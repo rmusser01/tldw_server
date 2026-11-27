@@ -145,6 +145,7 @@ export type PersistedQuickIngestTracking = {
   batchId?: string
   batchIds?: string[]
   collectionId?: string
+  planKey?: string
   plannedItemIds?: string[]
   jobIds?: number[]
   submittedItemIds?: string[]

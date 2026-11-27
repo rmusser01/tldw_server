@@ -93,6 +93,10 @@ class MediaIngestJobItem(BaseModel):
     idempotency_key: str | None = None
 
 
+class UnpublishedUploadValidationResponse(JSONResponse):
+    """A single upload was rejected while staging, before Jobs admission was attempted."""
+
+
 class SubmitMediaIngestJobsResponse(BaseModel):
     batch_id: str
     jobs: list[MediaIngestJobItem]
@@ -272,6 +276,20 @@ def _resolve_submit_bindings(
         url_count=url_count,
     )
     return collection_id_value, planned_values, key_values
+
+
+def _require_unplanned_job_bindings(
+    request: Request, db: CollectionsDatabase | None, items: list[str], keys: list[str],
+) -> None:
+    """Reserve durable plan identities for the receiving route that consumed the attempt."""
+    if not (items or keys) or (request is not None and "plan_key" in request.path_params):
+        return
+    if db is None:
+        raise HTTPException(503, "Cannot verify the collection binding for this submission.")
+    if any(db.is_quick_ingest_plan_item(i) for value in items if (i := _coerce_positive_int(value))) or any(
+        db.is_quick_ingest_plan_attempt_key(key) for key in keys
+    ):
+        raise HTTPException(409, "Submit this collection plan source through its plan dispatch route.")
 
 
 def _apply_collection_binding_to_payload(
@@ -727,6 +745,7 @@ async def submit_media_ingest_jobs(
     batch_id = str(uuid4())
     jobs: list[MediaIngestJobItem] = []
     errors: list[str] = []
+    error_response_type = JSONResponse
     first_url_submit_exception: Exception | None = None
     url_failure_count = 0
 
@@ -743,6 +762,7 @@ async def submit_media_ingest_jobs(
         idempotency_key=idempotency_key,
         idempotency_keys=idempotency_keys,
     )
+    _require_unplanned_job_bindings(request, collections_db, planned_item_values, idempotency_key_values)
     owner = str(current_user.id)
     replay = _existing_collection_url_batch(
         jm, owner, url_list, collection_id_value, planned_item_values, idempotency_key_values, bool(files),
@@ -820,6 +840,8 @@ async def submit_media_ingest_jobs(
                         expected_media_type_key=str(form_data.media_type),
                     )
                 if file_errors or not saved_files:
+                    if single_upload:
+                        error_response_type = UnpublishedUploadValidationResponse
                     errors.extend([err.get("error") or "Failed to stage upload" for err in file_errors] or ["Failed to stage upload"])
                     _mark_collection_item_submit_failed(
                         collections_db=collections_db, planned_item_id=planned_item_id, error_summary=errors[-1],
@@ -906,7 +928,7 @@ async def submit_media_ingest_jobs(
         if first_url_submit_exception is not None and valid_url_count == 1 and url_failure_count == 1 and not files:
             raise first_url_submit_exception
         if errors:
-            return JSONResponse(
+            return error_response_type(
                 status_code=status.HTTP_207_MULTI_STATUS,
                 content=SubmitMediaIngestJobsResponse(
                     batch_id=batch_id,

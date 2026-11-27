@@ -113,6 +113,7 @@ _MEDIA_ENDPOINT_MODULES: tuple[str, ...] = (
     "process_videos",
     "process_audios",
     "process_web_scraping",
+    "quick_ingest_dispatch",
     "process_mediawiki",
     "reprocess",
     "transcription_models",

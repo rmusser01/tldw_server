@@ -1078,6 +1078,7 @@ class WebScrapingService:
         extraction_failures = []
         skipped_articles = 0
         duplicate_articles = 0
+        duplicate_media_id = None
 
         logger.info(f"Storing {len(result.get('articles', []))} articles to database")
 
@@ -1281,6 +1282,7 @@ class WebScrapingService:
                     }:
                         skipped_articles += 1
                         duplicate_articles += 1
+                        duplicate_media_id = media_id
                         logger.info(
                             f"Skipping duplicate article: {redact_url_for_log(article.get('url', 'Unknown URL'))}"
                         )
@@ -1355,7 +1357,7 @@ class WebScrapingService:
             else "persist-ok"
         )
 
-        return {
+        receipt = {
             "status": status,
             "media_ids": media_ids,
             "total_articles": len(result.get("articles", [])),
@@ -1367,6 +1369,9 @@ class WebScrapingService:
             "extraction_failures": extraction_failures or None,
             "crawl_outcome": result.get("crawl_outcome"),
         }
+        if status == "duplicate" and duplicate_articles == 1 and duplicate_media_id:
+            receipt["media_id"] = duplicate_media_id
+        return receipt
 
     def _is_admin_user(self, user: Any) -> bool:
         return is_platform_admin(user)

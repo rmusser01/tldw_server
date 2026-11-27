@@ -42,6 +42,225 @@ const startQuickIngestSession = (input: Parameters<typeof startBatch>[0]) => sta
 const cancelQuickIngestSession = (input: Parameters<typeof cancelBatch>[0]) => cancelBatch({ requestScope, ...input })
 
 describe("submitQuickIngestBatch", () => {
+  const planPath = "/api/v1/media/collections/quick-ingest-plans/wizard"
+  const keyedInput = {
+    planKey: "wizard", __quickIngestSessionId: "qi-direct-run", storeRemote: true, processOnly: false,
+    conferenceBatchMetadata: { collectionName: "", sharedTags: ["talk"] },
+    entries: [{ id: "page", type: "html" as const, url: "https://example.test/talk" }], files: [],
+  }
+  const planRow = { id: 21, collection_id: 8, source_url: keyedInput.entries[0].url, status: "planned", idempotency_key: "logical-page", retry_count: 0 }
+  it.each(["html", "fallback"] as const)("claims exactly one %s write as two tabs recover a draft", async mode => {
+    const input = mode === "html" ? keyedInput : { ...keyedInput, entries: [{ ...keyedInput.entries[0], type: "pdf" as const }] }
+    let row: any = { ...planRow }
+    let stage = "unclaimed"
+    let writes = 0
+    mocks.bgRequest.mockImplementation(({ path, method, body }) => {
+      if (path === planPath && method === "PUT") return { collection_id: 8, items: [{ source_key: "page", item: { ...row }, dispatch_state: stage }] }
+      if (path === planPath + "/sources/page/claim") {
+        const claimed = row.status === "planned"
+        if (claimed) { row = { ...row, status: "processing" }; stage = "reserved" }
+        return { claimed, item: { ...row }, dispatch_state: stage }
+      }
+      if (path.includes("/dispatch/web?")) {
+        if (stage !== "reserved") return { dispatched: false, dispatch_state: stage, item: row, result: null }
+        stage = "web"; writes++
+        return Promise.resolve().then(() => { stage = "settled"; row = { ...row, status: "completed", media_id: 91 }; return { dispatched: true, dispatch_state: stage, item: row, result: { media_ids: [91] } } })
+      }
+      if (method === "PATCH") { row = { ...row, ...body }; return row }
+      throw new Error("Unexpected request " + path)
+    })
+    mocks.bgUpload.mockImplementation(({ path }) => {
+      if (path.includes("/dispatch/jobs?")) {
+        if (stage === "reserved") stage = "fallback_ready"
+        throw Object.assign(new Error("Queue full"), { status: 429, details: { detail: { code: "plan_jobs_quota_rejected" } } })
+      }
+      if (!path.includes("/dispatch/add?")) throw new Error("Unexpected " + path)
+      if (stage !== "fallback_ready") return { dispatched: false, dispatch_state: stage, item: row, result: null }
+      stage = "settled"; writes++; row = { ...row, status: "completed", media_id: 91 }
+      return { dispatched: true, dispatch_state: stage, item: row, result: { results: [{ status: "Success", media_id: 91 }] } }
+    })
+    const attempts = await Promise.all([submitQuickIngestBatch(input), submitQuickIngestBatch(input)])
+    const replay = await submitQuickIngestBatch(input)
+    expect(writes).toBe(1)
+    expect(replay.results).toMatchObject([{ id: "page", mediaId: 91 }])
+    expect(attempts.some(attempt => attempt.results?.some(row => row.mediaId === 91))).toBe(true)
+  })
+
+  it.each(["claim", "non-idempotent submit"] as const)("leaves the source unconfirmed after losing the %s response", async phase => {
+    let claimed = false
+    let consumed = false
+    let submits = 0
+    mocks.bgRequest.mockImplementation(({ path }) => {
+      const receipt = { source_key: "page", item: { ...planRow, status: claimed ? "processing" : "planned" }, dispatch_state: consumed ? "web" : claimed ? "reserved" : "unclaimed" }
+      if (path === planPath) return { collection_id: 8, items: [receipt] }
+      if (path === planPath + "/sources/page") return { collection_id: 8, ...receipt }
+      if (path.endsWith("/claim")) {
+        claimed = true
+        if (phase === "claim") throw new TypeError("Network error")
+        return { claimed, item: { ...planRow, status: "processing" }, dispatch_state: "reserved" }
+      }
+      if (path.includes("/dispatch/web?")) { consumed = true; submits++; throw new TypeError("Network error") }
+      throw new Error("Unexpected " + path)
+    })
+    for (let n = 0; n < 3; n++) expect((await submitQuickIngestBatch(keyedInput)).interruptedItemIds).toEqual(["page"])
+    expect(submits).toBe(1)
+    expect(mocks.bgRequest.mock.calls.filter(([req]) => req.method === "PATCH")).toHaveLength(0)
+  })
+
+  it("reattaches the original accepted job and retains the cancel batch without another claim or upload", async () => {
+    const onTrackingMetadata = vi.fn()
+    mocks.bgRequest.mockImplementation(({ path }) => {
+      if (path === planPath) return { collection_id: 8, items: [{ source_key: "page", item: { ...planRow, status: "processing", latest_job_id: "75" }, dispatch_state: "jobs" }] }
+      if (path.endsWith("/jobs/75")) return { ok: true, data: { id: 75, collection_id: "8", planned_item_id: "21", idempotency_key: "logical-page", batch_id: "old-batch", status: "completed", result: { media_id: 39 } } }
+      throw new Error("Unexpected " + path)
+    })
+    expect((await submitQuickIngestBatch({ ...keyedInput, onTrackingMetadata })).results).toMatchObject([{ collectionItemId: 21, mediaId: 39 }])
+    expect(onTrackingMetadata).toHaveBeenCalledWith(expect.objectContaining({ batchId: "old-batch", jobIdToItemId: { 75: "page" } }))
+    expect(mocks.bgUpload).not.toHaveBeenCalled()
+  })
+
+  it("resumes an explicit corrected retry under the exact next attempt and retains its saved ID on a lost dispatch acknowledgement", async () => {
+    const url = "https://example.test/corrected"
+    const retry = { resultId: "page", collectionItemId: "21", retryAttempt: 1, idempotencyKey: "retry-21-1" }
+    const previous = { ...planRow, status: "failed" }
+    const current = { ...planRow, source_url: url, retry_count: 1, idempotency_key: retry.idempotencyKey, status: "processing" }
+    let saved = false
+    mocks.bgRequest.mockImplementation(({ path, body }) => {
+      const receipt = { source_key: "page", dispatch_state: "settled", item: saved ? { ...current, status: "completed", media_id: 133 } : previous }
+      if (path === planPath) return { collection_id: 8, items: [receipt] }
+      if (path === planPath + "/sources/page") return { collection_id: 8, ...receipt }
+      if (path.endsWith("/claim")) {
+        expect(body).toEqual({ retry_count: 1, idempotency_key: retry.idempotencyKey, source_url: url })
+        return { claimed: true, item: current, dispatch_state: "reserved" }
+      }
+      if (path.endsWith("/dispatch/web?retry_count=1&idempotency_key=retry-21-1")) { saved = true; throw new TypeError("Network error") }
+      throw new Error("Unexpected " + path)
+    })
+    const response = await submitQuickIngestBatch({ ...keyedInput,
+      entries: [{ ...keyedInput.entries[0], url, sourceUrlEdited: true }],
+      conferenceRetry: { collectionId: "8", items: [retry] },
+    })
+    expect(response.results).toMatchObject([{ mediaId: 133, persisted: true, collectionItemId: 21, retryAttempt: 1 }])
+    expect(mocks.bgRequest.mock.calls.map(([req]) => req.method)).toEqual(["PUT", "POST", "POST", "GET"])
+  })
+
+  it("keeps a native submission on its qualified route and never falls back on an unrelated 429", async () => {
+    const directFile = new File(["notes"], "notes.pdf", { type: "application/pdf" })
+    const fileRow = { ...planRow, source_url: "local://notes.pdf" }
+    let admitted = false
+    mocks.bgRequest.mockImplementation(({ path }) => {
+      const receipt = { source_key: "pdf", dispatch_state: admitted ? "settled" : "unclaimed",
+        item: { ...fileRow, status: admitted ? "submit_failed" : "planned", error_summary: admitted ? "Daily upload limit" : null } }
+      if (path === planPath) return { collection_id: 8, items: [receipt] }
+      if (path === planPath + "/sources/pdf") return { collection_id: 8, ...receipt }
+      if (path.endsWith("/sources/pdf/claim")) return { claimed: true, item: { ...fileRow, status: "processing" }, dispatch_state: "reserved" }
+      throw new Error("Unexpected " + path)
+    })
+    mocks.bgUpload.mockImplementation(() => {
+      admitted = true
+      throw Object.assign(new Error("Queue full"), { status: 429, details: { detail: { code: "daily_upload_quota" } } })
+    })
+    const response = await submitQuickIngestBatch({ ...keyedInput, entries: [], files: [{ id: "pdf", directFile }] })
+    expect(response.results).toMatchObject([{ id: "pdf", outcome: "submit_failed", error: "Daily upload limit" }])
+    expect(mocks.bgUpload).toHaveBeenCalledExactlyOnceWith(expect.objectContaining({
+      directFile, path: planPath + "/sources/pdf/dispatch/jobs?retry_count=0&idempotency_key=logical-page",
+      fields: expect.objectContaining({ media_collection_item_id: 21, idempotency_key: "logical-page" }),
+    }))
+  })
+
+  it("abandons a plan response after its owner changes before claim", async () => {
+    let current = true
+    mocks.bgRequest.mockImplementation(() => {
+      current = false
+      return { collection_id: 8, items: [{ source_key: "page", item: planRow, dispatch_state: "unclaimed" }] }
+    })
+    await expect(submitQuickIngestBatch({ ...keyedInput, assertCurrent: () => { if (!current) throw new Error("Owner changed") } })).rejects.toThrow("Owner changed")
+    expect(mocks.bgRequest).toHaveBeenCalledTimes(1)
+    expect(mocks.bgUpload).not.toHaveBeenCalled()
+  })
+
+  it("offers a retryable source after a read-only check confirms its reservation was never dispatched", async () => {
+    const { classifyError } = await import("@/components/Common/QuickIngest/ErrorClassification")
+    mocks.bgRequest.mockResolvedValue({ source_key: "page", collection_id: 8, item: { ...planRow, status: "processing" }, dispatch_state: "reserved" })
+    const response = await submitQuickIngestBatch({ ...keyedInput, checkPlanOnly: true })
+    const result = response.results?.[0]
+    expect(result).toMatchObject({ outcome: "submit_failed" })
+    expect(classifyError(result?.error, result?.data).retryable).toBe(true)
+    expect(mocks.bgRequest.mock.calls.map(([req]) => req.method)).toEqual(["GET"])
+  })
+
+  it("does not send a source for an unbound receipt-only lookup", async () => {
+    await expect(submitQuickIngestBatch({ ...keyedInput, planKey: undefined, checkPlanOnly: true })).rejects.toThrow(/plan/i)
+    expect(mocks.bgRequest).not.toHaveBeenCalled()
+    expect(mocks.bgUpload).not.toHaveBeenCalled()
+  })
+
+  it.each(["file", "url"])("does not confirm a pre-submit %s stop after another tab consumes its reservation", async kind => {
+    const file = kind === "file"
+    const item = { ...planRow, source_url: file ? "local://notes.pdf" : planRow.source_url }
+    mocks.bgRequest.mockImplementation(async ({ path, method }) => {
+      if (path === planPath) return { collection_id: 8, items: [{ source_key: "page", item, dispatch_state: "unclaimed" }] }
+      if (path.endsWith("/claim")) {
+        await cancelQuickIngestSession({ sessionId: keyedInput.__quickIngestSessionId })
+        return { claimed: true, item: { ...item, status: "processing" }, dispatch_state: "reserved" }
+      }
+      if (method === "PATCH") throw Object.assign(new Error("Already consumed"), { status: 409 })
+      if (method === "GET") return { source_key: "page", collection_id: 8, item: { ...item, status: "processing" }, dispatch_state: "jobs" }
+      throw new Error("Unexpected request")
+    })
+    const result = await submitQuickIngestBatch({ ...keyedInput, entries: file ? [] : keyedInput.entries,
+      files: file ? [{ id: "page", directFile: new File(["notes"], "notes.pdf") }] : [] })
+    expect(result.results).toEqual([])
+    expect(result.interruptedItemIds).toEqual(["page"])
+    expect(mocks.bgUpload).not.toHaveBeenCalled()
+  })
+
+  it.each(["old-attempt", "swapped-job", "crossed-poll", "wrong-state", "fractional-media"])(
+    "reconciles a %s receipt through the original source before tracking or showing a saved result", async fault => {
+      const track = vi.fn()
+      const item = { ...planRow, status: "processing", retry_count: 1, idempotency_key: "second-attempt" }
+      const job = { id: 76, collection_id: "8", planned_item_id: "21", idempotency_key: item.idempotency_key }
+      const sourceGet = planPath + "/sources/page"
+      mocks.bgRequest.mockImplementation(({ path, method }) => {
+        if (method === "PUT") return { collection_id: 8, items: [{ source_key: "page", item, dispatch_state: "reserved" }] }
+        if (path === sourceGet) return { collection_id: 8, source_key: "page", dispatch_state: "settled",
+          item: { ...item, status: "completed", media_id: 120 } }
+        if (path.includes("/jobs/")) return { ok: true, data: { ...job, batch_id: "unrelated", idempotency_key: "old-key", status: "completed", result: { media_id: 99 } } }
+        throw new Error("Unexpected " + path)
+      })
+      mocks.bgUpload.mockResolvedValue(fault === "old-attempt" || fault === "fractional-media"
+        ? { dispatched: false, dispatch_state: "settled", result: null, item: fault === "old-attempt"
+          ? { ...planRow, status: "completed", media_id: 99 } : { ...item, status: "completed", media_id: 99.5 } }
+        : { dispatched: true, dispatch_state: fault === "wrong-state" ? "web" : "jobs", item: { ...item, latest_job_id: "76" },
+          result: { batch_id: "unrelated", jobs: [{ ...job, id: fault === "swapped-job" ? 88 : 76 }] } })
+      const response = await submitQuickIngestBatch({ ...keyedInput, entries: [{ ...keyedInput.entries[0], type: "pdf" }], onTrackingMetadata: track })
+      expect(response.results).toMatchObject([{ mediaId: 120 }])
+      expect(mocks.bgRequest.mock.calls.filter(([req]) => req.path === sourceGet)).toHaveLength(1)
+      expect(mocks.bgRequest.mock.calls.some(([req]) => req.path.endsWith("/jobs/88"))).toBe(false)
+      expect(track.mock.calls.some(([tracking]) => tracking.batchId || tracking.jobIds?.length)).toBe(false)
+    })
+  it.each([undefined, -1, 0.5, Number.MAX_SAFE_INTEGER + 1])("rejects an invalid persisted attempt count %s", async retry_count => {
+    mocks.bgRequest.mockResolvedValue({ collection_id: 8, items: [{ source_key: "page", dispatch_state: "settled",
+      item: { ...planRow, status: "completed", retry_count, media_id: 11 } }] })
+    expect((await submitQuickIngestBatch(keyedInput)).results).toMatchObject([{ outcome: "submit_failed" }])
+  })
+
+  it.each([[undefined, true], [502, true], [403, false]] as const)("uses the setup transport status %s to decide if the original plan can resume", async (status, retryable) => {
+    const { classifyError } = await import("@/components/Common/QuickIngest/ErrorClassification")
+    mocks.bgRequest.mockRejectedValue(Object.assign(new Error(status === 403 ? "Authentication timeout" : "Load failed"), { status }))
+    const response = await submitQuickIngestBatch(keyedInput)
+    const result = response.results?.[0]
+    expect(classifyError(result?.error, result?.data).retryable).toBe(retryable)
+    expect(mocks.bgUpload).not.toHaveBeenCalled()
+  })
+
+  it("does not use an incomplete plan response to submit any source", async () => {
+    mocks.bgRequest.mockResolvedValue({ collection_id: 8, items: [{ source_key: "page", item: { ...planRow, collection_id: 17 } }] })
+    expect((await submitQuickIngestBatch(keyedInput)).results).toMatchObject([{ outcome: "submit_failed" }])
+    expect(mocks.bgRequest).toHaveBeenCalledTimes(1)
+    expect(mocks.bgUpload).not.toHaveBeenCalled()
+  })
+
   it.each(["file", "url"] as const)("submits the next native file while its first accepted %s is still processing", async (firstKind) => {
     vi.useFakeTimers()
     const owner = new AbortController()

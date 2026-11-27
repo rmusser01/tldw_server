@@ -279,3 +279,28 @@ def test_nonowner_collections_reconciles_templates_and_projects_per_user(migrate
     assert count == 1 and rows[0].user_id == "1"  # nosec B101 -- second tenant also receives its own template.
     assert alice.get_audiobook_project(old[0].id).project_id == "x01-project-1"  # nosec B101 -- per-user backfill survives schema separation.
     assert bob.get_audiobook_project(old[1].id).project_id == "x01-project-2"  # nosec B101 -- later reconciliation preserves the other user.
+
+
+def test_pre_plan_postgres_migrates_before_serving_role_reuses_bindings(migrated_collections_serving):
+    from psycopg import sql
+
+    owner_backend, server_backend, retained = migrated_collections_serving
+    owner = CollectionsDatabase.from_backend("1", owner_backend)
+    old = owner.create_media_collection(name="Original", kind="conference")
+    for statement in ("DROP TABLE quick_ingest_plan_attempts", "DROP TABLE quick_ingest_plan_sources",
+                      "DROP TABLE quick_ingest_plans"):
+        owner_backend.execute(statement)
+    CollectionsDatabase._bootstrapped_backend_targets.clear()
+    with pytest.raises(DatabaseError):
+        CollectionsDatabase.from_backend("1", server_backend)
+    owner.ensure_schema()
+    with owner_backend.transaction() as conn:
+        conn.execute(sql.SQL("GRANT SELECT, INSERT, UPDATE, DELETE ON ALL TABLES IN SCHEMA public TO {}").format(
+            sql.Identifier(server_backend.config.pg_user)))
+    serving = CollectionsDatabase.from_backend("1", server_backend)
+    assert serving.get_media_collection(old.id).name == "Original"
+    args = ("draft", {"name": "Original", "kind": "conference"}, [("one", {"source_url": "url"})])
+    collection, rows = serving.put_quick_ingest_plan(*args)
+    assert collection != old.id and serving.put_quick_ingest_plan(*args)[1]["one"].id == rows["one"].id
+    assert serving.claim_quick_ingest_source("draft", "one")[0]
+    assert serving.list_output_templates(q=retained.name, limit=1, offset=0)[1] == 1

@@ -702,6 +702,9 @@ def test_submit_media_ingest_jobs_marks_planned_item_submit_failed_on_job_error(
     status_updates: list[dict] = []
 
     class _FakeCollectionsDatabase:
+        def is_quick_ingest_plan_item(self, item_id):
+            return False
+
         def update_media_collection_item_status(self, item_id, **kwargs):
             status_updates.append({"item_id": item_id, **kwargs})
 
@@ -759,6 +762,9 @@ def test_submit_media_ingest_jobs_keeps_created_url_jobs_when_later_url_fails(
     status_updates: list[dict] = []
 
     class _FakeCollectionsDatabase:
+        def is_quick_ingest_plan_item(self, item_id):
+            return False
+
         def update_media_collection_item_status(self, item_id, **kwargs):
             status_updates.append({"item_id": item_id, **kwargs})
 

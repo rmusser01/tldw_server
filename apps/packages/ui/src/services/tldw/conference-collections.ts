@@ -6,6 +6,8 @@ import type {
   WizardResultItem,
 } from "@/components/Common/QuickIngest/types"
 
+export const UNDISPATCHED_PLAN_SOURCE = "quick_ingest_source_not_dispatched"
+
 export type MediaCollectionItemStatus =
   | "planned"
   | "processing"
@@ -361,6 +363,17 @@ export const buildConferenceCollectionCreatePayload = (
     metadata: collectionMetadata,
     default_tags: normalizeConferenceTagList(metadata.sharedTags),
   }
+}
+
+export const hasConferenceCollectionMetadata = (
+  metadata: ConferenceBatchMetadata | null | undefined,
+  entries: readonly { conferenceOverride?: ConferenceItemMetadataOverride }[] = [],
+): boolean => {
+  const shared = [metadata?.collectionName, metadata?.conferenceName, metadata?.sourcePlaylistUrl,
+    metadata?.eventDate, metadata?.eventYear, ...(metadata?.sharedTags ?? [])]
+  return shared.some(value => value?.trim()) || entries.some(({ conferenceOverride: item }) =>
+    [item?.title, item?.speaker, item?.track, item?.talkDate, ...(item?.tags ?? [])].some(value => value?.trim())
+  )
 }
 
 export const buildConferenceCollectionItemPayload = (

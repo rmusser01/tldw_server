@@ -20,6 +20,7 @@ import { shouldKeepOriginalFile } from "@/services/tldw/media-routing"
 import {
   buildConferenceFailedResultExportText,
   buildConferenceRetryRequestItems,
+  UNDISPATCHED_PLAN_SOURCE,
   type ConferenceRetryRequestItem,
 } from "@/services/tldw/conference-collections"
 import { useServerCapabilities } from "@/hooks/useServerCapabilities"
@@ -49,6 +50,8 @@ type WizardResultsStepProps = {
     sources: Array<{ id: string; name: string; jobIds: number[]; lastProgress?: ItemProgress }>
     onCheckMedia: () => void
     onCheckStatus?: () => void
+    checkError?: string | null
+    onResumeSetup?: () => void
   }
   onClose: () => void
   onIngestMore?: () => void
@@ -516,6 +519,14 @@ export const WizardResultsStep: React.FC<WizardResultsStepProps> = ({
     const map = new Map<string, ErrorCategory>()
     for (const item of failures) {
       const category = classifyError(item.error, item.data)
+      if ((item.data as { code?: string } | undefined)?.code === UNDISPATCHED_PLAN_SOURCE) {
+        map.set(item.id, { ...category,
+          badgeLabel: qi("web.planReadyBadge", "Ready to submit"),
+          userMessage: qi("web.planReadyMessage", "This source can resume setup."),
+          suggestion: qi("web.planReadySuggestion", "Retry to submit it to the original collection."),
+        })
+        continue
+      }
       map.set(item.id, item.outcome === "cancelled" ? {
         ...category,
         retryable: false,
@@ -840,8 +851,10 @@ export const WizardResultsStep: React.FC<WizardResultsStepProps> = ({
           </ul>
           <div className="flex flex-wrap gap-2">
             {interruption.onCheckStatus && <button type="button" className={primaryStyle} onClick={interruption.onCheckStatus}>{qi("web.checkStatus", "Check status")}</button>}
+            {interruption.onResumeSetup && <button type="button" className={secondaryStyle} onClick={interruption.onResumeSetup}>{qi("web.resumeSetup", "Resume original collection setup")}</button>}
             <button type="button" className={secondaryStyle} onClick={interruption.onCheckMedia}>{qi("web.checkMedia", "Check Media")}</button>
           </div>
+          {interruption.checkError && <p role="alert" className="mt-2 text-sm text-text">{interruption.checkError}</p>}
         </section>}
         {excludedItems.length > 0 && <section aria-label={qi("wizard.results.excludedSection", "Excluded inputs")} className="mb-4 space-y-2">
           {excludedItems.map(item => <div key={item.id} className="text-sm text-text">

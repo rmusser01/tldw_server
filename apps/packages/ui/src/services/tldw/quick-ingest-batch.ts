@@ -50,6 +50,8 @@ import {
 import {
   buildConferenceCollectionCreatePayload,
   buildConferenceCollectionItemPayload,
+  hasConferenceCollectionMetadata,
+  UNDISPATCHED_PLAN_SOURCE,
   normalizeMediaCollectionItem,
   normalizeMediaCollectionResponse,
   resolveConferenceDuplicatePolicy,
@@ -57,6 +59,7 @@ import {
   type ApiMediaCollectionItem,
   type ConferenceCollectionItemMergeInput,
   type ConferenceRetryRequestItem,
+  type MediaCollectionItem,
   type MediaCollectionItemStatus,
 } from "@/services/tldw/conference-collections";
 
@@ -107,6 +110,9 @@ type QuickIngestBatchInput = QuickIngestRequestContext & {
   advancedValues?: Record<string, any>;
   fileDefaults?: TypeDefaults;
   conferenceBatchMetadata?: ConferenceBatchMetadata | null;
+  planKey?: string;
+  checkPlanOnly?: boolean;
+  expectedCollectionId?: string;
   conferenceRetry?: { collectionId: string; items: ConferenceRetryRequestItem[] };
   chunkingTemplateName?: string;
   autoApplyTemplate?: boolean;
@@ -121,6 +127,7 @@ type QuickIngestBatchInput = QuickIngestRequestContext & {
 
 type QuickIngestBatchResult = {
   id: string;
+  title?: string;
   status: "ok" | "error";
   outcome?: "skipped" | "submit_failed" | "failed" | "cancelled";
   url?: string;
@@ -142,6 +149,8 @@ type QuickIngestBatchResponse = {
   results?: QuickIngestBatchResult[];
   interruptedJobIds?: number[];
   interruptedItemIds?: string[];
+  statusCheckUnavailable?: boolean;
+  missingPlanSourceIds?: string[];
 };
 
 export const QUICK_INGEST_ANALYSIS_PROVIDER_WARNING =
@@ -417,10 +426,11 @@ const submitPersistentAdd = async (input: QuickIngestRequestContext, {
   fields,
   file,
   directFile,
-}: Pick<BgUploadInit, "file" | "directFile"> & { fields: Record<string, any> }): Promise<any> =>
+  planned,
+}: Pick<BgUploadInit, "file" | "directFile"> & { fields: Record<string, any>; planned?: PlannedConferenceCollectionItem }): Promise<any> =>
   normalizePersistentAddResponse(
-    await scopedQuickIngestUpload<any>(input, {
-      path: "/api/v1/media/add",
+    readDispatchReceipt(await scopedQuickIngestUpload<any>(input, {
+      path: dispatchPath(planned, "add", "/api/v1/media/add"),
       method: "POST",
       fields: serializeUploadFields(fields),
       file,
@@ -428,7 +438,7 @@ const submitPersistentAdd = async (input: QuickIngestRequestContext, {
       fileFieldName: file || directFile ? "files" : undefined,
       timeoutMs: getNativeFileTimeout(directFile),
       ...DIRECT_QUICK_INGEST_TRANSPORT,
-    }),
+    }), planned, "add"),
   );
 
 const buildFields = ({
@@ -529,6 +539,7 @@ const buildFields = ({
 
 const processWebScrape = async (input: QuickIngestRequestContext, {
   url,
+  planned,
   entry,
   common,
   advancedValues,
@@ -537,6 +548,7 @@ const processWebScrape = async (input: QuickIngestRequestContext, {
   persist = false,
 }: {
   url: string;
+  planned?: PlannedConferenceCollectionItem;
   entry?: QuickIngestEntry;
   common?: QuickIngestBatchInput["common"];
   advancedValues?: Record<string, any>;
@@ -582,14 +594,14 @@ const processWebScrape = async (input: QuickIngestRequestContext, {
     }
   }
 
-  return await scopedQuickIngestRequest<any>(input, {
-    path: "/api/v1/media/process-web-scraping",
+  return readDispatchReceipt(await scopedQuickIngestRequest<any>(input, {
+    path: dispatchPath(planned, "web", "/api/v1/media/process-web-scraping"),
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body,
     timeoutMs: DIRECT_INGEST_TIMEOUT_MS,
     ...DIRECT_QUICK_INGEST_TRANSPORT,
-  });
+  }), planned, "web");
 };
 
 const extractWebScrapeMediaId = (value: unknown): string | number | null => {
@@ -618,6 +630,9 @@ const webScrapeResponseIndicatesPersisted = (
 type PlannedConferenceCollectionItem = {
   collectionId: number;
   itemId: number;
+  record?: MediaCollectionItem;
+  dispatchState?: PlanDispatchState;
+  dispatchPath?: BgUploadInit["path"];
   retryAttempt?: number;
   idempotencyKey?: string | null;
 };
@@ -627,13 +642,6 @@ type PlannedConferenceCollection = {
   itemsByEntryId: Map<string, PlannedConferenceCollectionItem>;
 };
 
-const hasItemMetadata = ({ conferenceOverride: item }: ConferenceCollectionItemMergeInput) =>
-  [item?.title, item?.speaker, item?.track, item?.talkDate, ...(item?.tags ?? [])].some(value => value?.trim());
-
-const hasUsableConferenceMetadata = (metadata: QuickIngestBatchInput["conferenceBatchMetadata"]) =>
-  !!metadata && [metadata.collectionName, metadata.conferenceName, metadata.sourcePlaylistUrl,
-    metadata.eventDate, metadata.eventYear, ...(metadata.sharedTags ?? [])].some(value => value?.trim());
-
 const getConferenceFallbackName = (entries: ConferenceCollectionItemMergeInput[]): string | null => {
   for (const entry of entries) {
     const title = String(entry?.playlist?.playlistTitle || "").trim();
@@ -642,10 +650,95 @@ const getConferenceFallbackName = (entries: ConferenceCollectionItemMergeInput[]
   return null;
 };
 
+type PlanDispatchState = "unclaimed" | "reserved" | "jobs" | "web" | "add" | "fallback_ready" | "settled";
+const validDispatchState = (value: unknown): value is PlanDispatchState =>
+  ["unclaimed", "reserved", "jobs", "web", "add", "fallback_ready", "settled"].includes(String(value));
+
+const planPath = (key: string): BgUploadInit["path"] =>
+  `/api/v1/media/collections/quick-ingest-plans/${encodeURIComponent(key)}`;
+
+type PlanSourceReceipt = { source_key: string; item: ApiMediaCollectionItem; dispatch_state: PlanDispatchState };
+
+const positiveId = (value: unknown) => typeof value === "number" && Number.isSafeInteger(value) && value > 0;
+const wireId = (value: unknown) => positiveId(value) ? Number(value) :
+  typeof value === "string" && /^[1-9][0-9]*$/.test(value) && positiveId(Number(value)) ? Number(value) : null;
+
+const confirmedPlanItem = (item: ApiMediaCollectionItem, collectionId: number) => {
+  if (!item || !positiveId(item.id) || item.collection_id !== collectionId || !item.idempotency_key?.trim() ||
+      item.idempotency_key !== item.idempotency_key.trim() ||
+      !Number.isSafeInteger(item.retry_count) || Number(item.retry_count) < 0 ||
+      [item.media_id, item.content_item_id, item.latest_run_id].some(value => value != null && !positiveId(value)) ||
+      (item.latest_job_id != null && wireId(item.latest_job_id) == null) ||
+      !["planned", "processing", "completed", "skipped_existing", "failed", "cancelled", "submit_failed"].includes(item.status ?? "")) {
+    throw new Error("The server did not confirm the collection item.");
+  }
+  return normalizeMediaCollectionItem(item);
+};
+
+const plannedSource = (key: string, collectionId: number, receipt: PlanSourceReceipt): PlannedConferenceCollectionItem => {
+  if (!Number.isSafeInteger(collectionId) || collectionId <= 0 || !validDispatchState(receipt.dispatch_state)) throw new Error("Unconfirmed plan source.");
+  const record = confirmedPlanItem(receipt.item, collectionId);
+  return { collectionId, itemId: record.id, idempotencyKey: record.idempotencyKey, retryAttempt: record.retryCount,
+    record, dispatchState: receipt.dispatch_state, dispatchPath: `${planPath(key)}/sources/${encodeURIComponent(receipt.source_key)}/dispatch` };
+};
+
+const readPlanSource = async (input: QuickIngestBatchInput, key: string, sourceId: string, expectedCollectionId?: number) => {
+  const receipt = await scopedQuickIngestRequest<PlanSourceReceipt & { collection_id: number }>(input, {
+    path: `${planPath(key)}/sources/${encodeURIComponent(sourceId)}`, method: "GET", ...DIRECT_QUICK_INGEST_TRANSPORT,
+  });
+  if (receipt?.source_key !== sourceId || (expectedCollectionId != null && receipt.collection_id !== expectedCollectionId)) {
+    throw new Error("The server did not confirm the original collection source.");
+  }
+  return plannedSource(key, receipt.collection_id, receipt);
+};
+
+const resumeCollectionPlan = async (
+  input: QuickIngestBatchInput,
+  key: string,
+  entries: ConferenceCollectionItemMergeInput[],
+  metadata: ConferenceBatchMetadata,
+): Promise<PlannedConferenceCollection> => {
+  const sourceIds = new Set(entries.map(entry => entry.id));
+  if (entries.some(entry => !entry.id?.trim()) || sourceIds.size !== entries.length) throw new Error("Missing or repeated source identity.");
+  const response = await scopedQuickIngestRequest<{
+    collection_id: number; items: PlanSourceReceipt[];
+  }>(input, {
+    path: planPath(key), method: "PUT", headers: { "Content-Type": "application/json" },
+    body: {
+      collection: buildConferenceCollectionCreatePayload(metadata, getConferenceFallbackName(entries)),
+      items: entries.map(entry => ({ source_key: entry.id, item: buildConferenceCollectionItemPayload(metadata, entry) })),
+    },
+    timeoutMs: DIRECT_INGEST_TIMEOUT_MS, ...DIRECT_QUICK_INGEST_TRANSPORT,
+  });
+  const collectionId = response?.collection_id;
+  if (!Number.isSafeInteger(collectionId) || collectionId <= 0 || !Array.isArray(response.items) ||
+      (input.conferenceRetry && Number(input.conferenceRetry.collectionId) !== collectionId) ||
+      (input.expectedCollectionId != null && Number(input.expectedCollectionId) !== collectionId)) {
+    throw new Error("The server did not confirm the original collection.");
+  }
+  const itemsByEntryId = new Map<string, PlannedConferenceCollectionItem>();
+  const itemIds = new Set<number>();
+  for (const receipt of response.items) {
+    const source = plannedSource(key, collectionId, receipt);
+    const prior = input.conferenceRetry?.items.find(request => request.resultId === receipt.source_key);
+    if (!sourceIds.delete(receipt.source_key) || itemIds.has(source.itemId) || (prior && Number(prior.collectionItemId) !== source.itemId)) {
+      throw new Error("The server did not confirm the original collection source.");
+    }
+    itemIds.add(source.itemId);
+    itemsByEntryId.set(receipt.source_key, source);
+  }
+  if (sourceIds.size > 0) throw new Error("The server did not confirm all collection sources.");
+  return { collectionId, itemsByEntryId };
+};
+
 const createPlannedConferenceCollection = async (
   input: QuickIngestBatchInput,
   entries: ConferenceCollectionItemMergeInput[],
 ): Promise<PlannedConferenceCollection | null> => {
+  const metadata = input.conferenceBatchMetadata ?? { collectionName: "", sharedTags: [] };
+  if (input.planKey) {
+    return resumeCollectionPlan(input, input.planKey, entries, metadata);
+  }
   if (input.conferenceRetry) {
     const collectionId = Number(input.conferenceRetry.collectionId);
     if (!Number.isSafeInteger(collectionId) || collectionId <= 0) throw new Error("Invalid retry collection identity");
@@ -674,10 +767,9 @@ const createPlannedConferenceCollection = async (
     }
     return { collectionId, itemsByEntryId };
   }
-  const metadata = input.conferenceBatchMetadata ?? { collectionName: "", sharedTags: [] };
   const selectedEntries = entries.filter(entry => String(entry?.url || "").trim());
   if (selectedEntries.length === 0) return null;
-  if (!hasUsableConferenceMetadata(metadata) && !selectedEntries.some(hasItemMetadata)) return null;
+  if (!hasConferenceCollectionMetadata(metadata, selectedEntries)) return null;
 
   const collection = normalizeMediaCollectionResponse(
     await scopedQuickIngestRequest<ApiMediaCollection>(input, {
@@ -752,13 +844,64 @@ const createPlannedConferenceCollection = async (
   };
 };
 
+class RecoveredPlanReceipt extends Error {
+  constructor(readonly item: MediaCollectionItem, readonly result?: unknown) { super("The server returned the source receipt."); }
+}
+
+const dispatchPath = (planned: PlannedConferenceCollectionItem | undefined, transport: "jobs" | "web" | "add", legacy: BgUploadInit["path"]): BgUploadInit["path"] => {
+  if (!planned?.dispatchPath) return legacy;
+  const query = new URLSearchParams({ retry_count: String(planned.retryAttempt), idempotency_key: planned.idempotencyKey! });
+  return `${planned.dispatchPath}/${transport}?${query}`;
+};
+
+const readDispatchReceipt = (response: any, planned: PlannedConferenceCollectionItem | undefined, transport: "jobs" | "web" | "add") => {
+  if (!planned?.record) return response;
+  const row = confirmedPlanItem(response?.item, planned.collectionId);
+  const state = response.dispatch_state;
+  if (row.id !== planned.itemId || row.retryCount !== planned.retryAttempt || row.idempotencyKey !== planned.idempotencyKey ||
+      typeof response.dispatched !== "boolean" || !validDispatchState(state)) throw new Error("Unconfirmed dispatch.");
+  const terminal = !["planned", "processing"].includes(row.status) || row.mediaId != null || row.contentItemId != null;
+  if ((terminal && state !== "settled") || (!terminal && state === "settled") ||
+      (!terminal && (row.status === "planned") !== (state === "unclaimed"))) throw new Error("Unconfirmed dispatch state.");
+  if (response.dispatched && transport === "jobs") {
+    const jobs = response.result?.jobs;
+    const job = Array.isArray(jobs) && jobs.length === 1 ? jobs[0] : null;
+    if ((!terminal && state !== "jobs") || !job || !positiveId(job.id) || job.id !== wireId(row.latestJobId) ||
+        wireId(job.collection_id) !== planned.collectionId || wireId(job.planned_item_id) !== planned.itemId ||
+        job.idempotency_key !== planned.idempotencyKey) throw new Error("Unconfirmed job binding.");
+  } else if (response.dispatched && !terminal) {
+    throw new Error("Unconfirmed source result.");
+  }
+  if (!response.dispatched && response.result != null) throw new Error("Unexpected source result.");
+  planned.record = row;
+  planned.dispatchState = state;
+  // The binding comes from the canonical source. Read the accepted job before exposing a cancellation group.
+  throw new RecoveredPlanReceipt(row, terminal && transport !== "jobs" ? response.result : undefined);
+};
+
+class PlanFallbackReady extends Error {}
+
+const dispatchJobs = async (input: QuickIngestRequestContext, options: Omit<BgUploadInit, "path">, planned?: PlannedConferenceCollectionItem) => {
+  if (planned?.dispatchState === "fallback_ready") throw new PlanFallbackReady();
+  return readDispatchReceipt(await scopedQuickIngestUpload<any>(input, {
+    ...options, path: dispatchPath(planned, "jobs", "/api/v1/media/ingest/jobs"),
+  }), planned, "jobs");
+};
+
+const canFallback = (error: unknown, planned?: PlannedConferenceCollectionItem) => {
+  if (!planned?.record) return shouldFallbackToPersistentAdd(error);
+  if (error instanceof PlanFallbackReady) return true;
+  const rejection = error as { status?: number; details?: { detail?: { code?: string } } } | null;
+  return rejection?.status === 429 && rejection.details?.detail?.code === "plan_jobs_quota_rejected";
+};
+
 const updateConferenceCollectionItem = async (
   input: QuickIngestRequestContext,
   planned: PlannedConferenceCollectionItem | undefined,
   payload: Record<string, unknown>,
 ): Promise<void> => {
-  if (!planned) return;
-  await scopedQuickIngestRequest<ApiMediaCollectionItem>(input, {
+  if (!planned || (planned.record && payload.status !== "cancelled")) return;
+  const response = await scopedQuickIngestRequest<ApiMediaCollectionItem>(input, {
     path: `/api/v1/media/collections/${encodeURIComponent(
       String(planned.collectionId),
     )}/items/${encodeURIComponent(String(planned.itemId))}`,
@@ -766,7 +909,7 @@ const updateConferenceCollectionItem = async (
     headers: { "Content-Type": "application/json" },
     body: {
       ...payload,
-      ...(planned.retryAttempt
+      ...(planned.record || planned.retryAttempt
         ? {
             retry_count: planned.retryAttempt,
             idempotency_key: planned.idempotencyKey
@@ -776,6 +919,12 @@ const updateConferenceCollectionItem = async (
     timeoutMs: DIRECT_INGEST_TIMEOUT_MS,
     ...DIRECT_QUICK_INGEST_TRANSPORT,
   });
+  if (planned.record) {
+    const item = confirmedPlanItem(response, planned.collectionId);
+    if (item.id !== planned.itemId || item.status !== "cancelled" || item.idempotencyKey !== planned.idempotencyKey ||
+        item.retryCount !== planned.retryAttempt) throw new Error("The server did not confirm cancellation of this source.");
+    planned.record = item;
+  }
 };
 
 // Once a job is running, its receipt remains available if its collection update fails.
@@ -813,7 +962,7 @@ const runDirectQuickIngestBatch = async (
     : [];
   const files = Array.isArray(input.files)
     ? input.files.filter((file) => file?.conferenceOverride?.selected !== false).map(file => ({
-        ...file, id: String(file.id || crypto.randomUUID()), name: file.directFile?.name || file.name || "upload",
+        ...file, id: String(file.id || (input.planKey ? "" : crypto.randomUUID())), name: file.directFile?.name || file.name || "upload",
       }))
     : [];
   const fileDefaults =
@@ -836,6 +985,8 @@ const runDirectQuickIngestBatch = async (
   const out: QuickIngestBatchResult[] = [];
   const interruptedJobIds = new Set<number>();
   const interruptedItemIds: string[] = [];
+  let planReadFailed = false;
+  const missingPlanSourceIds: string[] = [];
   const unavailableJobIds = new Set<number>();
   const inputOrder = new Map([...entries, ...files].map((item, index) => [item.id, index]));
   const acceptedMonitors: Promise<{ error: unknown } | void>[] = [];
@@ -843,11 +994,14 @@ const runDirectQuickIngestBatch = async (
     // Observe failures immediately while later POSTs are still in flight.
     acceptedMonitors.push(monitor.then(() => undefined, (error) => ({ error })));
   };
-  const recordResult = (result: QuickIngestBatchResult) => {
-    out.push(result);
-    input.onItemResult?.(result);
-  };
   let conferencePlan: PlannedConferenceCollection | null = null;
+  const recordResult = (result: QuickIngestBatchResult) => {
+    const stored = conferencePlan?.itemsByEntryId.get(result.id)?.record;
+    const receipt = stored ? { ...result, title: stored.title ?? undefined,
+      ...(result.url ? { url: stored.sourceUrl } : {}) } : result;
+    out.push(receipt);
+    input.onItemResult?.(receipt);
+  };
 
   const trackAcceptedBatch = async (tracking: PersistedQuickIngestTracking & { batchId: string }) => {
     const stopAlreadyRequested = uploads.signal.aborted;
@@ -859,9 +1013,11 @@ const runDirectQuickIngestBatch = async (
     }
   };
 
-  const pollIngestJobStatus = async (jobId: number, itemId: string) => {
+  const pollIngestJobStatus = async (jobId: number, itemId: string, recovered?: PlannedConferenceCollectionItem) => {
     const startedAt = Date.now();
     let statusUnavailable = false;
+    let bindingChanged = false;
+    let verifiedBatch: string | undefined;
     const reportStatusUnavailable = (unavailable: boolean) => {
       statusUnavailable = unavailable;
       if (unavailable) unavailableJobIds.add(jobId);
@@ -884,6 +1040,22 @@ const runDirectQuickIngestBatch = async (
             ...DIRECT_QUICK_INGEST_TRANSPORT,
           });
           if (response?.ok) {
+            if (recovered) {
+              const row = response.data;
+              if (row?.id !== trackedJobId || wireId(row?.collection_id) !== recovered.collectionId ||
+                  wireId(row?.planned_item_id) !== recovered.itemId || row.idempotency_key !== recovered.idempotencyKey ||
+                  typeof row.batch_id !== "string" || !row.batch_id.trim() || (verifiedBatch && row.batch_id !== verifiedBatch) ||
+                  (input.requestScope?.userId != null && String(row.owner_user_id) !== String(input.requestScope.userId))) {
+                bindingChanged = true;
+                return invalidStatusResponse;
+              }
+              if (!verifiedBatch) await trackAcceptedBatch({
+                mode: "webui-direct", sessionId: directSessionId, batchId: row.batch_id, batchIds: [row.batch_id],
+                jobIds: [jobId], submittedItemIds: [itemId], jobIdToItemId: buildJobIdToItemId([jobId], itemId),
+                ...collectionJobTracking([jobId], recovered),
+              });
+              verifiedBatch = row.batch_id;
+            }
             const { status } = readIngestJobProgress(response.data);
             if (!ACTIVE_INGEST_JOB_STATUSES.has(status) && !TERMINAL_INGEST_JOB_STATUSES.has(status)) {
               reportStatusUnavailable(true);
@@ -907,39 +1079,191 @@ const runDirectQuickIngestBatch = async (
       isCancelled: () => input.isJobCancellationConfirmed?.(itemId) === true,
       onCancel: () => undefined,
     });
-    if (result.terminalStatus === "interrupted") interruptedJobIds.add(jobId);
+    if (result.terminalStatus === "interrupted" && !bindingChanged) interruptedJobIds.add(jobId);
     else if (statusUnavailable) reportStatusUnavailable(false);
-    return result;
+    return { ...result, bindingChanged };
+  };
+
+  const recheckedBindings = new Set<string>();
+  const prepareSource = async (
+    source: { id: string; type: string; url?: string; fileName?: string; sourceUrlEdited?: boolean },
+    planned?: PlannedConferenceCollectionItem,
+    receiptOnly = false,
+    resultData?: unknown,
+    joinMonitor = false,
+  ): Promise<boolean> => {
+    if (!planned?.record || !input.planKey) return !input.checkPlanOnly;
+    let row = planned.record;
+    const retry = input.conferenceRetry?.items.find(item => item.resultId === source.id);
+    const failed = row.status === "failed" || row.status === "submit_failed" || row.status === "cancelled";
+    if (!input.checkPlanOnly && !receiptOnly && (row.status === "planned" || (failed && retry?.retryAttempt === row.retryCount + 1))) {
+      try {
+        const receipt = await scopedQuickIngestRequest<{ claimed: boolean; item: ApiMediaCollectionItem; dispatch_state: PlanDispatchState }>(input, {
+          path: `${planPath(input.planKey)}/sources/${encodeURIComponent(source.id)}/claim`,
+          method: "POST", headers: { "Content-Type": "application/json" },
+          ...(failed && retry ? { body: { retry_count: retry.retryAttempt, idempotency_key: retry.idempotencyKey,
+            ...(source.sourceUrlEdited ? { source_url: source.url } : {}) } } : {}),
+          ...DIRECT_QUICK_INGEST_TRANSPORT,
+        });
+        row = confirmedPlanItem(receipt.item, planned.collectionId);
+        const attempt = failed && retry ? retry : planned;
+        if (row.id !== planned.itemId || row.retryCount !== attempt.retryAttempt || row.idempotencyKey !== attempt.idempotencyKey ||
+            typeof receipt.claimed !== "boolean" || !validDispatchState(receipt.dispatch_state)) throw new Error("Unconfirmed source claim.");
+        planned.dispatchState = receipt.dispatch_state;
+        planned.record = row;
+        planned.retryAttempt = row.retryCount;
+        planned.idempotencyKey = row.idempotencyKey;
+      } catch (error) {
+        assertQuickIngestRequestCurrent(input, error);
+        interruptedItemIds.push(source.id);
+        return false;
+      }
+    }
+    // Either tab can resume this reservation. The qualified transport consumes it atomically.
+    const ready = (planned.dispatchState === "reserved" || planned.dispatchState === "fallback_ready") &&
+      row.status === "processing" && !row.latestJobId && row.mediaId == null;
+    if (ready && !input.checkPlanOnly && !receiptOnly && (!source.url || source.url === row.sourceUrl)) return true;
+    const identity = { ...source, collectionItemId: planned.itemId, retryAttempt: row.retryCount, idempotencyKey: row.idempotencyKey };
+    if (row.status === "completed" || row.status === "skipped_existing" || row.mediaId != null || row.contentItemId != null) {
+      const skipped = row.status === "skipped_existing";
+      recordResult({ ...identity, status: "ok", mediaId: row.mediaId, data: resultData, persisted: row.mediaId != null,
+        ...(skipped ? { outcome: "skipped", message: DUPLICATE_SKIP_MESSAGE } : {}) });
+    } else if (row.status === "processing" && Number.isSafeInteger(Number(row.latestJobId)) && Number(row.latestJobId) > 0) {
+      const jobId = Number(row.latestJobId);
+      const monitor = pollIngestJobStatus(jobId, source.id, planned).then(async result => {
+        const mediaId = extractCompletedIngestJobMediaId(result.data);
+        if (result.bindingChanged || (mediaId != null && wireId(mediaId) == null)) {
+          if (!recheckedBindings.has(source.id)) {
+            recheckedBindings.add(source.id);
+            try {
+              const current = await readPlanSource(input, input.planKey!, source.id, planned.collectionId);
+              if (current.itemId === planned.itemId && (current.record?.status !== "processing" ||
+                  current.record.latestJobId !== row.latestJobId || current.idempotencyKey !== planned.idempotencyKey)) {
+                conferencePlan?.itemsByEntryId.set(source.id, current);
+                await prepareSource(source, current, true, undefined, true);
+                return;
+              }
+            } catch (error) { assertQuickIngestRequestCurrent(input, error); }
+          }
+          interruptedItemIds.push(source.id);
+          return;
+        }
+        if (result.terminalStatus === "interrupted") return;
+        const error = result.terminalStatus !== "completed" || completedIngestJobIndicatesFailure(result.data);
+        const skipped = completedIngestJobIndicatesSkipped(result.data);
+        recordResult({ ...identity, status: error ? "error" : "ok", data: result.data, mediaId, persisted: mediaId != null,
+          outcome: error ? (result.terminalStatus === "cancelled" ? "cancelled" : "failed") : skipped ? "skipped" : undefined,
+          error: error ? result.error || extractCompletedIngestJobError(result.data) || "Ingest failed." : undefined });
+      });
+      if (joinMonitor) await monitor;
+      else monitorAcceptedJob(monitor);
+    } else if (row.status === "processing" && !(ready && input.checkPlanOnly)) {
+      interruptedItemIds.push(source.id);
+    } else {
+      const outcome = row.status === "cancelled" || row.status === "failed" ? row.status : "submit_failed";
+      const data = input.checkPlanOnly && (ready || row.status === "planned") ? { code: UNDISPATCHED_PLAN_SOURCE } : resultData;
+      recordResult({ ...identity, status: "error", outcome, data, error: row.errorSummary ||
+        (outcome === "submit_failed" ? "No source was submitted. Retry this source." : outcome === "cancelled" ? "Ingest was cancelled." : "Ingest failed.") });
+    }
+    return false;
   };
 
   try {
     if (directSessionId) directRuns.set(directSessionId, { uploads, batchIds });
 
+    const sources = [...entries, ...files.map(file => ({
+      id: file.id, fileName: file.name, url: `local://${encodeURIComponent(file.name)}`,
+      type: inferUploadMediaTypeFromFile(file.name, file.directFile?.type ?? file.type),
+      conferenceOverride: file.conferenceOverride,
+    }))];
     if (shouldStoreRemote) {
-      const sources = [...entries, ...files.map(file => ({
-        id: file.id, fileName: file.name, url: `local://${encodeURIComponent(file.name)}`,
-        type: inferUploadMediaTypeFromFile(file.name, file.directFile?.type ?? file.type),
-        conferenceOverride: file.conferenceOverride,
-      }))];
       try {
-        conferencePlan = await createPlannedConferenceCollection(input, sources);
+        if (input.checkPlanOnly && input.planKey) {
+          for (const source of sources) {
+            try {
+              const stored = await readPlanSource(input, input.planKey, source.id,
+                conferencePlan?.collectionId ?? (input.expectedCollectionId ? Number(input.expectedCollectionId) : undefined));
+              conferencePlan ??= { collectionId: stored.collectionId, itemsByEntryId: new Map() };
+              conferencePlan.itemsByEntryId.set(source.id, stored);
+            } catch (error) {
+              assertQuickIngestRequestCurrent(input, error);
+              interruptedItemIds.push(source.id);
+              if ((error as { status?: number } | null)?.status === 404) missingPlanSourceIds.push(source.id);
+              planReadFailed = true;
+            }
+          }
+        } else {
+          conferencePlan = await createPlannedConferenceCollection(input, sources);
+        }
+        if (input.planKey && conferencePlan) input.onTrackingMetadata?.({
+          mode: "webui-direct", sessionId: directSessionId, planKey: input.planKey,
+          durableMode: "durable_collection", collectionId: String(conferencePlan.collectionId),
+          plannedItemIds: [...conferencePlan.itemsByEntryId.values()].map(item => String(item.itemId)),
+        });
       } catch (error) {
         assertQuickIngestRequestCurrent(input, error);
-        if (input.conferenceRetry) throw error;
+        if (input.checkPlanOnly) return { ok: true, results: [], interruptedItemIds: sources.map(source => source.id) };
+        if (input.conferenceRetry && !input.planKey) throw error;
         const reason = error instanceof Error ? error.message : String(error);
+        const status = (error as { status?: number } | null)?.status;
+        const setupCanResume = input.planKey && (!status || status === 408 || status === 429 || status >= 500);
         for (const source of sources) {
           const existing = "playlist" in source && !resolveConferenceDuplicatePolicy(
             source.playlist?.duplicateStatus, source.conferenceOverride?.duplicatePolicy, source.processAgain,
           ).shouldSubmitJob;
+          const retry = input.conferenceRetry?.items.find(item => item.resultId === source.id);
           recordResult({
             id: source.id, type: source.type, status: "error", outcome: "submit_failed",
+            ...(setupCanResume ? { data: { code: UNDISPATCHED_PLAN_SOURCE } } :
+              input.planKey && status ? { data: { plan_setup_http_status: status } } : {}),
+            ...(retry ? { collectionItemId: retry.collectionItemId, retryAttempt: retry.retryAttempt - 1 } : {}),
             ...("fileName" in source ? { fileName: source.fileName } : { url: source.url }),
-            error: `Could not save collection metadata. ${reason}${existing ? " Its existing Media record was preserved." : ""}`,
+            error: `Could not save collection metadata. ${status ? `HTTP ${status}. ` : ""}${reason}${existing ? " Its existing Media record was preserved." : ""}`,
           });
         }
         return { ok: true, results: out };
       }
     }
+
+    const reconcileDispatchFailure = async (
+      error: unknown, id: string, type: string, planned?: PlannedConferenceCollectionItem,
+    ) => {
+      if (!planned?.record || !input.planKey) return false;
+      const source = sources.find(item => item.id === id)!;
+      const descriptor = "fileName" in source ? { id, type, fileName: source.fileName } : { id, type, url: source.url };
+      try {
+        if (error instanceof RecoveredPlanReceipt) {
+          planned.record = error.item;
+          await prepareSource(descriptor, planned, true, error.result);
+        } else {
+          // A broken connection can hide a committed transport. Read the same source once.
+          const current = await readPlanSource(input, input.planKey, id, planned.collectionId);
+          if (current.itemId !== planned.itemId) throw new Error("Unconfirmed source.");
+          conferencePlan?.itemsByEntryId.set(id, current);
+          await prepareSource(descriptor, current, true);
+        }
+      } catch (readError) {
+        assertQuickIngestRequestCurrent(input, readError);
+        interruptedItemIds.push(id);
+      }
+      return true;
+    };
+
+    const stopBeforeSubmission = async (id: string, type: string, planned?: PlannedConferenceCollectionItem) => {
+      const stopped = { status: "cancelled", error_summary: "Stopped before submission." };
+      if (!planned?.record) {
+        await patchConferenceCollectionItem(input, planned, stopped);
+        return true;
+      }
+      try {
+        await updateConferenceCollectionItem(input, planned, stopped);
+        return true;
+      } catch (error) {
+        assertQuickIngestRequestCurrent(input, error);
+        await reconcileDispatchFailure(error, id, type, planned);
+        return false;
+      }
+    };
 
     for (const entry of entries) {
       assertQuickIngestRequestCurrent(input);
@@ -950,6 +1274,7 @@ const runDirectQuickIngestBatch = async (
 
       const plannedConferenceItem =
         conferencePlan?.itemsByEntryId.get(entry.id);
+      if (!await prepareSource({ id: entry.id, type: resolvedType, url, sourceUrlEdited: entry.sourceUrlEdited }, plannedConferenceItem)) continue;
       const duplicatePolicyResolution = resolveConferenceDuplicatePolicy(
         entry.playlist?.duplicateStatus,
         entry.conferenceOverride?.duplicatePolicy,
@@ -983,6 +1308,7 @@ const runDirectQuickIngestBatch = async (
       };
       const recordEntryFailure = async (error: unknown) => {
         assertQuickIngestRequestCurrent(input, error);
+        if (!jobSubmitted && await reconcileDispatchFailure(error, entry.id, resolvedType, plannedConferenceItem)) return;
         const outcome =
           jobSubmitted || localProcessingAttempted ? "failed" : "submit_failed";
         if (!isIngestConflict(error)) {
@@ -1009,7 +1335,7 @@ const runDirectQuickIngestBatch = async (
       };
       try {
         if (shouldStoreRemote && !duplicatePolicyResolution.shouldSubmitJob) {
-          if (!plannedConferenceItem && hasUsableConferenceMetadata(input.conferenceBatchMetadata)) {
+          if (!plannedConferenceItem && hasConferenceCollectionMetadata(input.conferenceBatchMetadata)) {
             throw new Error("Could not add this source to the collection. Its existing Media record was preserved.");
           }
           await patchConferenceCollectionItem(input, plannedConferenceItem, {
@@ -1033,9 +1359,7 @@ const runDirectQuickIngestBatch = async (
 
         if (uploads.signal.aborted) {
           const reason = "Stopped before submission.";
-          await patchConferenceCollectionItem(input, plannedConferenceItem, {
-            status: "cancelled", error_summary: reason,
-          });
+          if (!await stopBeforeSubmission(entry.id, resolvedType, plannedConferenceItem)) continue;
           recordResult({
             id: entry.id, url, type: resolvedType, status: "error",
             outcome: "cancelled", error: reason,
@@ -1049,7 +1373,7 @@ const runDirectQuickIngestBatch = async (
         if (resolvedType === "html") {
           localProcessingAttempted = true;
           data = await processWebScrape(input, {
-            url,
+            url, planned: plannedConferenceItem,
             entry,
             common: input.common,
             advancedValues: input.advancedValues,
@@ -1095,13 +1419,12 @@ const runDirectQuickIngestBatch = async (
           applyPlannedConferenceFields(fields, plannedConferenceItem);
           fields.urls = [url];
           try {
-            const submitData = await scopedQuickIngestUpload<any>(input, {
-              path: "/api/v1/media/ingest/jobs",
+            const submitData = await dispatchJobs(input, {
               method: "POST",
               fields: serializeUploadFields(fields),
               timeoutMs: DIRECT_INGEST_TIMEOUT_MS,
               ...DIRECT_QUICK_INGEST_TRANSPORT,
-            });
+            }, plannedConferenceItem);
             const { batchId, jobIds } = requireSubmittedIngestJobs(submitData);
             const firstJobId = jobIds[0];
             jobSubmitted = true;
@@ -1177,7 +1500,7 @@ const runDirectQuickIngestBatch = async (
             continue;
           } catch (error) {
       assertQuickIngestRequestCurrent(input, error);
-            if (uploads.signal.aborted || !shouldFallbackToPersistentAdd(error)) {
+            if (uploads.signal.aborted || !canFallback(error, plannedConferenceItem)) {
               throw error;
             }
             await patchConferenceCollectionItem(input, plannedConferenceItem, {
@@ -1191,7 +1514,7 @@ const runDirectQuickIngestBatch = async (
               fields.media_ingest_job_id = String(latestJobId);
             }
             localProcessingAttempted = true;
-            data = await submitPersistentAdd(input, { fields });
+            data = await submitPersistentAdd(input, { fields, planned: plannedConferenceItem });
             resultMediaId = extractCompletedIngestJobMediaId(data);
             const fallbackDuplicate = completedIngestJobIndicatesSkipped(data);
             if (fallbackDuplicate) {
@@ -1260,11 +1583,12 @@ const runDirectQuickIngestBatch = async (
       const requestContext = directFile ? runContext : input;
       const timeoutMs = getNativeFileTimeout(directFile);
       const planned = conferencePlan?.itemsByEntryId.get(id);
+      if (!await prepareSource({ id, type: mediaType, fileName }, planned)) continue;
       const receipt = planned ? {
         collectionItemId: planned.itemId, retryAttempt: planned.retryAttempt ?? 0, idempotencyKey: planned.idempotencyKey,
       } : {};
       if (uploads.signal.aborted) {
-        await patchConferenceCollectionItem(input, planned, { status: "cancelled", error_summary: "Stopped before submission." });
+        if (!await stopBeforeSubmission(id, mediaType, planned)) continue;
         recordResult({
           id, fileName, type: mediaType, status: "error", ...receipt,
           outcome: "cancelled", error: "Stopped before submission.",
@@ -1275,6 +1599,7 @@ const runDirectQuickIngestBatch = async (
       let fallbackAttempted = false;
       const recordFileFailure = async (error: unknown) => {
         assertQuickIngestRequestCurrent(input, error);
+        if (!jobAcknowledged && await reconcileDispatchFailure(error, id, mediaType, planned)) return;
         const message = error instanceof Error ? error.message : String(error || "Upload failed");
         const outcome = jobAcknowledged || fallbackAttempted ? "failed" : "submit_failed";
         if (!isIngestConflict(error)) await patchConferenceCollectionItem(input, planned, { status: outcome, error_summary: message });
@@ -1311,15 +1636,14 @@ const runDirectQuickIngestBatch = async (
         if (shouldStoreRemote) {
           applyPlannedConferenceFields(fields, planned, "file");
           try {
-            const submitData = await scopedQuickIngestUpload<any>(requestContext, {
-              path: "/api/v1/media/ingest/jobs",
+            const submitData = await dispatchJobs(requestContext, {
               method: "POST",
               fields: serializeUploadFields(fields),
               ...upload,
               fileFieldName: "files",
               timeoutMs,
               ...DIRECT_QUICK_INGEST_TRANSPORT,
-            });
+            }, planned);
             const { batchId, jobIds } = requireSubmittedIngestJobs(submitData);
             jobAcknowledged = true;
             await trackAcceptedBatch({
@@ -1372,12 +1696,12 @@ const runDirectQuickIngestBatch = async (
             monitorAcceptedJob(pollFile().catch(recordFileFailure));
           } catch (error) {
       assertQuickIngestRequestCurrent(input, error);
-            if (uploads.signal.aborted || !shouldFallbackToPersistentAdd(error)) {
+            if (uploads.signal.aborted || !canFallback(error, planned)) {
               throw error;
             }
             fallbackAttempted = true;
             const data = await submitPersistentAdd(requestContext, {
-              fields,
+              fields, planned,
               ...upload,
             });
             const fallbackDuplicate = completedIngestJobIndicatesSkipped(data);
@@ -1443,6 +1767,8 @@ const runDirectQuickIngestBatch = async (
       ok: true,
       results: out.sort((a, b) => (inputOrder.get(a.id) ?? inputOrder.size) - (inputOrder.get(b.id) ?? inputOrder.size)),
       ...(interruptedItemIds.length ? { interruptedItemIds } : {}),
+      ...(planReadFailed ? { statusCheckUnavailable: true } : {}),
+      ...(missingPlanSourceIds.length ? { missingPlanSourceIds } : {}),
       ...(interruptedJobIds.size ? { interruptedJobIds: [...interruptedJobIds] } : {}),
     };
   } finally {
@@ -1470,9 +1796,12 @@ export const submitQuickIngestBatch = async (
   input: QuickIngestBatchInput,
 ): Promise<QuickIngestBatchResponse> => {
   assertQuickIngestRequestCurrent(input);
+  if (input.checkPlanOnly && (!input.planKey || !input.storeRemote || input.processOnly)) {
+    throw new Error("A stored collection plan is required to check its status.");
+  }
   if (
     !input.conferenceRetry &&
-    !isDirectQuickIngestSessionId(input?.__quickIngestSessionId) &&
+    !input.planKey && !isDirectQuickIngestSessionId(input?.__quickIngestSessionId) &&
     !hasNativeFile(input.files) &&
     (await canUseExtensionMessagingRuntime())
   ) {
@@ -1501,7 +1830,7 @@ export const startQuickIngestSession = async (
   if (
     !input.conferenceRetry &&
     !hasNativeFile(input.files) &&
-    !shouldPreferDirectQuickIngestSession() &&
+    !input.planKey && !shouldPreferDirectQuickIngestSession() &&
     (await canUseExtensionMessagingRuntime())
   ) {
     try {

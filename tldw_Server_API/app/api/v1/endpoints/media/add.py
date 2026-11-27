@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-from functools import partial
 from typing import Any
 
 from fastapi import APIRouter, BackgroundTasks, Depends, File, HTTPException, Request, Response, UploadFile, status
@@ -26,6 +25,7 @@ from tldw_Server_API.app.api.v1.API_Deps.personalization_deps import (
     get_usage_event_logger,
 )
 from tldw_Server_API.app.api.v1.API_Deps.storage_quota_guard import guard_storage_quota
+from tldw_Server_API.app.api.v1.API_Deps.usage_quota_deps import media_analysis_quota_before_save
 from tldw_Server_API.app.api.v1.schemas.media_request_models import AddMediaForm
 from tldw_Server_API.app.core.AuthNZ.permissions import MEDIA_CREATE
 from tldw_Server_API.app.core.Billing.enforcement import LimitCategory
@@ -87,7 +87,10 @@ async def add_media(
     research_handoff = is_research_discovery_handoff(form_data)
     admit_after_duplicate_check = None
     if media_analysis_requested(form_data):
-        admit = partial(admit_media_analysis, current_user.id, form_data)
+        async def admit() -> None:
+            with media_analysis_quota_before_save():
+                await admit_media_analysis(current_user.id, form_data)
+
         if not research_handoff and form_data.media_type != "email" and not form_data.overwrite_existing:
             admit_after_duplicate_check = admit
         else:

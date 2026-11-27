@@ -7580,6 +7580,24 @@
   "quickIngest_web_checkStatus": {
     "message": "Check status"
   },
+  "quickIngest_web_planCheckFailed": {
+    "message": "Could not refresh the collection source status."
+  },
+  "quickIngest_web_resumeSetup": {
+    "message": "Resume original collection setup"
+  },
+  "quickIngest_web_reattachToResumeSetup": {
+    "message": "Reattach the original file to retry collection setup."
+  },
+  "quickIngest_web_planReadyBadge": {
+    "message": "Ready to submit"
+  },
+  "quickIngest_web_planReadyMessage": {
+    "message": "This source can resume setup."
+  },
+  "quickIngest_web_planReadySuggestion": {
+    "message": "Retry to submit it to the original collection."
+  },
   "quickIngest_web_checkMedia": {
     "message": "Check Media"
   },

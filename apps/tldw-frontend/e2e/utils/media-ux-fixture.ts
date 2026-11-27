@@ -47,6 +47,8 @@ export function createMediaItems(count = 40) {
   });
 }
 
+type FixturePlanItem = Record<string, unknown> & { id: number; collection_id: number; idempotency_key: string };
+
 export async function installBrowserFixture(
   page: any,
   options: {
@@ -67,6 +69,10 @@ export async function installBrowserFixture(
     errorList: options.errorList ?? false,
     requests: [] as Array<{ method: string; path: string; body?: any }>,
     jobs: new Map<number, any>(),
+    collectionPlans: new Map<string, { id: number; items: Map<string, FixturePlanItem> }>(),
+    interruptPlanResponse: false,
+    planDispatch: new WeakMap<FixturePlanItem, string>(),
+    jobSources: new Map<number, FixturePlanItem>(),
     nextJob: 7100,
     nextMedia: 40,
     attempts: new Map<string, number>(),
@@ -249,6 +255,45 @@ export async function installBrowserFixture(
       });
     if (path === '/api/v1/media/keywords')
       return fulfill({ keywords: ['research', 'retrieval', 'transcript'] });
+    if (/^\/api\/v1\/media\/collections\/quick-ingest-plans\/[^/]+$/.test(path) && method === 'PUT') {
+      const plan = state.collectionPlans.get(path) ?? { id: 21 + state.collectionPlans.size, items: new Map<string, FixturePlanItem>() };
+      state.collectionPlans.set(path, plan);
+      const items = body.items.map(({ source_key, item }: { source_key: string; item: Record<string, unknown> }) => {
+        const id = plan.items.size + 1;
+        const row = plan.items.get(source_key) ?? {
+          ...item, id, collection_id: plan.id, status: 'planned', retry_count: 0,
+          idempotency_key: `fixture-plan-${plan.id}-source-${id}`,
+        };
+        plan.items.set(source_key, row);
+        return { source_key, item: row, dispatch_state: state.planDispatch.get(row) ?? 'unclaimed' };
+      });
+      if (state.interruptPlanResponse) return route.abort('connectionreset');
+      return fulfill({ collection_id: plan.id, items });
+    }
+    const planSource = path.match(/^(\/api\/v1\/media\/collections\/quick-ingest-plans\/[^/]+)\/sources\/([^/]+)(?:\/(claim|dispatch\/(?:jobs|web|add)))?$/);
+    const sourceRow = planSource && state.collectionPlans.get(planSource[1])?.items.get(decodeURIComponent(planSource[2]));
+    const sourceAction = planSource?.[3];
+    if (planSource && !sourceRow) return fulfill({ detail: 'Unknown plan source' }, 404);
+    if (sourceRow && !sourceAction && method === 'GET') {
+      return fulfill({ source_key: decodeURIComponent(planSource![2]), collection_id: sourceRow.collection_id,
+        item: sourceRow, dispatch_state: state.planDispatch.get(sourceRow) ?? 'unclaimed' });
+    }
+    if (sourceRow && method === 'POST') {
+      const phase = state.planDispatch.get(sourceRow) ?? 'unclaimed';
+      if (sourceAction === 'claim') {
+        const claimed = phase === 'unclaimed';
+        if (claimed) {
+          sourceRow.status = 'processing';
+          state.planDispatch.set(sourceRow, 'reserved');
+        }
+        return fulfill({ claimed, item: sourceRow, dispatch_state: state.planDispatch.get(sourceRow) });
+      }
+      if (url.searchParams.get('idempotency_key') !== sourceRow.idempotency_key ||
+          url.searchParams.get('retry_count') !== String(sourceRow.retry_count)) {
+        return fulfill({ detail: 'The source attempt has changed.' }, 409);
+      }
+      if (phase !== 'reserved') return fulfill({ dispatched: false, item: sourceRow, dispatch_state: phase, result: null });
+    }
     if (path === '/api/v1/media/collections' && method === 'POST')
       return fulfill({ id: 21, ...body }, 201);
     if (path === '/api/v1/media/collections/21/items' && method === 'POST')
@@ -281,6 +326,11 @@ export async function installBrowserFixture(
           });
         }
       }
+      const boundSource = state.jobSources.get(job.id);
+      if (boundSource && ['completed', 'failed', 'cancelled'].includes(job.status)) {
+        Object.assign(boundSource, { status: job.status, media_id: job.result?.media_id ?? null });
+        state.planDispatch.set(boundSource, 'settled');
+      }
       return {
         ...job,
         job_id: job.id,
@@ -288,7 +338,7 @@ export async function installBrowserFixture(
         progress_message: 'Simulated processing outcome',
       };
     };
-    if (path === '/api/v1/media/process-web-scraping' && method === 'POST') {
+    if ((path === '/api/v1/media/process-web-scraping' || sourceAction === 'dispatch/web') && method === 'POST') {
       const source = String(body?.url_input || '');
       const attempts = (state.attempts.get(source) || 0) + 1;
       state.attempts.set(source, attempts);
@@ -309,14 +359,18 @@ export async function installBrowserFixture(
       const id = ++state.nextMedia;
       const item = { ...createMediaItems(1)[0], id, title: `Imported source ${id}`, url: source };
       state.items.push(item);
-      return fulfill({
-        status: 'persist-ok',
-        media_ids: [id],
-        title: item.title,
+      const result = {
+        status: 'persist-ok', media_ids: [id], title: item.title,
         content: 'Simulated extracted evidence for UI verification.',
-      });
+      };
+      if (sourceRow) {
+        Object.assign(sourceRow, { status: 'completed', media_id: id });
+        state.planDispatch.set(sourceRow, 'settled');
+        return fulfill({ dispatched: true, item: sourceRow, dispatch_state: 'settled', result });
+      }
+      return fulfill(result);
     }
-    if (path === '/api/v1/media/ingest/jobs' && method === 'POST') {
+    if ((path === '/api/v1/media/ingest/jobs' || sourceAction === 'dispatch/jobs') && method === 'POST') {
       const id = ++state.nextJob;
       const firstUrl = Array.isArray(body?.urls) ? body.urls[0] : body?.urls;
       const source =
@@ -331,10 +385,21 @@ export async function installBrowserFixture(
         source_url: /^https?:/.test(source) ? source : undefined,
         source_kind: /^https?:/.test(source) ? 'url' : 'file',
         status: 'queued',
+        ...(sourceRow && { owner_user_id: '1', collection_id: sourceRow.collection_id,
+          planned_item_id: sourceRow.id, idempotency_key: sourceRow.idempotency_key }),
         fail: state.ingestFailure || (source.includes('fail-once') && attempts === 1),
       };
       state.jobs.set(id, job);
-      return fulfill({ batch_id: job.batch_id, job_ids: [id], jobs: [{ id, status: 'queued' }] });
+      const result = { batch_id: job.batch_id, job_ids: [id], jobs: [{ id, status: 'queued', ...(sourceRow && {
+        collection_id: sourceRow.collection_id, planned_item_id: sourceRow.id, idempotency_key: sourceRow.idempotency_key,
+      }) }] };
+      if (sourceRow) {
+        Object.assign(sourceRow, { latest_job_id: String(id), status: 'processing' });
+        state.planDispatch.set(sourceRow, 'jobs');
+        state.jobSources.set(id, sourceRow);
+        return fulfill({ dispatched: true, item: sourceRow, dispatch_state: 'jobs', result });
+      }
+      return fulfill(result);
     }
     if (path === '/api/v1/media/ingest/jobs' && method === 'GET') {
       const batch = url.searchParams.get('batch_id');

@@ -2,7 +2,8 @@
 
 from __future__ import annotations
 
-from collections.abc import Collection
+from collections.abc import Collection, Iterator
+from contextlib import contextmanager
 from dataclasses import asdict
 from typing import Any
 
@@ -22,6 +23,21 @@ from tldw_Server_API.app.core.Usage.quota_checks import (
     rag_queries_decision,
     seconds_until_utc_midnight,
 )
+
+
+class MediaAnalysisQuotaDeniedBeforeSave(HTTPException):
+    """Only the analysis admission check ran; provider execution and media storage have not started."""
+
+
+@contextmanager
+def media_analysis_quota_before_save() -> Iterator[None]:
+    """Preserve the existing HTTP refusal while identifying a retryable, unpublished attempt."""
+    try:
+        yield
+    except HTTPException as exc:
+        if exc.status_code != status.HTTP_402_PAYMENT_REQUIRED:
+            raise
+        raise MediaAnalysisQuotaDeniedBeforeSave(exc.status_code, exc.detail, headers=exc.headers) from exc
 
 
 async def enforce_rag_query_quota(user_id: Any, units: int) -> None:

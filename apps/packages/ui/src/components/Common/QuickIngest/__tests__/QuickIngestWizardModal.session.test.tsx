@@ -753,6 +753,226 @@ describe("QuickIngestWizardModal session runtime", () => {
     ])
   })
 
+  it("reopens a lost collection plan response and resumes only its missing work in the original collection", async () => {
+    mocks.useActualResultsStep = true
+    const batch = await vi.importActual<typeof import("@/services/tldw/quick-ingest-batch")>("@/services/tldw/quick-ingest-batch")
+    mocks.startQuickIngestSession.mockImplementation(batch.startQuickIngestSession)
+    mocks.submitQuickIngestBatch.mockImplementation(batch.submitQuickIngestBatch)
+    const ids = ["saved", "fresh"]
+    const session = useQuickIngestSessionStore.getState().createDraftSession({
+      presetConfig: resolvePresetMap().quick,
+      conferenceBatchMetadata: { collectionName: "November", sharedTags: ["field notes"] },
+      queueItems: ids.map(id => ({ id, kind: "url", url: `https://source.test/${id}.pdf`, detectedType: "pdf", icon: "File", fileSize: 0, validation: { valid: true }, conferenceOverride: { selected: true, title: "Original " + id, tags: ["original"] } })),
+    })
+    const planPath = "/api/v1/media/collections/quick-ingest-plans/" + session.id
+    const planBodies: any[] = []
+    const rows = ids.map((id, index) => ({
+      source_key: id, dispatch_state: index ? "unclaimed" : "settled", item: { retry_count: 0, id: 11 + index, collection_id: 7, status: index ? "planned" : "completed",
+        source_url: index ? "https://source.test/fresh.pdf" : "https://source.test/updated.pdf", title: index ? "New source" : "Edited in Library",
+        media_id: index ? null : 41, idempotency_key: "key-" + id },
+    }))
+    mocks.bgRequest.mockImplementation(({ path, method, body }) => {
+      if (path === planPath && method === "PUT") {
+        planBodies.push(body)
+        if (planBodies.length === 1) throw new TypeError("Load failed")
+        return { collection_id: 7, items: [...rows].reverse() }
+      }
+      if (path === planPath + "/sources/fresh/claim") return { claimed: true, item: { ...rows[1].item, status: "processing" }, dispatch_state: "reserved" }
+      if (path === "/api/v1/media/ingest/jobs/82") return { ok: true, data: { id: 82, collection_id: "7", planned_item_id: "12", idempotency_key: "key-fresh", batch_id: "batch-82", status: "completed", result: { media_id: 42 } } }
+      if (method === "PATCH") return {}
+      throw new Error("Unexpected request " + path)
+    })
+    mocks.bgUpload.mockResolvedValue({ dispatched: true, dispatch_state: "jobs", item: { ...rows[1].item, status: "processing", latest_job_id: "82" }, result: { batch_id: "batch-82", jobs: [{ id: 82, collection_id: "7", planned_item_id: "12", idempotency_key: "key-fresh" }] } })
+    const modal = render(<RuntimeIngestModal open onClose={vi.fn()} />)
+    fireEvent.click(await screen.findByRole("button", { name: "Save 2 sources" }))
+    await waitFor(() => expect(useQuickIngestSessionStore.getState().session?.results).toHaveLength(2))
+    expect(mocks.bgUpload).not.toHaveBeenCalled()
+    modal.unmount()
+    await useQuickIngestSessionStore.persist.rehydrate()
+    render(<RuntimeIngestModal open onClose={vi.fn()} />)
+    fireEvent.click(await screen.findByRole("button", { name: "Retry 2 failed sources" }))
+    await waitFor(() => expect(useQuickIngestSessionStore.getState().session?.results.map(item => item.mediaId)).toEqual([41, 42]))
+    expect(useQuickIngestSessionStore.getState().session?.results[0]).toMatchObject({ title: "Edited in Library", url: "https://source.test/updated.pdf" })
+    expect(planBodies).toHaveLength(2)
+    expect(planBodies[1]).toEqual(planBodies[0])
+    expect(planBodies[0].items.map((entry: any) => entry.source_key)).toEqual(ids)
+    expect(mocks.bgUpload).toHaveBeenCalledExactlyOnceWith(expect.objectContaining({
+      fields: expect.objectContaining({ idempotency_key: "key-fresh", media_collection_item_id: 12 }),
+    }))
+    expect(useQuickIngestSessionStore.getState().session?.tracking?.collectionId).toBe("7")
+  })
+
+  it("resumes the same plan only after explicitly requesting setup following a missing receipt", async () => {
+    mocks.useActualResultsStep = true
+    const batch = await vi.importActual<typeof import("@/services/tldw/quick-ingest-batch")>("@/services/tldw/quick-ingest-batch")
+    mocks.startQuickIngestSession.mockImplementation(batch.startQuickIngestSession)
+    mocks.submitQuickIngestBatch.mockImplementation(batch.submitQuickIngestBatch)
+    useQuickIngestSessionStore.getState().createDraftSession({
+      id: "pre-setup", currentStep: 5, lifecycle: "interrupted",
+      presetConfig: resolvePresetMap().quick, conferenceBatchMetadata: { collectionName: "Reading", sharedTags: [] },
+      processingState: { status: "error", perItemProgress: [{ id: "link", status: "queued", currentStage: "", estimatedRemaining: 0, progressPercent: 0 }], estimatedRemaining: 0, elapsed: 1 },
+      tracking: { mode: "webui-direct", planKey: "pre-setup" },
+      queueItems: [{ id: "link", kind: "url", url: "https://source.test/report.pdf", detectedType: "pdf", icon: "File", fileSize: 0, validation: { valid: true } }],
+    })
+    const plan = "/api/v1/media/collections/quick-ingest-plans/pre-setup"
+    mocks.bgRequest.mockImplementation(({ method, path }) => {
+      if (method === "GET" && path === plan + "/sources/link") throw Object.assign(new Error("Not found"), { status: 404 })
+      if (method === "PUT" && path === plan) return { collection_id: 18, items: [{ source_key: "link", dispatch_state: "settled", item: {
+        id: 52, retry_count: 0, collection_id: 18, source_url: "https://source.test/report.pdf", status: "completed", media_id: 51, idempotency_key: "original-link",
+      } }] }
+      throw new Error("Unexpected route")
+    })
+    render(<RuntimeIngestModal open onClose={vi.fn()} />)
+    fireEvent.click(await screen.findByRole("button", { name: "Check status" }))
+    expect(await screen.findByText("Could not refresh the collection source status.")).toHaveAttribute("role", "alert")
+    expect(mocks.bgRequest.mock.calls.map(([req]) => req.method)).toEqual(["GET"])
+    fireEvent.click(screen.getByRole("button", { name: "Resume original collection setup" }))
+    expect(await screen.findByRole("heading", { name: "1 saved to Media" })).toBeVisible()
+    expect(mocks.bgRequest.mock.calls.map(([req]) => [req.method, req.path])).toEqual([["GET", plan + "/sources/link"], ["PUT", plan]])
+    expect(mocks.bgUpload).not.toHaveBeenCalled()
+  })
+
+  it.each([false, true])("keeps the first saved source and explicitly resumes only its missing sibling (other unresolved: %s)", async otherUnresolved => {
+    mocks.useActualResultsStep = true
+    const batch = await vi.importActual<typeof import("@/services/tldw/quick-ingest-batch")>("@/services/tldw/quick-ingest-batch")
+    mocks.startQuickIngestSession.mockImplementation(batch.startQuickIngestSession)
+    mocks.submitQuickIngestBatch.mockImplementation(batch.submitQuickIngestBatch)
+    const ids = otherUnresolved ? ["A", "B", "C"] : ["A", "B"]
+    useQuickIngestSessionStore.getState().createDraftSession({
+      id: "subset", currentStep: 5, lifecycle: "interrupted", presetConfig: resolvePresetMap().quick,
+      conferenceBatchMetadata: { collectionName: "Reading", sharedTags: [] },
+      processingState: { status: "error", perItemProgress: ids.map(id => ({ id, status: "queued", currentStage: "", estimatedRemaining: 0, progressPercent: 0 })), estimatedRemaining: 0, elapsed: 1 },
+      tracking: { mode: "webui-direct", planKey: "subset" },
+      queueItems: ids.map(id => ({ id, kind: "url", url: `https://source.test/${id}.pdf`, detectedType: "pdf", icon: "File", fileSize: 0, validation: { valid: true } })),
+    })
+    const row = (id: string) => ({ source_key: id, dispatch_state: "settled", item: { id: id === "A" ? 51 : 52, retry_count: 0, collection_id: 18,
+      source_url: `https://source.test/${id}.pdf`, title: id, status: "completed", media_id: id === "A" ? 61 : 62, idempotency_key: "original-" + id } })
+    let responseStatus = 503
+    mocks.bgRequest.mockImplementation(({ method, path, body }) => {
+      if (path.endsWith("/sources/A")) return { collection_id: 18, ...row("A") }
+      if (path.endsWith("/sources/B")) throw Object.assign(new Error("Unavailable"), { status: responseStatus })
+      if (path.endsWith("/sources/C")) throw Object.assign(new Error("Unavailable"), { status: 503 })
+      if (method === "PUT" && path.endsWith("/subset") && body.items.length === 1 && body.items[0].source_key === "B") return { collection_id: 18, items: [row("B")] }
+      throw new Error("Unexpected mutation")
+    })
+    render(<RuntimeIngestModal open onClose={vi.fn()} />)
+    fireEvent.click(await screen.findByRole("button", { name: "Check status" }))
+    fireEvent.click(await screen.findByRole("button", { name: "Open in Media" }))
+    expect(mocks.navigate).toHaveBeenCalledWith("/media?id=61")
+    expect(screen.queryByRole("button", { name: "Resume original collection setup" })).toBeNull()
+    responseStatus = 404
+    fireEvent.click(screen.getByRole("button", { name: "Check status" }))
+    const resume = await screen.findByRole("button", { name: "Resume original collection setup" })
+    expect(mocks.bgRequest.mock.calls.map(([req]) => req.method)).toEqual(Array(otherUnresolved ? 5 : 3).fill("GET"))
+    fireEvent.click(resume)
+    expect(await screen.findByRole("heading", { name: "2 saved to Media" })).toBeVisible()
+    expect(useQuickIngestSessionStore.getState().session?.results.map(item => item.mediaId)).toEqual([61, 62])
+    if (otherUnresolved) expect(screen.getByRole("region", { name: "Status unavailable" })).toHaveTextContent("https://source.test/C.pdf")
+    expect(mocks.bgUpload).not.toHaveBeenCalled()
+  })
+
+  it("keeps status inspection available while a missing native sibling waits for reattachment", async () => {
+    mocks.useActualResultsStep = true
+    const batch = await vi.importActual<typeof import("@/services/tldw/quick-ingest-batch")>("@/services/tldw/quick-ingest-batch")
+    mocks.submitQuickIngestBatch.mockImplementation(batch.submitQuickIngestBatch)
+    useQuickIngestSessionStore.getState().createDraftSession({
+      id: "native-subset", currentStep: 5, lifecycle: "interrupted", presetConfig: resolvePresetMap().quick,
+      tracking: { mode: "webui-direct", planKey: "native-subset", collectionId: "18", durableMode: "durable_collection" },
+      processingState: { status: "error", perItemProgress: ["B", "C"].map(id => ({ id, status: "queued", currentStage: "", estimatedRemaining: 0, progressPercent: 0 })), estimatedRemaining: 0, elapsed: 1 },
+      queueItems: [
+        { id: "A", kind: "url", url: "https://source.test/a.pdf", detectedType: "pdf", icon: "File", fileSize: 0, validation: { valid: true } },
+        { id: "B", kind: "file", fileName: "b.pdf", detectedType: "pdf", icon: "File", fileSize: 123, validation: { valid: true } },
+        { id: "C", kind: "url", url: "https://source.test/c.pdf", detectedType: "pdf", icon: "File", fileSize: 0, validation: { valid: true } },
+      ],
+      results: [{ id: "A", status: "ok", type: "pdf", title: "A", mediaId: 61, persisted: true }],
+    })
+    let ready = false
+    mocks.bgRequest.mockImplementation(({ path, method }) => {
+      if (method !== "GET") throw new Error("Unexpected write")
+      if (path.endsWith("/sources/B")) throw Object.assign(new Error("Missing receipt"), { status: 404 })
+      if (!ready) throw Object.assign(new Error("Temporarily unavailable"), { status: 503 })
+      return { source_key: "C", collection_id: 18, dispatch_state: "settled", item: { id: 53, retry_count: 0, collection_id: 18,
+        source_url: "https://source.test/c.pdf", title: "C", status: "completed", media_id: 63, idempotency_key: "source-C" } }
+    })
+    render(<RuntimeIngestModal open onClose={vi.fn()} />)
+    fireEvent.click(await screen.findByRole("button", { name: "Check status" }))
+    fireEvent.click(await screen.findByRole("button", { name: "Resume original collection setup" }))
+    expect(await screen.findByLabelText("Reattach b.pdf")).toBeVisible()
+    expect(screen.getByRole("region", { name: "Status unavailable" })).toHaveTextContent("https://source.test/c.pdf")
+    expect(useQuickIngestSessionStore.getState().session?.lifecycle).toBe("interrupted")
+    ready = true
+    fireEvent.click(screen.getByRole("button", { name: "Check status" }))
+    await waitFor(() => expect(useQuickIngestSessionStore.getState().session?.results).toMatchObject([
+      { id: "A", mediaId: 61 }, { id: "B", status: "error" }, { id: "C", mediaId: 63 },
+    ]))
+    expect(screen.getByLabelText("Reattach b.pdf")).toBeVisible()
+    const inspected = mocks.bgRequest.mock.calls.map(([req]) => req.path.split("/").pop())
+    expect(inspected.slice(0, 2).sort()).toEqual(["B", "C"])
+    expect(inspected.slice(2)).toEqual(["C"])
+    expect(mocks.bgUpload).not.toHaveBeenCalled()
+  })
+
+  it("discards a delayed inspection after a different source begins a new retry in the same draft", async () => {
+    mocks.useActualResultsStep = true
+    const ids = ["A", "B"]
+    const pendingCheck = deferred<any>()
+    const retry = deferred<any>()
+    mocks.startQuickIngestSession.mockResolvedValue({ ok: true, sessionId: "qi-direct-fresh-run" })
+    mocks.submitQuickIngestBatch.mockImplementation(input => input.checkPlanOnly ? pendingCheck.promise : retry.promise)
+    useQuickIngestSessionStore.getState().createDraftSession({
+      id: "fenced", currentStep: 5, lifecycle: "interrupted", presetConfig: resolvePresetMap().quick,
+      tracking: { mode: "webui-direct", sessionId: "old-run", planKey: "fenced", collectionId: "7", durableMode: "durable_collection" },
+      processingState: { status: "error", perItemProgress: ids.map(id => ({ id, status: "queued", currentStage: "", estimatedRemaining: 0, progressPercent: 0 })), estimatedRemaining: 0, elapsed: 1 },
+      queueItems: ids.map(id => ({ id, kind: "url", url: `https://source.test/${id}.pdf`, detectedType: "pdf", icon: "File", fileSize: 0, validation: { valid: true } })),
+      results: [{ id: "B", status: "error", outcome: "failed", type: "pdf", title: "B", error: "Network error", collectionItemId: 2, retryAttempt: 0 }],
+    })
+    render(<RuntimeIngestModal open onClose={vi.fn()} />)
+    fireEvent.click(await screen.findByRole("button", { name: "Check status" }))
+    fireEvent.click(screen.getByRole("button", { name: "Retry B" }))
+    await waitFor(() => expect(useQuickIngestSessionStore.getState().session?.tracking?.sessionId).toBe("qi-direct-fresh-run"))
+    const oldRequest = mocks.submitQuickIngestBatch.mock.calls[0][0]
+    await act(async () => {
+      oldRequest.onTrackingMetadata({ mode: "webui-direct", sessionId: "old-run", collectionId: "7", planKey: "fenced" })
+      pendingCheck.resolve({ ok: true, results: [{ id: "A", status: "ok", mediaId: 999 }] })
+    })
+    expect(useQuickIngestSessionStore.getState().session).toMatchObject({ lifecycle: "processing", tracking: { sessionId: "qi-direct-fresh-run" } })
+    expect(useQuickIngestSessionStore.getState().session?.results.some(item => item.mediaId === 999)).toBe(false)
+    await act(async () => retry.resolve({ ok: true, results: [{ id: "B", status: "ok", mediaId: 2 }] }))
+  })
+
+  it("checks a consumed upload after reload without bytes, then opens its eventual saved media", async () => {
+    mocks.useActualResultsStep = true
+    const batch = await vi.importActual<typeof import("@/services/tldw/quick-ingest-batch")>("@/services/tldw/quick-ingest-batch")
+    mocks.submitQuickIngestBatch.mockImplementation(batch.submitQuickIngestBatch)
+    useQuickIngestSessionStore.getState().createDraftSession({
+      id: "draft-checked", currentStep: 4, lifecycle: "processing",
+      processingState: { status: "running", perItemProgress: [{ id: "scan", status: "queued", currentStage: "", estimatedRemaining: 0, progressPercent: 0 }], estimatedRemaining: 0, elapsed: 2 },
+      tracking: { mode: "webui-direct", planKey: "draft-checked", collectionId: "7", durableMode: "durable_collection" },
+      queueItems: [{ id: "scan", kind: "file", fileName: "scan.pdf", detectedType: "pdf", icon: "File", fileSize: 12, validation: { valid: true } }],
+    })
+    let saved = false
+    mocks.bgRequest.mockRejectedValueOnce(Object.assign(new Error("No receipt"), { status: 404 })).mockImplementation(({ method, path }) => {
+      if (method !== "GET" || !path.endsWith("/draft-checked/sources/scan")) throw new Error("Unexpected write")
+      return { collection_id: 7, source_key: "scan", dispatch_state: saved ? "settled" : "add", item: {
+        id: 72, retry_count: 0, collection_id: 7, source_url: "local://scan.pdf", status: saved ? "completed" : "processing", media_id: saved ? 391 : null, idempotency_key: "scan-key",
+      } }
+    })
+    render(<RuntimeIngestModal open onClose={vi.fn()} />)
+    fireEvent.click(await screen.findByRole("button", { name: "Check status" }))
+    expect(await screen.findByText("Could not refresh the collection source status.")).toHaveAttribute("role", "alert")
+    expect(mocks.bgRequest.mock.calls.map(([req]) => req.method)).toEqual(["GET"])
+    expect(useQuickIngestSessionStore.getState().session?.results).toHaveLength(0)
+    fireEvent.click(screen.getByRole("button", { name: "Check status" }))
+    await waitFor(() => expect(mocks.bgRequest).toHaveBeenCalledTimes(2))
+    expect(await screen.findByRole("region", { name: "Status unavailable" })).toBeVisible()
+    saved = true
+    fireEvent.click(screen.getByRole("button", { name: "Check status" }))
+    expect(await screen.findByRole("heading", { name: "1 saved to Media" })).toBeVisible()
+    fireEvent.click(screen.getByRole("button", { name: /open .*media/i }))
+    expect(mocks.navigate).toHaveBeenCalledWith("/media?id=391")
+    expect(mocks.bgUpload).not.toHaveBeenCalled()
+  })
+
   it("retains the live upload's reported stage and percent when its next job read returns 404", async () => {
     mocks.useActualAddContentStep = true
     mocks.useActualProcessingStep = true
@@ -1192,7 +1412,11 @@ describe("QuickIngestWizardModal session runtime", () => {
     mocks.startQuickIngestSession.mockImplementation(batch.startQuickIngestSession)
     mocks.submitQuickIngestBatch.mockImplementation(batch.submitQuickIngestBatch)
     mocks.bgUpload.mockResolvedValue({ batch_id: "retry-batch", jobs: [{ id: 78 }] })
-    mocks.bgRequest.mockResolvedValue({ ok: true, data: { status: "completed", result: { status: "Success", media_id: 78 } } })
+    mocks.bgRequest.mockImplementation(({ method, path }) => {
+      if (path === "/api/v1/media/collections") return { id: 7 }
+      if (path.endsWith("/items") && method === "POST") return { id: 81, collection_id: 7, status: "planned", idempotency_key: "source-81" }
+      return { ok: true, data: { status: "completed", result: { status: "Success", media_id: 78 } } }
+    })
     useQuickIngestSessionStore.getState().createDraftSession({
       ...createEmptyQuickIngestSession(), currentStep: 5, lifecycle: "completed",
       presetConfig: { ...resolvePresetMap().quick, common: { perform_analysis: false, perform_chunking: false, overwrite_existing: false }, storeRemote: true, reviewBeforeStorage: false, typeDefaults: { audio: { language: "fr", diarize: true } } },

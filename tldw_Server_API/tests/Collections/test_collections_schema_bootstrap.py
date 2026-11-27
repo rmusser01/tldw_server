@@ -71,6 +71,9 @@ def test_schema_memo_verifier_accepts_sqlite_mapping_rows(
         "reminder_tasks",
         "file_artifacts",
         "audio_studio_idempotency_keys",
+        "quick_ingest_plans",
+        "quick_ingest_plan_sources",
+        "quick_ingest_plan_attempts",
     ):
         backend.execute(f"CREATE TABLE {table} (id INTEGER PRIMARY KEY)")
 
@@ -142,3 +145,21 @@ def test_cached_postgres_adapter_does_not_write_sqlite_fts(
 def test_postgres_unique_predicate_preserves_operator_grouping(actual, expected, matched):
     """Catalog expressions must match structurally, including malformed-expression refusal."""
     assert _postgres_predicate_matches(actual, expected) is matched  # nosec B101 -- exact schema predicate admission.
+
+
+def test_pre_plan_sqlite_database_upgrades_without_rebinding_legacy_items(tmp_path):
+    backend = SQLiteBackend(DatabaseConfig(backend_type=BackendType.SQLITE, sqlite_path=str(tmp_path / "old.db")))
+    try:
+        old = CollectionsDatabase.from_backend("alice", backend)
+        collection = old.create_media_collection(name="Repeated", kind="conference")
+        item = old.add_media_collection_item(collection_id=collection.id, source_url="https://example.test")
+        backend.execute("DROP TABLE quick_ingest_plan_attempts")
+        backend.execute("DROP TABLE quick_ingest_plan_sources")
+        backend.execute("DROP TABLE quick_ingest_plans")
+        upgraded = CollectionsDatabase.from_backend("alice", backend)
+        new, rows = upgraded.put_quick_ingest_plan("new", {"name": "Repeated", "kind": "conference"},
+                                                  [("source", {"source_url": "https://example.test"})])
+        assert new != collection.id and rows["source"].id != item.id
+        assert upgraded.get_media_collection(collection.id).items[0] == item
+    finally:
+        backend.get_pool().close_all()

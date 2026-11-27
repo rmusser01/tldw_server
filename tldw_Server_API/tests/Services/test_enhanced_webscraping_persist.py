@@ -251,6 +251,7 @@ async def test_enhanced_webscraping_persist_repeated_real_repository_write_is_du
     assert first["stored_articles"] == 1
     assert second["status"] == "duplicate"
     assert second["media_ids"] == []
+    assert second["media_id"] == first["media_ids"][0]
     assert second["stored_articles"] == 0
     assert second["skipped_articles"] == 1
     assert second["duplicate_articles"] == 1
@@ -284,6 +285,7 @@ async def test_enhanced_webscraping_persist_uses_structured_extraction_duplicate
     )
 
     assert response["status"] == "duplicate"
+    assert response.get("media_id") is None
     assert response["media_ids"] == []
     assert response["stored_articles"] == 0
     assert response["skipped_articles"] == 1

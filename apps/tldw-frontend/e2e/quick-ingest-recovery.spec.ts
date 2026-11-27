@@ -91,7 +91,7 @@ for (const [device, width, height] of [['desktop', 1280, 800], ['mobile', 390, 8
     await dialog.getByRole('button', { name: 'Confirm and save 2 sources' }).click();
     await expect(dialog.getByRole('heading', { name: '2 saved to Media' })).toBeVisible();
     expect([...fixture.jobs.values()].map(job => job.source_url)).toEqual(items.map(item => item.source_url));
-    const submissions = fixture.requests.filter(request => request.method === 'POST' && request.path === '/api/v1/media/ingest/jobs');
+    const submissions = fixture.requests.filter(request => request.method === 'POST' && (request.path === '/api/v1/media/ingest/jobs' || request.path.endsWith('/dispatch/jobs')));
     expect(submissions.map(request => request.body.overwrite_existing)).toEqual([true, false]);
   });
 }
@@ -361,11 +361,50 @@ for (const width of [320, 390, 1280]) {
 
     await dialog.getByRole('button', { name: 'Save 1 source' }).click();
     await expect(dialog.getByRole('heading', { name: '1 saved to Media' })).toBeVisible();
-    const saved = fixture.requests.filter(r => r.path === '/api/v1/media/collections/21/items' && r.method === 'POST');
-    expect(saved.map(r => r.body)).toEqual([expect.objectContaining({
+    expect(fixture.collectionPlans.size).toBe(1);
+    const [plan] = fixture.collectionPlans.values();
+    expect([...plan.items.values()]).toEqual([expect.objectContaining({
       source_url: urls[0], title: 'Listening to tides', speaker: 'Maya Chen',
       track: 'Fieldwork', tags: ['workshop', 'coast', 'audio'],
     })]);
     expect([...fixture.jobs.values()].map(job => job.source_url)).toEqual([urls[0]]);
+  });
+}
+
+for (const [device, width] of [['desktop', 1280], ['mobile', 390]] as const) {
+  test(`reuses the same two collection sources after a lost setup response on ${device}`, async ({ page }, info) => {
+    await page.setViewportSize({ width, height: width < 600 ? 844 : 800 });
+    const fixture = await installBrowserFixture(page, { webUrl, processingPolls: 0 });
+    fixture.interruptPlanResponse = true;
+    const dialog = await openIngest(page);
+    const links = ['https://archive.example.org/talks/tides.mp4', 'https://archive.example.org/talks/birds.mp4'];
+    await addLinks(dialog, links);
+    await useQuickPreset(dialog);
+    await dialog.getByRole('button', { name: 'Hide settings' }).click();
+    await dialog.getByLabel('Collection name').fill('Coastal oral histories');
+    const titles = ['Estuary tides', 'Marsh birds'];
+    for (const [index, title] of titles.entries()) {
+      const group = dialog.getByRole('group', { name: 'Source ' + (index + 1), exact: true });
+      if (width < 600 && index > 0) await group.getByRole('button').click();
+      await group.getByLabel('Title override for item ' + (index + 1)).fill(title);
+    }
+    await dialog.getByRole('button', { name: 'Save 2 sources' }).click();
+    await expect.poll(() => fixture.collectionPlans.size).toBe(1);
+    const [original] = fixture.collectionPlans.values();
+    const originalSources = [...original.items].map(([key, item]) => [key, item.id, item.source_url]);
+    expect(originalSources).toHaveLength(2);
+    expect([...original.items.values()].map(item => item.title)).toEqual(titles);
+    await expect(dialog.getByRole('button', { name: 'Retry 2 failed sources' })).toBeVisible();
+    expect(fixture.jobs.size).toBe(0);
+    await capture(page, info, `collection-setup-interrupted-${device}`);
+
+    fixture.interruptPlanResponse = false;
+    await dialog.getByRole('button', { name: 'Retry 2 failed sources' }).click();
+    await expect(dialog.getByRole('heading', { name: '2 saved to Media' })).toBeVisible();
+    expect(fixture.collectionPlans.size).toBe(1);
+    expect([...original.items].map(([key, item]) => [key, item.id, item.source_url])).toEqual(originalSources);
+    expect([...fixture.jobs.values()].map(job => job.source_url).sort()).toEqual([...links].sort());
+    for (const title of titles) await expect(dialog.getByText(title, { exact: true })).toBeVisible();
+    await capture(page, info, `collection-setup-recovered-${device}`);
   });
 }
