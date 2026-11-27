@@ -452,6 +452,50 @@ describe("RunDetailDrawer stream lifecycle", () => {
     expect(fetchRunDetails).toHaveBeenCalledTimes(4)
   })
 
+  it.each([
+    ["global", (status: string) => ({ q: status })],
+    ["job-scoped", (status: string) => ({ job_id: 1, status })]
+  ] as const)("refreshes %s status-filtered pages when a hosted run completes", async (_label, filter) => {
+    vi.stubEnv("NEXT_PUBLIC_TLDW_DEPLOYMENT_MODE", "hosted")
+    vi.useFakeTimers()
+    let persistedRun = baseRunDetails
+    mocks.getRunDetailsMock.mockResolvedValueOnce(baseRunDetails).mockImplementationOnce(async () => {
+      persistedRun = { ...baseRunDetails, status: "succeeded" }
+      return persistedRun
+    })
+
+    const FilteredRunList = ({ status }: { status: string }) => {
+      const { data } = useWatchlistsQuery("runs", { page: 1, size: 20, ...filter(status) }, async () => {
+        const matches = persistedRun.status === status
+        return { items: matches ? [persistedRun] : [], total: matches ? 1 : 0 }
+      })
+      return <span data-testid={`filtered-${status}`}>{data?.total}:{data?.items[0]?.status}</span>
+    }
+
+    render(
+      <>
+        <FilteredRunList status="running" />
+        <FilteredRunList status="succeeded" />
+        <RunDetailDrawer open runId={10} onClose={vi.fn()} />
+      </>
+    )
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(1)
+    })
+    expect(screen.getByTestId("filtered-running")).toHaveTextContent("1:running")
+    expect(screen.getByTestId("filtered-succeeded")).toHaveTextContent("0:")
+
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(5_001)
+    })
+    expect(screen.getByText("Completed")).toBeInTheDocument()
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(1)
+    })
+    expect(screen.getByTestId("filtered-running")).toHaveTextContent("0:")
+    expect(screen.getByTestId("filtered-succeeded")).toHaveTextContent("1:succeeded")
+  })
+
   it.each(["closing the drawer", "turning off Live"])(
     "ignores an in-flight hosted refresh after %s",
     async (action) => {
