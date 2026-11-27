@@ -35,6 +35,7 @@ The Workbench verifies the active owner before sending, keeps one review write i
 Three Chromium tests passed, including desktop and mobile keyboard review on a 24-item fixture and the existing pack review smoke. The test captures before and after review board screenshots and an inline failure state. TypeScript, scoped ESLint, the Impeccable detector, pre-commit, and independent review passed.
 
 The full VN and API client run passed 400 tests. The two Task69 legacy generation-recovery cases timed out waiting for the storage warning on the account and server variants. The same two cases failed with the same assertion in the broad run on the unmodified dev snapshot at 9dc8ad084e. Production edits use TypeScript.
+Pull request [#3666](https://github.com/rmusser01/tldw_server/pull/3666) targets dev.
 <!-- SECTION:IMPLEMENTATION_NOTES:END -->
 
 ## Final Summary
