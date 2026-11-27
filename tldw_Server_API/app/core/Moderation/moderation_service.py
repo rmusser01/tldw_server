@@ -30,6 +30,7 @@ from loguru import logger
 
 from tldw_Server_API.app.core.config import load_and_log_configs, load_comprehensive_config
 from tldw_Server_API.app.core.config_sections.moderation import parse_surface_enabled
+from tldw_Server_API.app.core.Moderation.surfaces import KNOWN_SURFACES
 from tldw_Server_API.app.core.Moderation.models import (
     ModerationEvaluationResult,
     ModerationPolicy,
@@ -59,6 +60,8 @@ _MODERATION_NONCRITICAL_EXCEPTIONS = (
     json.JSONDecodeError,
     re.error,
 )
+
+_WARNED_UNKNOWN_SURFACES: set[str] = set()
 
 
 @dataclass(frozen=True)
@@ -122,11 +125,22 @@ class ModerationService:
                 max_replacements_per_pattern=self._max_replacements_per_pattern,
             )
 
+    @staticmethod
+    def _known_surface(surface: str) -> bool:
+        """True for a registered surface id; an unknown id warns once per process and is ignored."""
+        if surface in KNOWN_SURFACES:
+            return True
+        if surface not in _WARNED_UNKNOWN_SURFACES:
+            _WARNED_UNKNOWN_SURFACES.add(surface)
+            logger.warning("Ignoring unknown moderation surface key 'surface.{}' in [Moderation]", surface)
+        return False
+
     def _load_global_policy(self) -> ModerationPolicy:
         mod_cfg = self._load_moderation_config_section()
         resolved = self._resolve_moderation_config(mod_cfg)
         try:
-            self._surface_enabled = parse_surface_enabled(mod_cfg)
+            raw_surfaces = parse_surface_enabled(mod_cfg)
+            self._surface_enabled = {k: v for k, v in raw_surfaces.items() if self._known_surface(k)}
         except ValueError as exc:
             logger.warning("Ignoring [Moderation] surface keys: {}", exc)
             self._surface_enabled = {}

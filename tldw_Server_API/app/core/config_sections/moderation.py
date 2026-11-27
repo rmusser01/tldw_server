@@ -5,10 +5,6 @@ import os
 from collections.abc import Mapping
 from dataclasses import dataclass
 
-from loguru import logger
-
-from tldw_Server_API.app.core.Moderation.surfaces import KNOWN_SURFACES
-
 from .precedence import resolve
 from .types import ConfigParserLike
 
@@ -38,7 +34,6 @@ class ModerationConfig:
 
 
 _SURFACE_PREFIX = "surface."
-_warned_unknown_surfaces: set[str] = set()
 
 
 def _get_raw(
@@ -68,19 +63,12 @@ def _parse_bool(raw: object, *, option: str, default: bool) -> bool:
 
 
 def parse_surface_enabled(options: Mapping[str, object]) -> dict[str, bool]:
-    """Read ``surface.<id> = true|false`` entries; an unknown id warns once and is ignored."""
+    """Read ``surface.<id> = true|false`` entries as raw ids; the registry check lives in ModerationService."""
     out: dict[str, bool] = {}
     for key, raw in options.items():
         name = str(key).strip().lower()
-        if not name.startswith(_SURFACE_PREFIX):
-            continue
-        surface = name[len(_SURFACE_PREFIX):]
-        if surface not in KNOWN_SURFACES:
-            if surface not in _warned_unknown_surfaces:
-                _warned_unknown_surfaces.add(surface)
-                logger.warning("Ignoring unknown moderation surface key {!r} in [Moderation]", key)
-            continue
-        out[surface] = _parse_bool(raw, option=name, default=True)
+        if name.startswith(_SURFACE_PREFIX):
+            out[name[len(_SURFACE_PREFIX):]] = _parse_bool(raw, option=name, default=True)
     return out
 
 
