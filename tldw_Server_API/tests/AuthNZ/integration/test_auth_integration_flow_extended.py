@@ -11,26 +11,33 @@ from tldw_Server_API.tests.helpers.app_main_state import reload_app_main
 pytestmark = pytest.mark.integration
 
 
+@pytest.fixture
+def stub_mfa_module(monkeypatch):
+    """A stub ``mfa_service`` in ``sys.modules`` for one test, removed at teardown.
+
+    Left in place it makes every later test's MFA lookup fail, so MFA sign-in never asks for a second
+    factor (TASK-15679).
+    """
+
+    class _StubMFA:
+        def generate_secret(self) -> str:
+            return "IGNORED"
+
+    mfa_stub_mod = types.ModuleType("mfa_service")
+    mfa_stub_mod.get_mfa_service = lambda: _StubMFA()
+    monkeypatch.setitem(sys.modules, "tldw_Server_API.app.core.AuthNZ.mfa_service", mfa_stub_mod)
+
+
 @pytest.mark.asyncio
-async def test_reset_password_integration_success(monkeypatch):
+async def test_reset_password_integration_success(monkeypatch, stub_mfa_module):
     """End-to-end reset-password via dependency overrides of JWT and DB.
 
     - Uses the real JWTService to mint/verify a reset token
     - Overrides DB transaction to accept queries
     - Forces Postgres code path in the endpoint for simpler branches
     - Overrides password service to accept and hash new password
+    - The MFA import path is stubbed (stub_mfa_module) before the app reload
     """
-    # Ensure MFA import path is stubbed prior to auth import
-    class _StubMFA:
-        def generate_secret(self) -> str:
-            return "IGNORED"
-
-    mfa_stub_mod = types.ModuleType("mfa_service")
-    setattr(mfa_stub_mod, "get_mfa_service", lambda: _StubMFA())
-    # monkeypatch, not an assignment: a stub left in sys.modules makes every later test's MFA lookup
-    # fail, so MFA sign-in never asks for a second factor (TASK-15679).
-    monkeypatch.setitem(sys.modules, 'tldw_Server_API.app.core.AuthNZ.mfa_service', mfa_stub_mod)
-
     monkeypatch.setenv("AUTH_MODE", "multi_user")
     monkeypatch.setenv("JWT_SECRET_KEY", "test-secret-key-for-testing-only-needs-32-chars-minimum")
     from tldw_Server_API.app.core.AuthNZ.settings import reset_settings
