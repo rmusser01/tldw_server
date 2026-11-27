@@ -35,6 +35,7 @@ Static library instructions retain readable copy without a live announcement. Ac
 Passed 72 focused page, API, route, shared-primitive, and guard tests, plus the full shared-UI typecheck, scoped ESLint and diff whitespace. Bandit is inapplicable to the TypeScript, JSON and Markdown scope.
 Verified the WebUI library guidance and New Template action before and after at 1440x900 and 390x844 with fixtures. The rendered phone guidance measured 13.89:1 contrast. A freshly built Chrome extension passed the same route and builder probe in an isolated profile against a loopback fixture server. Browser artifacts are in /private/tmp/tldw-tracker-1670.x50vaO.
 Read-only three-way merge of the only overlapping file, the baseline JSON, preserved all deletions from this slice and PR #3671. The public #1670 issue remains open for the rest of the migration.
+Pull request https://github.com/rmusser01/tldw_server/pull/3672
 <!-- SECTION:IMPLEMENTATION_NOTES:END -->
 
 ## Final Summary
