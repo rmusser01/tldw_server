@@ -333,3 +333,20 @@ async def test_take_back_after_the_newer_address_unlocked_first_leaves_the_intru
     assert await keys.validate_api_key(created["key"]) is None
     assert await keys.validate_api_key(recent["key"]) is None
     assert [took_back["took_back_address"] for _event, took_back in unlock_audit] == [False, True]
+
+
+async def test_list_users_carries_the_lock_pg(lock_db) -> None:
+    from tldw_Server_API.app.core.AuthNZ.account_lock import set_lock
+    from tldw_Server_API.app.core.AuthNZ.password_service import hash_password
+    from tldw_Server_API.app.core.AuthNZ.repos.users_repo import AuthnzUsersRepo
+    from tldw_Server_API.tests.AuthNZ_SQLite._user_fixtures import create_authnz_test_user
+
+    other_id = await create_authnz_test_user(
+        lock_db.pool, username="other", email="other@example.com", password_hash=hash_password(OWNER_PASSWORD)
+    )
+    await set_lock(lock_db.user_id)
+    users, total = await AuthnzUsersRepo(lock_db.pool).list_users(offset=0, limit=10)
+    by_id = {u["id"]: u for u in users}
+    assert total == 2
+    assert by_id[lock_db.user_id]["security_locked_at"] is not None
+    assert by_id[other_id]["security_locked_at"] is None

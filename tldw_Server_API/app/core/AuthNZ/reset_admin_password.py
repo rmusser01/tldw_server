@@ -20,6 +20,7 @@ from loguru import logger
 # Ensure project root is importable
 sys.path.insert(0, str(Path(__file__).parent.parent.parent.parent.parent))
 
+from tldw_Server_API.app.core.AuthNZ.account_lock import clear_lock
 from tldw_Server_API.app.core.AuthNZ.password_service import PasswordService
 from tldw_Server_API.app.core.AuthNZ.settings import get_settings
 from tldw_Server_API.app.core.DB_Management.Users_DB import get_users_db
@@ -64,6 +65,8 @@ async def reset_user_password(
 
         # Update password in database (works for both SQLite and PostgreSQL)
         await users_db.update_user(user_id, password_hash=new_hash)
+        # The operator at the console is the recovery path for a locked account.
+        await clear_lock(user_id)
 
         print(f"[reset-password] Password updated for user '{username}' (id={user_id}, role={user_role}).")
         return True

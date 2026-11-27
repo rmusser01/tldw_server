@@ -14,6 +14,7 @@ from tldw_Server_API.app.api.v1.schemas.admin_schemas import (
     AdminMfaRequirementRequest,
     AdminPasswordResetRequest,
     AdminUserCreateRequest,
+    SecurityUnlockRequest,
     UserUpdateRequest,
     unwrap_optional_secret,
 )
@@ -21,6 +22,7 @@ from tldw_Server_API.app.core.Audit.unified_audit_service import (
     AuditEventCategory,
     AuditEventType,
 )
+from tldw_Server_API.app.core.AuthNZ.account_lock import clear_lock, write_account_audit
 from tldw_Server_API.app.core.AuthNZ.database import get_db_pool
 from tldw_Server_API.app.core.AuthNZ.exceptions import (
     DuplicateUserError,
@@ -378,7 +380,10 @@ async def update_user(
             require_hierarchy=True,
         )
         reason: str | None = None
-        if request.role is not None or request.is_active is not None:
+        own_email_change = (
+            request.email is not None and principal.user_id is not None and int(principal.user_id) == int(user_id)
+        )
+        if request.role is not None or request.is_active is not None or own_email_change:
             reason = await verify_privileged_action(
                 principal,
                 db,
@@ -421,17 +426,6 @@ async def update_user(
             updates.append(f"is_verified = ${param_count}" if is_pg else "is_verified = ?")
             params.append(request.is_verified)
             profile_visible_fields.append("is_verified")
-
-        if request.is_locked is not None:
-            param_count += 1
-            updates.append(f"is_locked = ${param_count}" if is_pg else "is_locked = ?")
-            params.append(request.is_locked)
-
-            if not request.is_locked:
-                param_count += 1
-                updates.append(f"failed_login_attempts = ${param_count}" if is_pg else "failed_login_attempts = ?")
-                params.append(0)
-                updates.append("locked_until = NULL")
 
         quota_requested = "storage_quota_mb" in request.model_fields_set
 
@@ -542,6 +536,45 @@ async def update_user(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail="Failed to update user",
         ) from e
+
+
+async def security_unlock(
+    principal: AuthPrincipal,
+    user_id: int,
+    request: SecurityUnlockRequest,
+    password_service,
+) -> dict[str, bool]:
+    """Unlock an account its owner locked; ``unlocked`` is False when it was not locked.
+
+    No write transaction may be open while ``clear_lock`` runs (SQLite would wait out its busy timeout), so the
+    step-up check reads on a short-lived connection that is released first.
+    """
+    await admin_scope_service.enforce_admin_user_scope(principal, user_id, require_hierarchy=True)
+    async with (await get_db_pool()).acquire() as conn:
+        reason = await verify_privileged_action(
+            principal,
+            conn,
+            password_service,
+            reason=request.reason,
+            admin_password=unwrap_optional_secret(request.admin_password),
+            admin_reauth_token=unwrap_optional_secret(request.admin_reauth_token),
+        )
+    unlocked_at = await clear_lock(user_id)
+    if unlocked_at is None:
+        return {"unlocked": False}
+    await write_account_audit(AuditEventType.AUTH_ACCOUNT_UNLOCKED, user_id=user_id, metadata={"via": "admin"})
+    await _emit_admin_account_audit_event(
+        actor_id=principal.user_id,
+        target_user_id=user_id,
+        event_type=AuditEventType.AUTH_ACCOUNT_UNLOCKED,
+        category=AuditEventCategory.AUTHORIZATION,
+        resource_type="user_account",
+        resource_id=str(user_id),
+        action="admin.user.security_unlock",
+        metadata={"reason": reason},
+    )
+    logger.info("Admin unlocked account user_id={}", user_id)
+    return {"unlocked": True}
 
 
 async def reset_user_password(

@@ -357,7 +357,8 @@ class AuthnzUsersRepo:
                 offset_pos = param_count + 2
                 query_template = """
                     SELECT DISTINCT users.id, users.uuid, users.username, users.email, users.role, users.is_active, users.is_verified,
-                           users.two_factor_enabled, created_at, last_login, storage_quota_mb, storage_used_mb
+                           users.two_factor_enabled, created_at, last_login, storage_quota_mb, storage_used_mb,
+                           users.security_locked_at
                     FROM users{join_clause}{where_clause}
                     ORDER BY users.created_at DESC
                     LIMIT ${limit_pos} OFFSET ${offset_pos}
@@ -368,7 +369,8 @@ class AuthnzUsersRepo:
             else:
                 query_template = """
                     SELECT DISTINCT users.id, users.uuid, users.username, users.email, users.role, users.is_active, users.is_verified,
-                           users.two_factor_enabled, created_at, last_login, storage_quota_mb, storage_used_mb
+                           users.two_factor_enabled, created_at, last_login, storage_quota_mb, storage_used_mb,
+                           users.security_locked_at
                     FROM users{join_clause}{where_clause}
                     ORDER BY users.created_at DESC
                     LIMIT ? OFFSET ?
@@ -394,6 +396,7 @@ class AuthnzUsersRepo:
                         "last_login": r.get("last_login"),
                         "storage_quota_mb": int(r.get("storage_quota_mb") or 0),
                         "storage_used_mb": float(r.get("storage_used_mb") or 0.0),
+                        "security_locked_at": r.get("security_locked_at"),
                     }
                 else:
                     user_dict = {
@@ -409,6 +412,7 @@ class AuthnzUsersRepo:
                         "last_login": row[9],
                         "storage_quota_mb": int(row[10] or 0),
                         "storage_used_mb": float(row[11] or 0.0),
+                        "security_locked_at": row[12],
                     }
                 users.append(user_dict)
 
