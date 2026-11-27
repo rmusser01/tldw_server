@@ -192,6 +192,85 @@ async def test_sign_in_waits_for_an_uncommitted_lock_and_is_refused_pg(lock_db) 
     assert await lock_db.pool.fetchval("SELECT COUNT(*) FROM sessions WHERE user_id = $1", lock_db.user_id) == 0
 
 
+async def _apps_db(lock_db) -> SimpleNamespace:
+    """``lock_db`` on the pool of the running loop. Run on the app's loop (``client.portal.call``): its
+    background pollers recreate a pool bound to another loop, which would close one in use."""
+    from tldw_Server_API.app.core.AuthNZ.database import get_db_pool
+
+    return SimpleNamespace(pool=await get_db_pool(), user_id=lock_db.user_id, backend="postgres")
+
+
+@pytest.mark.asyncio
+async def test_take_back_waits_for_an_in_flight_identity_write_and_then_overrides_it_pg(
+    isolated_test_environment, lock_db
+) -> None:
+    """The intruder's email and password change passed its checks before the owner's take-back began; the
+    newer address had unlocked first, so the account is not locked. A pool transaction plays that request."""
+    from tldw_Server_API.app.core.AuthNZ.account_lock import assert_identity_write_allowed, clear_lock
+    from tldw_Server_API.app.core.AuthNZ.password_service import PasswordService, hash_password
+    from tldw_Server_API.app.core.DB_Management.user_profile_writes import update_user_email
+    from tldw_Server_API.tests.AuthNZ_SQLite.test_account_lock_schema_sqlite import (
+        NEW,
+        _move_email,
+        _password_verifies,
+        _row,
+    )
+
+    client, _db_name = isolated_test_environment
+    intruder_password = "Intruder-Pass-2026!"
+
+    async def _race() -> tuple:
+        db = await _apps_db(lock_db)
+        await _move_email(db, NEW)  # OLD is the previous address for 7 days
+        take_back = None
+        try:
+            async with db.pool.transaction() as request:
+                await assert_identity_write_allowed(request, db.user_id, is_postgres=True)
+                take_back = asyncio.create_task(clear_lock(db.user_id, take_back=OLD))
+                await asyncio.sleep(0.5)
+                waited = not take_back.done()
+                await update_user_email(request, backend="postgres", user_id=db.user_id, email="third@example.com")
+                await PasswordService().set_password(
+                    db.user_id, hash_password(intruder_password), request, is_postgres=True
+                )
+            valid_after = await take_back
+        finally:
+            if take_back is not None:
+                take_back.cancel()
+                await asyncio.gather(take_back, return_exceptions=True)
+        return await _row(db), await _password_verifies(db, intruder_password), waited, valid_after
+
+    row, intruder_password_works, waited, valid_after = client.portal.call(_race)
+    assert (row["email"], row["security_locked_at"]) == (OLD, None)
+    assert intruder_password_works is False
+    assert waited is True and valid_after is not None
+
+
+@pytest.mark.asyncio
+async def test_identity_write_guard_lets_a_session_revoke_on_another_connection_through_pg(
+    isolated_test_environment, lock_db
+) -> None:
+    """A password reset on PostgreSQL revokes sessions on another connection while it holds the guard's row
+    lock. The blacklist rows' foreign key takes KEY SHARE on the users row, which FOR UPDATE would block until
+    the request commits: the request would wait on itself."""
+    from tldw_Server_API.app.core.AuthNZ.account_lock import assert_identity_write_allowed
+    from tldw_Server_API.app.core.AuthNZ.token_blacklist import get_token_blacklist
+    from tldw_Server_API.tests.AuthNZ_SQLite.test_account_lock_schema_sqlite import _live_session_count, _session
+
+    client, _db_name = isolated_test_environment
+
+    async def _reset_with_inline_revoke() -> tuple[int, int]:
+        db = await _apps_db(lock_db)
+        await _session(db, "before-the-reset")
+        async with db.pool.transaction() as request:
+            await assert_identity_write_allowed(request, db.user_id, is_postgres=True)
+            await asyncio.wait_for(get_token_blacklist().revoke_all_user_tokens(db.user_id, "Password reset"), 5)
+        blacklisted = await db.pool.fetchval("SELECT COUNT(*) FROM token_blacklist WHERE user_id = $1", db.user_id)
+        return blacklisted, await _live_session_count(db)
+
+    assert client.portal.call(_reset_with_inline_revoke) == (2, 0)
+
+
 async def _pg_key(lock_db) -> tuple[dict, "APIKeyManager"]:
     from tldw_Server_API.app.core.AuthNZ.api_key_manager import APIKeyManager
 

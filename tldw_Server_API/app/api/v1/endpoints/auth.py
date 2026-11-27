@@ -90,6 +90,7 @@ from tldw_Server_API.app.core.AuthNZ.account_lock import (
     StaleCredentialError,
     TakeBackUnavailableError,
     assert_account_not_locked,
+    assert_identity_write_allowed,
     find_locked_user_by_previous_address,
     is_security_locked,
     magic_link_email_allowed,
@@ -2789,18 +2790,18 @@ async def reset_password(
                 detail="This reset token has already been used",
             )
 
-        # A locked account (423), a token from before the last unlock, or one for an address the
-        # account no longer has (400). No row (an inactive user): as before.
-        user = await _auth_service.fetch_active_user_by_id(db, user_id)
-        if user:
-            try:
-                assert_account_not_locked(user, token_iat=payload.get("iat"))
-            except StaleCredentialError:
-                raise HTTPException(
-                    status_code=status.HTTP_400_BAD_REQUEST, detail="Invalid or expired reset token"
-                ) from None
-            if str(payload.get("email") or "").strip().lower() != str(user.get("email") or "").strip().lower():
-                raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Invalid or expired reset token")
+        # Lock the user's row until this reset commits, then refuse a locked account (423), a token from
+        # before the last unlock, or one for an address the account no longer has (400).
+        is_pg = await is_postgres_backend()
+        try:
+            await assert_identity_write_allowed(db, user_id, is_postgres=is_pg, token_iat=payload.get("iat"))
+        except StaleCredentialError:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST, detail="Invalid or expired reset token"
+            ) from None
+        user = await _auth_service.fetch_active_user_by_id(db, user_id)  # no row (an inactive user): as before
+        if user and str(payload.get("email") or "").strip().lower() != str(user.get("email") or "").strip().lower():
+            raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Invalid or expired reset token")
 
         # Validate new password (service raises WeakPasswordError on failure)
         try:

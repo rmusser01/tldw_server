@@ -41,7 +41,10 @@ from tldw_Server_API.app.core.AuthNZ.repos.api_keys_repo import AuthnzApiKeysRep
 from tldw_Server_API.app.core.AuthNZ.repos.federated_identity_repo import FederatedIdentityRepo
 from tldw_Server_API.app.core.AuthNZ.repos.users_repo import AuthnzUsersRepo
 from tldw_Server_API.app.core.AuthNZ.settings import get_settings
-from tldw_Server_API.app.core.DB_Management.user_profile_writes import restore_previous_email
+from tldw_Server_API.app.core.DB_Management.user_profile_writes import (
+    read_lock_state_for_identity_write,
+    restore_previous_email,
+)
 from tldw_Server_API.app.core.exceptions import ServiceInitializationError
 from tldw_Server_API.app.core.Utils.iso_datetime import parse_iso_utc
 
@@ -62,6 +65,7 @@ __all__ = [
     "StaleCredentialError",
     "TakeBackUnavailableError",
     "assert_account_not_locked",
+    "assert_identity_write_allowed",
     "clear_lock",
     "find_locked_user_by_previous_address",
     "is_security_locked",
@@ -115,6 +119,23 @@ def assert_account_not_locked(user: Mapping[str, Any], token_iat: int | float | 
     valid_after = parse_iso_utc(user.get("credentials_valid_after"))
     if valid_after is not None and token_iat < int(valid_after.timestamp()):
         raise StaleCredentialError()
+
+
+async def assert_identity_write_allowed(
+    db_conn: Any, user_id: int, *, is_postgres: bool, token_iat: int | float | None = None
+) -> None:
+    """Lock the user's row on the request transaction and apply the lock rule to it.
+
+    Call it on the transaction that writes an email or password, before reading the credential that allows
+    the write. A lock or take-back then waits for this request to commit and overrides what it wrote, or this
+    request sees the lock (``AccountSecurityLockedError``) or the take-back's new password hash and
+    ``credentials_valid_after`` (``StaleCredentialError`` for a ``token_iat`` before it). No row: returns.
+    """
+    state = await read_lock_state_for_identity_write(
+        db_conn, backend="postgres" if is_postgres else "sqlite", user_id=int(user_id)
+    )
+    if state is not None:
+        assert_account_not_locked(state, token_iat=token_iat)
 
 
 async def is_user_security_locked(user_id: int) -> bool:

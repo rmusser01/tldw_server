@@ -132,13 +132,16 @@ async def test_reset_password_weak_and_success(monkeypatch):
         async def fetchval(self, *args, **kwargs):
             return None
 
-        async def execute(self, *args, **kwargs):
+        async def execute(self, query, *args, **kwargs):
+            # The account-lock read (security_locked_at, credentials_valid_after): not locked.
+            row = (None, None) if "security_locked_at" in str(query) else (1, None)
+
             class _C:
                 lastrowid = 1
 
                 async def fetchone(self):
                     # Simulate existing reset token record
-                    return (1, None)
+                    return row
 
             return _C()
 

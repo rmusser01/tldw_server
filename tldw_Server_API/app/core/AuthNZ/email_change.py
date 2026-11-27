@@ -8,7 +8,7 @@ from typing import Any
 import jinja2
 from loguru import logger
 
-from tldw_Server_API.app.core.AuthNZ import password_service, settings
+from tldw_Server_API.app.core.AuthNZ import account_lock, password_service, settings
 from tldw_Server_API.app.core.AuthNZ.email_service import get_email_service
 from tldw_Server_API.app.core.AuthNZ.transaction_hooks import defer_until_after_commit
 from tldw_Server_API.app.core.DB_Management.user_profile_writes import email_recently_released_by_another_user
@@ -40,6 +40,9 @@ async def authorize_own_email_change(
 ) -> None:
     """Return when the user may change their own email address; raise ``EmailChangeRefused`` otherwise.
 
+    A locked account raises ``AccountSecurityLockedError`` (423); the user's row stays locked for the
+    rest of ``db_conn``'s transaction (TASK-15671).
+
     Reads only on ``db_conn``: a profile update must fit in its existing PostgreSQL transaction slot.
     ``new_emails`` holds every ``identity.email`` value in the request; one that differs from the
     stored address (ignoring case and surrounding whitespace) requires the password.
@@ -47,6 +50,8 @@ async def authorize_own_email_change(
     if settings.is_single_user_mode():
         # The API key is the only credential in single-user mode, so there is no password to ask for.
         return
+    # A lock or take-back that starts now waits for this transaction; one that committed is seen (423).
+    await account_lock.assert_identity_write_allowed(db_conn, user_id, is_postgres=is_postgres)
     email, password_hash = await password_service.fetch_email_and_password_hash(
         db_conn, user_id, is_postgres=is_postgres
     )

@@ -758,6 +758,7 @@ async def change_password(
     try:
         user_context = await _require_principal_active_verified(principal)
         user_id = int(user_context["id"])
+        await account_lock.assert_identity_write_allowed(db, user_id, is_postgres=await _database.is_postgres_backend())
         # Prefer the request-scoped DB transaction for compatibility with legacy
         # tests that override get_db_transaction.
         password_hash = await _fetch_password_hash_for_user(db, user_id)

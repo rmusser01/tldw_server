@@ -3,14 +3,23 @@
 from __future__ import annotations
 
 import json
+from contextlib import contextmanager
 from datetime import datetime, timedelta
 
 import pytest
+from fastapi import Depends
 
+from tldw_Server_API.app.api.v1.API_Deps.auth_deps import (
+    get_auth_principal,
+    get_password_service_dep,
+    require_expected_user,
+)
 from tldw_Server_API.app.core.Audit.unified_audit_service import AuditEventType
 from tldw_Server_API.app.core.AuthNZ import api_key_audit
 from tldw_Server_API.app.core.AuthNZ.account_lock import AccountSecurityLockedError, set_lock
 from tldw_Server_API.app.core.AuthNZ.database import get_db_pool
+from tldw_Server_API.app.core.AuthNZ.email_change import authorize_own_email_change
+from tldw_Server_API.app.core.AuthNZ.password_service import get_password_service
 from tldw_Server_API.app.core.AuthNZ.jwt_service import get_jwt_service
 from tldw_Server_API.app.core.AuthNZ.repos.sessions_repo import AuthnzSessionsRepo
 from tldw_Server_API.app.core.AuthNZ.session_manager import get_session_manager
@@ -208,6 +217,68 @@ async def test_reset_token_still_works_for_an_unlocked_account(two_user_client) 
 
 async def test_reset_password_works_as_the_first_blacklist_use_of_the_process(two_user_client) -> None:
     await _reset_signs_alice_out(two_user_client, cold_blacklist=True)
+
+
+@contextmanager
+def _overridden(ctx, dependency, override):
+    ctx.client.app.dependency_overrides[dependency] = override
+    try:
+        yield
+    finally:
+        ctx.client.app.dependency_overrides.pop(dependency, None)
+
+
+async def _email(user_id: int) -> str:
+    return (await (await get_db_pool()).fetchone("SELECT email FROM users WHERE id = ?", user_id))["email"]
+
+
+async def test_change_password_started_before_a_lock_is_refused_at_its_write(two_user_client) -> None:
+    """The lock lands after the request is signed in and before its transaction begins (the route resolves
+    the password service between the two)."""
+    ctx = two_user_client
+    tokens = login(ctx.client, "alice", ctx.password)
+    before = await _password_hash(ctx.alice_id)
+
+    async def _lock_then_the_password_service():
+        await set_lock(ctx.alice_id)
+        return get_password_service()
+
+    with _overridden(ctx, get_password_service_dep, _lock_then_the_password_service):
+        response = ctx.client.post(
+            "/api/v1/users/change-password",
+            json={"current_password": ctx.password, "new_password": NEW_PASSWORD},
+            headers=bearer(tokens),
+        )
+    assert_locked(response)
+    assert await _password_hash(ctx.alice_id) == before
+
+
+async def test_email_change_is_refused_while_locked(two_user_client) -> None:
+    """At the route (the lock lands between sign-in and the transaction: ``require_expected_user`` resolves
+    there), then the gate itself on a transaction of the now locked account."""
+    ctx = two_user_client
+    tokens = login(ctx.client, "alice", ctx.password)
+
+    async def _lock_once_signed_in(principal=Depends(get_auth_principal)) -> None:
+        await set_lock(ctx.alice_id)
+
+    with _overridden(ctx, require_expected_user, _lock_once_signed_in):
+        response = ctx.client.patch(
+            PROFILE_ROUTE,
+            json={
+                "updates": [{"key": "identity.email", "value": "alice2@example.com"}],
+                "current_password": ctx.password,
+            },
+            headers=bearer(tokens),
+        )
+    assert_locked(response)
+    assert await _email(ctx.alice_id) == "alice@example.com"
+    async with (await get_db_pool()).transaction() as conn:
+        with pytest.raises(AccountSecurityLockedError):
+            await authorize_own_email_change(
+                db_conn=conn, is_postgres=False, user_id=ctx.alice_id,
+                new_emails=("alice2@example.com",), current_password=ctx.password,
+            )
 
 
 async def test_admin_cannot_impersonate_a_locked_user(two_user_client) -> None:

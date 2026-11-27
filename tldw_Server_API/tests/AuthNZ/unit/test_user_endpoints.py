@@ -122,6 +122,8 @@ class TestUserEndpoints:
         # Setup mock connection with proper transaction context
         mock_conn = AsyncMock()
         mock_conn.fetchval = AsyncMock(return_value=test_user_copy["password_hash"])
+        # The account-lock read (PostgreSQL branch): the row is not locked.
+        mock_conn.fetchrow = AsyncMock(return_value={"security_locked_at": None, "credentials_valid_after": None})
         mock_conn.execute = AsyncMock()
         mock_conn.commit = AsyncMock()
 
@@ -179,6 +181,8 @@ class TestUserEndpoints:
         # Setup mock connection with proper transaction context
         mock_conn = AsyncMock()
         mock_conn.fetchval = AsyncMock(return_value=test_user_copy["password_hash"])
+        # The account-lock read (PostgreSQL branch): the row is not locked.
+        mock_conn.fetchrow = AsyncMock(return_value={"security_locked_at": None, "credentials_valid_after": None})
 
         # Mock the transaction context manager
         mock_db_pool.transaction.return_value.__aenter__.return_value = mock_conn
@@ -557,8 +561,12 @@ async def test_change_password_repo_lookup_log_is_sanitized(monkeypatch):
         def __init__(self) -> None:
             self.statements: list[tuple[str, tuple[object, ...]]] = []
 
-        async def execute(self, statement: str, *args: object) -> None:
+        async def execute(self, statement: str, *args: object) -> "_Db":
             self.statements.append((statement, args))
+            return self
+
+        async def fetchone(self) -> tuple[None, None]:
+            return (None, None)  # the account-lock read: not locked
 
     async def _fake_require_principal_active_verified(_principal):
         return {"id": 7, "username": "alice"}
@@ -591,8 +599,12 @@ async def test_change_password_repo_lookup_log_is_sanitized(monkeypatch):
 
     assert response.message == "Password changed successfully"
     assert response.details == {"user_id": 7}
-    # The password write and its history entry are PasswordService.set_password's job.
-    assert db.statements == [("set_password", (7, "new-hash"))]
+    # The lock read on the request transaction (it locks the row), then the password write and its history
+    # entry, which are PasswordService.set_password's job.
+    assert db.statements == [
+        ("SELECT security_locked_at, credentials_valid_after FROM users WHERE id = ?", ((7,),)),
+        ("set_password", (7, "new-hash")),
+    ]
     assert logger_stub.debugs == ["User repo lookup skipped for password change"]
     assert "repo lookup exploded" not in str(logger_stub.debugs)
     assert "/private/users.db" not in str(logger_stub.debugs)

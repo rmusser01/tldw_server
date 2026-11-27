@@ -88,6 +88,32 @@ async def update_user_email(
     )
 
 
+async def read_lock_state_for_identity_write(connection: Any, *, backend: str, user_id: int) -> dict[str, Any] | None:
+    """The user's ``security_locked_at`` and ``credentials_valid_after``, read on the caller's transaction.
+
+    On PostgreSQL the row stays locked until that transaction ends, so an account lock or take-back (whose
+    first write updates this row) waits for it. ``FOR NO KEY UPDATE``, not ``FOR UPDATE``: the latter also
+    blocks the ``KEY SHARE`` of a foreign-key insert on another connection, and the password reset revokes
+    sessions (blacklist rows) on one while it holds this lock. On SQLite the request transaction already holds
+    the write lock. None when there is no row (TASK-15671).
+    """
+    if backend == "postgres":
+        row = await connection.fetchrow(
+            "SELECT security_locked_at, credentials_valid_after FROM users WHERE id = $1 FOR NO KEY UPDATE",
+            user_id,
+        )
+    else:
+        cursor = await connection.execute(
+            "SELECT security_locked_at, credentials_valid_after FROM users WHERE id = ?", (user_id,)
+        )
+        row = await cursor.fetchone()
+    if not row:
+        return None
+    if isinstance(row, dict):
+        return {key: row.get(key) for key in ("security_locked_at", "credentials_valid_after")}
+    return {"security_locked_at": row[0], "credentials_valid_after": row[1]}
+
+
 async def email_recently_released_by_another_user(
     db_conn: Any, emails: Sequence[str], *, user_id: int, is_postgres: bool
 ) -> bool:
