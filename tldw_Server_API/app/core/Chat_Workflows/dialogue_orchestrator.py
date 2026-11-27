@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+from functools import partial
 from typing import Any, Awaitable, Callable
 
 from tldw_Server_API.app.core.Chat.chat_orchestrator import chat_api_call_async
@@ -17,7 +18,7 @@ class ChatWorkflowDialogueOrchestrator:
         *,
         llm_caller: Callable[..., Awaitable[Any]] | None = None,
     ) -> None:
-        self._llm_caller = llm_caller or chat_api_call_async
+        self._llm_caller = llm_caller or partial(chat_api_call_async, llm_surface="chat.dialogue_workflows")
 
     async def run_round(
         self,

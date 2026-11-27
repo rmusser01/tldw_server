@@ -19,9 +19,11 @@ from tldw_Server_API.app.core.Chat.chat_target_resolution import ResolvedChatTar
 from tldw_Server_API.app.core.DB_Management.media_db import api as media_db_api
 from tldw_Server_API.app.core.DB_Management.scope_context import scoped_context
 from tldw_Server_API.app.core.exceptions import (
+    LLMPolicyRefusal,
     SharedWorkspaceChatContextTooLarge,
     SharedWorkspaceChatServiceError,
     SharedWorkspaceGenerationFailed,
+    SharedWorkspaceGenerationRefused,
     SharedWorkspaceNoProviderConfigured,
     SharedWorkspaceNoRelevantEvidence,
     SharedWorkspaceRetrievalUnavailable,
@@ -732,6 +734,7 @@ class SharedWorkspaceChatService:
                     streaming=False,
                     temperature=0,
                     max_tokens=prompt_budget.max_output_tokens,
+                    llm_surface="sharing.workspace_chat",
                     user_identifier=str(recipient_user_id),
                 )
             answer, labels = _parse_grounded_response(response, budgeted)
@@ -744,6 +747,8 @@ class SharedWorkspaceChatService:
             )
         except SharedWorkspaceGenerationFailed:
             raise
+        except LLMPolicyRefusal:
+            raise SharedWorkspaceGenerationRefused() from None
         except Exception:  # noqa: BLE001 - adapter details are private at this boundary.
             raise SharedWorkspaceGenerationFailed() from None
         finally:

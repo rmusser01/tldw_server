@@ -104,6 +104,10 @@ _ERRORS: dict[str, dict[str, Any]] = {
         "message": "No usable generation provider is configured.",
         "retryable": False,
     },
+    "llm_policy_refused": {
+        "message": "The shared workspace question was refused by moderation policy.",
+        "retryable": False,
+    },
     "generation_failed": {
         "message": "Shared workspace generation is temporarily unavailable.",
         "retryable": True,

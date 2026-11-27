@@ -152,6 +152,7 @@ async def test_generation_invokes_direct_adapter_without_tools_stream_or_fallbac
         "streaming": False,
         "temperature": 0,
         "max_tokens": result.prompt_budget.max_output_tokens,
+        "llm_surface": "sharing.workspace_chat",
         "user_identifier": "41",
     }
     assert not ({"tools", "fallback", "enable_fallback"} & set(call))
@@ -534,3 +535,19 @@ async def test_generation_on_an_operator_base_url_from_the_server_config_counts_
     )
     assert result.answer == "Grounded"
     assert seen == ["user_unmetered"]
+
+
+@pytest.mark.asyncio
+async def test_generation_moderation_refusal_is_not_generation_failed(monkeypatch, generation_stubs) -> None:
+    """TASK-13950.27: a gateway refusal is its own non-retryable error, not the blanket 503 ``generation_failed``."""
+    from tldw_Server_API.app.core.exceptions import LLMPolicyRefusal, SharedWorkspaceGenerationRefused
+
+    async def _refuse(**_kwargs):
+        raise LLMPolicyRefusal("Input violates moderation policy")
+
+    monkeypatch.setattr(shared_chat, "perform_chat_api_call_async", _refuse)
+    with pytest.raises(SharedWorkspaceGenerationRefused):
+        await _service().generate_grounded_answer(
+            query="Question?", evidence=(_evidence(),), target=ResolvedChatTarget("openai", "gpt-model"),
+            recipient_user_id=41, share_scope_type="team", share_scope_id=73, request=SimpleNamespace(),
+        )

@@ -767,6 +767,7 @@ class DocumentGeneratorService:
             temperature=temperature,
             max_tokens=max_tokens,
             stream=stream,
+            llm_surface="chat.document_generation",
             app_config=app_config,
             credentials_resolved=credentials_resolved,
             **(
