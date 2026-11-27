@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from collections.abc import Sequence
 from typing import Any
 
 from tldw_Server_API.app.core.AuthNZ.profile_version import (
@@ -85,3 +86,30 @@ async def update_user_email(
         parameters=(email, user_id, email),
         ownership=ownership,
     )
+
+
+async def email_recently_released_by_another_user(
+    db_conn: Any, emails: Sequence[str], *, user_id: int, is_postgres: bool
+) -> bool:
+    """Whether another user's ``previous_email`` is one of ``emails`` (any case), changed in the last 7 days.
+
+    Reads on the caller's connection only. Its owner may still take such an address back (TASK-15671).
+    """
+    addresses = sorted({str(value).strip().lower() for value in emails if str(value).strip()})
+    if not addresses:
+        return False
+    if is_postgres:
+        found = await db_conn.fetchval(
+            "SELECT 1 FROM users WHERE id <> $1 AND LOWER(previous_email) = ANY($2::text[])"
+            " AND email_changed_at > CURRENT_TIMESTAMP - INTERVAL '7 days' LIMIT 1",
+            user_id,
+            addresses,
+        )
+        return found is not None
+    placeholders = ", ".join("?" for _ in addresses)
+    cursor = await db_conn.execute(
+        f"SELECT 1 FROM users WHERE id <> ? AND LOWER(previous_email) IN ({placeholders})"  # nosec B608 - placeholders only
+        " AND datetime(email_changed_at) > datetime('now', '-7 days') LIMIT 1",
+        (user_id, *addresses),
+    )
+    return await cursor.fetchone() is not None

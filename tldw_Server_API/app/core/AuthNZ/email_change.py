@@ -11,6 +11,7 @@ from loguru import logger
 from tldw_Server_API.app.core.AuthNZ import password_service, settings
 from tldw_Server_API.app.core.AuthNZ.email_service import get_email_service
 from tldw_Server_API.app.core.AuthNZ.transaction_hooks import defer_until_after_commit
+from tldw_Server_API.app.core.DB_Management.user_profile_writes import email_recently_released_by_another_user
 
 _NOTICE_NONCRITICAL_EXCEPTIONS = (OSError, RuntimeError, ValueError, TypeError, KeyError, jinja2.TemplateError)
 
@@ -68,9 +69,7 @@ async def authorize_own_email_change(
         )
     # Another account's owner can take its previous address back for 7 days (TASK-15671, Decision 18).
     changed = [value for value in new_emails if str(value).strip().lower() != stored]
-    if await password_service.email_recently_released_by_another_user(
-        db_conn, changed, user_id=user_id, is_postgres=is_postgres
-    ):
+    if await email_recently_released_by_another_user(db_conn, changed, user_id=user_id, is_postgres=is_postgres):
         raise _refuse(
             user_id,
             "email_recently_released",

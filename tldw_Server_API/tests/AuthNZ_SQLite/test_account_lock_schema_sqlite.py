@@ -12,7 +12,8 @@ from types import SimpleNamespace
 
 import pytest
 
-from tldw_Server_API.app.core.AuthNZ import migrations
+from tldw_Server_API.app.core.Audit.unified_audit_service import AuditEventType
+from tldw_Server_API.app.core.AuthNZ import api_key_audit, migrations
 from tldw_Server_API.app.core.AuthNZ.account_lock import (
     AccountSecurityLockedError,
     StaleCredentialError,
@@ -24,6 +25,7 @@ from tldw_Server_API.app.core.AuthNZ.account_lock import (
     security_mail_recipients,
     set_lock,
     take_back_address,
+    write_account_audit,
 )
 from tldw_Server_API.app.core.AuthNZ.database import get_db_pool
 from tldw_Server_API.app.core.AuthNZ.email_change import EmailChangeRefused, authorize_own_email_change
@@ -36,6 +38,7 @@ from tldw_Server_API.app.core.AuthNZ.repos.sessions_repo import AuthnzSessionsRe
 from tldw_Server_API.app.core.AuthNZ.repos.users_repo import AuthnzUsersRepo
 from tldw_Server_API.app.core.AuthNZ.settings import reset_settings
 from tldw_Server_API.app.core.DB_Management.user_profile_writes import update_user_email
+from tldw_Server_API.app.core.exceptions import ServiceInitializationError
 from tldw_Server_API.app.core.Utils.iso_datetime import parse_iso_utc
 from tldw_Server_API.tests.AuthNZ_SQLite._user_fixtures import create_authnz_test_user
 
@@ -399,3 +402,170 @@ async def test_previous_address_lookup_refuses_an_ambiguous_match(lock_db) -> No
     assert (await repo.find_locked_user_by_previous_email(OLD, since=week_ago))["id"] == lock_db.user_id
     await set_lock(second)
     assert await repo.find_locked_user_by_previous_email(OLD, since=week_ago) is None
+
+
+async def _password_verifies(db, password: str = OWNER_PASSWORD) -> bool:
+    return PasswordService().verify_password(password, (await _row(db))["password_hash"])[0]
+
+
+async def test_plain_unlock_that_wins_during_a_take_back_leaves_the_intruder_nothing(lock_db, monkeypatch) -> None:
+    """The other link runs to completion inside the take-back's first sweep and clears its fresh lock; the
+    intruder then makes a key, an SSO link and a session just before the take-back's compare-and-set."""
+    uid = lock_db.user_id
+    await _move_email(lock_db, NEW)
+    await set_lock(uid)
+    sweep = AuthnzApiKeysRepo.suspend_keys_created_since
+    compare_and_set = AuthnzUsersRepo.clear_security_lock
+    plain: dict[str, object] = {}
+    cas_calls = 0
+
+    async def _plain_unlock_runs_in_the_first_sweep(self, **kwargs):
+        if "result" not in plain:
+            plain["result"] = None
+            plain["result"] = await clear_lock(uid)
+        return await sweep(self, **kwargs)
+
+    async def _intruder_acts_before_the_take_backs_compare_and_set(self, user_id, **kwargs):
+        nonlocal cas_calls
+        cas_calls += 1
+        if cas_calls == 2:  # 1 is the plain unlock's, 2 the take-back's first
+            await _key(lock_db, "made-in-the-window")
+            await _link_identity(lock_db, "intruder")
+            await _session(lock_db, "intruder")
+        return await compare_and_set(self, user_id, **kwargs)
+
+    monkeypatch.setattr(AuthnzApiKeysRepo, "suspend_keys_created_since", _plain_unlock_runs_in_the_first_sweep)
+    monkeypatch.setattr(AuthnzUsersRepo, "clear_security_lock", _intruder_acts_before_the_take_backs_compare_and_set)
+    await clear_lock(uid, take_back=OLD)
+    row = await _row(lock_db)
+    assert plain["result"] is not None  # the other link did win its own compare-and-set
+    assert await _unsuspended_active_keys(lock_db) == []
+    assert await _identity_links(lock_db) == []
+    assert await _live_session_count(lock_db) == 0
+    assert row["email"] == OLD and row["security_locked_at"] is None
+    assert await _password_verifies(lock_db) is False
+
+
+async def test_take_back_that_never_wins_its_compare_and_set_gives_up_with_the_account_locked(
+    lock_db, monkeypatch
+) -> None:
+    uid = lock_db.user_id
+    await _move_email(lock_db, NEW)
+    await set_lock(uid)
+    compare_and_set = AuthnzUsersRepo.clear_security_lock
+    attempts = 0
+
+    async def _another_take_back_always_relocks_first(self, user_id, **kwargs):
+        nonlocal attempts
+        attempts += 1
+        await self.force_security_lock(user_id, now=datetime.now(timezone.utc))
+        return await compare_and_set(self, user_id, **kwargs)
+
+    monkeypatch.setattr(AuthnzUsersRepo, "clear_security_lock", _another_take_back_always_relocks_first)
+    assert await clear_lock(uid, take_back=OLD) is None
+    assert attempts == 3
+    assert (await _row(lock_db))["security_locked_at"] is not None
+
+
+async def test_take_back_that_restores_nothing_is_refused_and_keeps_the_lock(lock_db) -> None:
+    await _move_email(lock_db, NEW)
+    await set_lock(lock_db.user_id)
+    with pytest.raises(TakeBackUnavailableError):
+        await clear_lock(lock_db.user_id, take_back="stranger@example.com")
+    row = await _row(lock_db)
+    assert row["email"] == NEW and row["security_locked_at"] is not None
+
+
+async def test_take_back_is_refused_and_the_lock_kept_when_the_address_is_taken_while_it_runs(
+    lock_db, monkeypatch
+) -> None:
+    await _move_email(lock_db, NEW)
+    await set_lock(lock_db.user_id)
+    sweep = AuthnzApiKeysRepo.suspend_keys_created_since
+    taken: dict[str, int] = {}
+
+    async def _someone_registers_the_address_during_the_first_sweep(self, **kwargs):
+        if not taken:
+            taken["by"] = await _user(lock_db, "late-holder", OLD)
+        return await sweep(self, **kwargs)
+
+    monkeypatch.setattr(AuthnzApiKeysRepo, "suspend_keys_created_since", _someone_registers_the_address_during_the_first_sweep)
+    with pytest.raises(TakeBackUnavailableError):
+        await clear_lock(lock_db.user_id, take_back=OLD)
+    row = await _row(lock_db)
+    assert "by" in taken and row["email"] == NEW and row["security_locked_at"] is not None
+
+
+async def test_a_second_take_back_to_the_restored_address_still_replaces_the_password(lock_db) -> None:
+    uid = lock_db.user_id
+    await _move_email(lock_db, NEW)
+    await set_lock(uid)
+    await clear_lock(uid, take_back=OLD)
+    async with lock_db.pool.transaction() as conn:  # a password set again after the first take-back
+        await PasswordService().set_password(
+            uid, hash_password(OWNER_PASSWORD), conn, is_postgres=lock_db.backend == "postgres"
+        )
+    assert await _password_verifies(lock_db) is True
+    assert await clear_lock(uid, take_back=OLD) is not None  # the second link mailed to the same address
+    row = await _row(lock_db)
+    assert row["email"] == OLD and row["security_locked_at"] is None
+    assert await _password_verifies(lock_db) is False
+
+
+async def _email_change_refusal(db, user_id: int, address: str) -> str | None:
+    """The refusal code of a self-service change to ``address`` with the right password; None when allowed."""
+    async with db.pool.transaction() as conn:
+        try:
+            await authorize_own_email_change(
+                db_conn=conn, is_postgres=db.backend == "postgres", user_id=user_id,
+                new_emails=(address,), current_password=OWNER_PASSWORD,
+            )
+        except EmailChangeRefused as refused:
+            return refused.code
+    return None
+
+
+async def test_email_change_to_an_address_released_eight_days_ago_is_allowed(lock_db) -> None:
+    await _move_email(lock_db, NEW)
+    await lock_db.age("users", "email_changed_at", lock_db.user_id, timedelta(days=8))
+    other_user_id = await _user(lock_db, "other", "other@example.com")
+    assert await _email_change_refusal(lock_db, other_user_id, OLD) is None
+
+
+async def test_email_change_back_to_your_own_previous_address_is_allowed(lock_db) -> None:
+    await _move_email(lock_db, NEW)
+    assert await _email_change_refusal(lock_db, lock_db.user_id, OLD) is None
+
+
+async def test_recently_released_address_is_refused_in_any_letter_case(lock_db) -> None:
+    await _move_email(lock_db, NEW)
+    other_user_id = await _user(lock_db, "other", "other@example.com")
+    assert await _email_change_refusal(lock_db, other_user_id, "Old@Example.COM") == "email_recently_released"
+
+
+async def test_email_in_use_check_ignores_letter_case(lock_db) -> None:
+    repo = AuthnzUsersRepo(lock_db.pool)
+    other_user_id = await _user(lock_db, "other", "other@example.com")
+    assert await repo.email_in_use_by_another_user("Old@Example.COM", user_id=other_user_id) is True
+    assert await repo.email_in_use_by_another_user("Old@Example.COM", user_id=lock_db.user_id) is False
+
+
+# --- the audit write (SQLite only: tests/AuthNZ/conftest.py stubs audit for PostgreSQL tests) ------
+
+
+async def test_audit_service_that_cannot_start_does_not_fail_the_caller(owner_db, monkeypatch) -> None:
+    async def _cannot_start(user_id: int):
+        raise ServiceInitializationError("audit service unavailable")
+
+    monkeypatch.setattr(api_key_audit, "_get_or_create_audit_service", _cannot_start)
+    assert await write_account_audit(AuditEventType.AUTH_ACCOUNT_LOCKED, user_id=owner_db.user_id) is None
+
+
+@pytest.mark.real_audit
+async def test_audit_event_is_written_and_reads_back(owner_db, real_audit_service) -> None:
+    await write_account_audit(
+        AuditEventType.AUTH_ACCOUNT_LOCKED, user_id=owner_db.user_id, session_id=41, metadata={"via": "test"}
+    )
+    service = await api_key_audit._get_or_create_audit_service(owner_db.user_id)
+    events = await service.query_events(user_id=str(owner_db.user_id), event_types=[AuditEventType.AUTH_ACCOUNT_LOCKED])
+    assert [(event["event_type"], event["context_session_id"]) for event in events] == [("auth.account.locked", "41")]

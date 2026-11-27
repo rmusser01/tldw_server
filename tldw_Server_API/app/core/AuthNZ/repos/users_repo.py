@@ -214,12 +214,6 @@ class AuthnzUsersRepo:
             "UPDATE users SET security_locked_at = ? WHERE id = ?", self._bind_time(now), int(user_id)
         )
 
-    async def set_credentials_valid_after(self, user_id: int, *, valid_after: datetime) -> None:
-        """Refuse every token of this user issued before ``valid_after``."""
-        await self.db_pool.execute(
-            "UPDATE users SET credentials_valid_after = ? WHERE id = ?", self._bind_time(valid_after), int(user_id)
-        )
-
     async def find_locked_user_by_previous_email(self, email: str, *, since: datetime) -> dict[str, Any] | None:
         """The one locked user whose previous address is ``email``, changed after ``since``; None when not exactly one."""
         query = (
