@@ -383,6 +383,17 @@ async def test_anonymous_answers_do_not_reveal_the_lock(two_user_client, lockabl
     ]
 
 
+async def test_forgot_password_does_not_reveal_the_lock_when_no_reset_token_can_be_stored(two_user_client, lockable):
+    """The packaged schema cannot store a reset token (TASK-15678, not repaired here): the unlocked account's
+    forgot-password still answers as the locked account's and an unknown address's do (TASK-15679)."""
+    ctx = two_user_client
+    await lock_user(ctx.alice_id)
+    answers = [ctx.client.post(FORGOT, json={"email": e}) for e in (OWNER, "bob@example.com", "nobody@example.com")]
+    generic = (200, {"message": "If the email exists, a reset link has been sent"})
+    assert [(r.status_code, r.json()) for r in answers] == [generic] * 3
+    assert [to for to, _ in lockable] == [OWNER]  # alice's unlock link; no reset link whose token was not stored
+
+
 @pytest.mark.real_audit
 async def test_unlock_writes_an_audit_event(real_audit_service, two_user_client, lockable):
     ctx = two_user_client

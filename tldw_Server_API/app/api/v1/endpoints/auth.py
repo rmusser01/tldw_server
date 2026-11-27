@@ -9,6 +9,7 @@ import json
 import os
 import re
 import secrets
+import sqlite3
 import time
 from datetime import datetime, timedelta, timezone
 from importlib import import_module
@@ -17,6 +18,7 @@ from urllib.parse import urlsplit, urlunsplit
 
 #
 # 3rd-party imports
+import asyncpg
 from fastapi import APIRouter, Depends, Form, HTTPException, Query, Request, Response, status
 from fastapi.responses import RedirectResponse
 from fastapi.security import OAuth2PasswordRequestForm
@@ -228,6 +230,8 @@ _AUTH_NONCRITICAL_EXCEPTIONS = (
     TokenExpiredError,
     WeakPasswordError,
 )
+# What storing a password-reset token raises on each backend (aiosqlite re-raises sqlite3 errors).
+_RESET_TOKEN_STORE_ERRORS = (sqlite3.Error, asyncpg.PostgresError)
 
 #######################################################################################################################
 #
@@ -2686,13 +2690,19 @@ async def forgot_password(
             )
 
             # Store token in database for validation
-            await _store_password_reset_token(
-                db,
-                user_id=int(user["id"]),
-                token_hash=jwt_service.hash_password_reset_token(reset_token),
-                expires_at=datetime.utcnow() + timedelta(hours=1),
-                ip_address=client_ip,
-            )
+            try:
+                await _store_password_reset_token(
+                    db,
+                    user_id=int(user["id"]),
+                    token_hash=jwt_service.hash_password_reset_token(reset_token),
+                    expires_at=datetime.utcnow() + timedelta(hours=1),
+                    ip_address=client_ip,
+                )
+            except _RESET_TOKEN_STORE_ERRORS as exc:
+                # The same answer the locked branch gives, so a failure here cannot tell the two apart
+                # (TASK-15679); the table defect that causes it on fresh installs is TASK-15678.
+                logger.error("Password reset token not stored for user {}: {}", user["id"], type(exc).__name__)
+                return {"message": "If the email exists, a reset link has been sent"}
 
             # Send email
             email_service = _get_email_service()
