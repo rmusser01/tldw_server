@@ -30,6 +30,7 @@ from tldw_Server_API.app.core.DB_Management.Kanban_DB import (
 )
 from tldw_Server_API.app.core.Kanban.vector_search import create_kanban_vector_search
 from tldw_Server_API.app.core.exceptions import AdapterError
+from tldw_Server_API.app.core.LLM_Calls.provider_results import raise_if_content_filtered
 from tldw_Server_API.app.core.testing import is_test_mode, is_truthy
 from tldw_Server_API.app.core.Workflows.adapters._common import resolve_context_user_id
 from tldw_Server_API.app.core.Workflows.adapters._registry import registry
@@ -975,6 +976,7 @@ async def run_character_chat_adapter(config: dict[str, Any], context: dict[str, 
                 temp=temperature,
                 max_tokens=max_tokens,
             )
+            raise_if_content_filtered(llm_response)  # a refusal fails the step: never saved as the character's reply
             response_text = _extract_character_chat_response_text(llm_response).strip()
 
             try:

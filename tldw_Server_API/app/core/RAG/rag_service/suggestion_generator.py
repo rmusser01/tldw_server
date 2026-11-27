@@ -13,13 +13,14 @@ from typing import Any
 
 from loguru import logger
 
+from tldw_Server_API.app.core.exceptions import LLMPolicyRefusal
+from tldw_Server_API.app.core.LLM_Calls.provider_results import content_filter_refusal, is_content_filtered
 from tldw_Server_API.app.core.LLM_Calls.structured_output import (
     StructuredOutputOptions,
     StructuredOutputParseError,
     parse_structured_output,
 )
 
-from .query_classifier import is_content_filtered
 from .runtime_provider_call import (
     attach_runtime_provider_credentials,
     await_runtime_bound_provider_call,
@@ -240,7 +241,7 @@ async def generate_suggestions(
         )
 
         if is_content_filtered(raw_response):
-            raise ValueError("content_filter")  # moderation replaced the list: heuristic suggestions below
+            raise content_filter_refusal(raw_response)  # refused list: heuristic suggestions below, labelled llm_policy_refused
 
         # Extract text from response
         response_content = ""
@@ -267,12 +268,13 @@ async def generate_suggestions(
             return _finalize_suggestions(suggestions, query, num_suggestions)
 
     except Exception as exc:  # includes a policy refusal: suggestions are optional, the answer was moderated
+        refused = isinstance(exc, LLMPolicyRefusal)
         logger.debug(f"Suggestion generation LLM call failed: {_safe_exception_type(exc)}")
 
     # Fallback to heuristic suggestions
     if credential_runtime is not None and stage_metadata is not None:
         stage_metadata.update(
-            failure_code="provider_unavailable",
+            failure_code="llm_policy_refused" if refused else "provider_unavailable",
             verification_available=False,
         )
     return _finalize_suggestions([], query, num_suggestions)

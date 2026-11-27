@@ -150,10 +150,12 @@ def make_service(monkeypatch, tmp_path):
 @pytest.fixture(autouse=True)
 def _clean_hook_state():
     hooks_mod._GUARDIAN_ENGINES.clear()
+    hooks_mod._GUARDIAN_MISSING.clear()
     getattr(hooks_mod._stream_buffer_chars, "cache_clear", lambda: None)()  # may be monkeypatched
     yield
     hooks_mod._unregister()
     hooks_mod._GUARDIAN_ENGINES.clear()
+    hooks_mod._GUARDIAN_MISSING.clear()
     getattr(hooks_mod._stream_buffer_chars, "cache_clear", lambda: None)()  # may be monkeypatched
     assert gateway._POLICY_HOOKS == []
 

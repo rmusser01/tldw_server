@@ -16,7 +16,6 @@ CALLER_MODERATED_SURFACES: frozenset[str] = frozenset({"chat.completions"})
 
 EXEMPT_SURFACES: dict[str, str] = {
     "internal.byok_probe": "fixed max_tokens=1 health probe",
-    "internal.first_chat_verifier": "fixed setup prompt",
     "internal.eval_judge": "owner 2026-11-26: measurement; moderating judge I/O changes scores",
     "moderation.classifier": "it is the moderation (AC5 interpretation)",
 }
@@ -77,6 +76,8 @@ MODERATED_SURFACES: frozenset[str] = frozenset(
         "evaluations",
         "data_tables.generation",
         "explainer",
+        # setup (the first-chat check sends the client's own prompt)
+        "setup.first_chat",
     }
 )
 

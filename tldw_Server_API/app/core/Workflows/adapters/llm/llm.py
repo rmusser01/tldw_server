@@ -13,6 +13,7 @@ from typing import Any
 from loguru import logger
 
 from tldw_Server_API.app.core.exceptions import AdapterError
+from tldw_Server_API.app.core.LLM_Calls.provider_results import OUTPUT_REFUSAL_TEXT, content_filter_refusal
 from tldw_Server_API.app.core.LLM_Calls.sse import is_done_line
 from tldw_Server_API.app.core.testing import is_test_mode
 from tldw_Server_API.app.core.Workflows.adapters._common import extract_openai_content
@@ -188,6 +189,7 @@ async def run_llm_adapter(config: dict[str, Any], context: dict[str, Any]) -> di
     if stream:
         stream_iter = await perform_chat_api_call_async(**call_args, llm_surface="workflows.step")
         text = ""
+        ours = False  # the output hook's refusal delta was seen (wording by origin)
         async for line in stream_iter:
             if not line:
                 continue
@@ -208,6 +210,9 @@ async def run_llm_adapter(config: dict[str, Any], context: dict[str, Any]) -> di
                     if choices:
                         delta = choices[0].get("delta") or {}
                         chunk = delta.get("content")
+                        ours = ours or chunk == OUTPUT_REFUSAL_TEXT
+                        if choices[0].get("finish_reason") == "content_filter":
+                            raise content_filter_refusal(ours=ours)  # refused: the step fails, no text is its output
                         if isinstance(chunk, str) and chunk:
                             text += chunk
                             try:

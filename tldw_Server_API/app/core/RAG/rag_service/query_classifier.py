@@ -20,6 +20,7 @@ from typing import Any
 from loguru import logger
 
 from tldw_Server_API.app.core.exceptions import LLMPolicyRefusal
+from tldw_Server_API.app.core.LLM_Calls.provider_results import is_content_filtered
 from tldw_Server_API.app.core.LLM_Calls.structured_output import (
     StructuredOutputOptions,
     StructuredOutputParseError,
@@ -227,14 +228,6 @@ def _detect_intent_heuristic(q_lower: str) -> str:
 # ---------------------------------------------------------------------------
 # LLM-based classifier
 # ---------------------------------------------------------------------------
-
-def is_content_filtered(raw_response: Any) -> bool:
-    """True when moderation replaced the answer (finish_reason content_filter): never parse, retry or reuse it."""
-    try:
-        return (raw_response["choices"][0].get("finish_reason") or "") == "content_filter"
-    except (AttributeError, IndexError, KeyError, TypeError):
-        return False
-
 
 def _parse_classification_response(raw: str) -> dict[str, Any]:
     """Parse LLM JSON response, handling common formatting issues."""

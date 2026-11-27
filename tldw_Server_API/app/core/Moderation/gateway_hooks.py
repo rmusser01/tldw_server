@@ -10,8 +10,8 @@ Rules this module keeps:
 - Hooks never log the request (it carries ``api_key``); a log line carries phase, action,
   surface, provider and the integer user id, never message text.
 - A post hook never raises. An evaluator failure on output is treated as a block (fail closed).
-- When moderation changes a chunk or a response, ``provider_response`` is dropped from it,
-  because it carries the original text.
+- When moderation changes a response, or is on for a stream, ``provider_response`` is dropped from it
+  (from every stream chunk that has one, tool calls included), because it carries the original text.
 - Not moderated (documented in Task 11): non-text content parts, tool-call arguments,
   ``reasoning_content``, ``system`` messages and anything on a chunk without ``choices``.
 """
@@ -23,6 +23,7 @@ import contextvars
 import functools
 import json
 import threading
+import time
 from collections.abc import AsyncIterator, Callable, Iterator
 from typing import Any
 
@@ -90,6 +91,10 @@ def _stream_buffer_chars() -> int:
 # deleted keeps a stale engine. Upgrade path: an LRU with a size cap.
 _GUARDIAN_ENGINES: dict[int, Any] = {}
 _GUARDIAN_LOCK = threading.Lock()
+# "No Guardian DB" per user id, remembered for 60 s so a user without one costs no filesystem stat per call.
+# ponytail: same unbounded-by-user ceiling as the engine cache; entries are tiny floats.
+_GUARDIAN_MISSING: dict[int, float] = {}
+_GUARDIAN_MISSING_TTL_SECONDS = 60.0
 
 
 def _guardian_engine(user_id: int) -> Any | None:
@@ -100,19 +105,25 @@ def _guardian_engine(user_id: int) -> Any | None:
         return None
     with _GUARDIAN_LOCK:
         engine = _GUARDIAN_ENGINES.get(user_id)
+        missing_at = _GUARDIAN_MISSING.get(user_id)
     if engine is not None:
         return engine
+    if missing_at is not None and time.monotonic() - missing_at < _GUARDIAN_MISSING_TTL_SECONDS:
+        return None
     try:
         from tldw_Server_API.app.core.DB_Management.guardian_db_resolver import resolve_existing_guardian_db_for_user_id
         from tldw_Server_API.app.core.Moderation.supervised_policy import get_supervised_policy_engine
 
         engine = get_supervised_policy_engine(resolve_existing_guardian_db_for_user_id(user_id))
     except FileNotFoundError:
+        with _GUARDIAN_LOCK:
+            _GUARDIAN_MISSING[user_id] = time.monotonic()
         return None
     except Exception as exc:
         logger.debug("Guardian overlay unavailable: {}", type(exc).__name__)
         return None
     with _GUARDIAN_LOCK:
+        _GUARDIAN_MISSING.pop(user_id, None)
         return _GUARDIAN_ENGINES.setdefault(user_id, engine)
 
 
@@ -404,8 +415,14 @@ class _StreamState:
                     emit = (emit or "") + held
                 elif held:
                     pre.append(_content_frame(index, held))
-            # provider_response can carry other parts of the same event, so a content chunk that has one is rebuilt
-            if text is None or (emit == text and not moderator.held and "provider_response" not in chunk):
+            # provider_response can carry every part of the same event (a Google event: text next to a tool call),
+            # so any chunk that has one is rebuilt without it, whatever its own delta holds
+            has_raw = "provider_response" in chunk
+            if text is None:
+                new_choices.append(choice)
+                changed = changed or has_raw
+                continue
+            if emit == text and not moderator.held and not has_raw:
                 new_choices.append(choice)
                 continue
             changed = True

@@ -704,6 +704,9 @@ class ChromaDBManager:
             # analyze may return a generator; ensure string
             text = resp if isinstance(resp, str) else str(resp)
             return (text or "").strip()
+        except LLMPolicyRefusal:  # optional enrichment: a labelled skip, the embedding completes
+            logger.warning(f"User '{self.user_id}': context_policy_refused: skipped the context header for a chunk.")
+            return ""
         except Exception as e:
             logger.error(f"User '{self.user_id}': Error in situate_context with LLM '{provider}': {e}", exc_info=True)
             return ""
@@ -743,6 +746,9 @@ class ChromaDBManager:
                 model_override=model_override,
             )
             return (resp or "").strip()
+        except LLMPolicyRefusal:  # optional enrichment: a labelled skip, the embedding completes
+            logger.warning(f"User '{self.user_id}': outline_policy_refused: skipped the document outline.")
+            return ""
         except _CHROMA_NONCRITICAL_EXCEPTIONS as e:
             logger.warning(f"User '{self.user_id}': Outline generation failed: {e}")
             return ""

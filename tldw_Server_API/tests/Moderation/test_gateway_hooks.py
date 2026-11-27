@@ -327,7 +327,7 @@ def test_stream_moderator_unit(moderation_hooks):
 
 
 @pytest.mark.parametrize(
-    "surface", ["chat.completions", "internal.eval_judge", "internal.byok_probe", "internal.first_chat_verifier"]
+    "surface", ["chat.completions", "internal.eval_judge", "internal.byok_probe"]
 )
 def test_exempt_surfaces_are_never_moderated(moderation_hooks, stub_llm_registry, surface):
     stub_llm_registry.reply = reply("forbidden secret")
@@ -558,6 +558,40 @@ def test_zero_holdback_multi_part_google_event_leaks_nothing(moderation_hooks, s
     out = list(_call(stream=True))
     assert "secret" not in "".join(out) and "provider_response" not in "".join(out)
     assert _text(out) == "fine part a [X] part"
+
+
+def test_google_tool_call_chunk_does_not_carry_the_events_text(moderation_hooks, stub_llm_registry, buffer_chars):
+    """A Gemini event with text and a functionCall: the tool-call chunk's provider_response holds the text too."""
+    buffer_chars(0)
+    event = {"candidates": [{"content": {"parts": [{"text": "a secret note"}, {"functionCall": {"name": "f", "args": {}}}]}}]}
+    tool_call = {"index": 0, "function": {"name": "f", "arguments": "{}"}}
+    stub_llm_registry.items = [sse({"choices": [{"index": 0, "delta": {"tool_calls": [tool_call]}}], "provider_response": event}), DONE]
+    out = list(_call(stream=True))
+    joined = "".join(out)
+    assert "secret" not in joined and "provider_response" not in joined
+    assert _parse(out[0])["choices"][0]["delta"]["tool_calls"] == [tool_call]
+
+
+def test_chunks_without_provider_response_keep_identity_when_moderation_is_on(moderation_hooks, stub_llm_registry, buffer_chars):
+    buffer_chars(0)
+    item = sse({"choices": [{"index": 0, "delta": {"tool_calls": [{"index": 0, "function": {"name": "f"}}]}}]})
+    stub_llm_registry.items = [item, DONE]
+    assert list(_call(stream=True))[0] is item
+
+
+def test_a_missing_guardian_db_is_remembered_for_a_minute(make_service, stub_llm_registry, monkeypatch):
+    make_service(enabled=False)
+    seen = _guardian(monkeypatch, exists=False)
+    clock = [1000.0]
+    monkeypatch.setattr(hooks_mod, "time", types.SimpleNamespace(monotonic=lambda: clock[0]))
+    hooks_mod.register_moderation_gateway_hooks()
+    with llm_call_context(user_id=7):
+        _call()
+        _call()
+        assert seen["resolve"] == 1  # the second call did not look again
+        clock[0] += 61
+        _call()
+    assert seen["resolve"] == 2
 
 
 def test_post_call_resolution_failure_fails_closed(moderation_hooks, monkeypatch, stub_llm_registry):

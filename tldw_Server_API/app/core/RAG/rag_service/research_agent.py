@@ -23,6 +23,8 @@ from typing import Any, Callable, Literal
 from loguru import logger
 
 from tldw_Server_API.app.core.Chat.Chat_Deps import ChatAPIError
+from tldw_Server_API.app.core.exceptions import LLMPolicyRefusal
+from tldw_Server_API.app.core.LLM_Calls.provider_results import is_content_filtered
 from tldw_Server_API.app.core.LLM_Calls.structured_output import (
     StructuredOutputOptions,
     StructuredOutputParseError,
@@ -30,7 +32,7 @@ from tldw_Server_API.app.core.LLM_Calls.structured_output import (
 )
 from tldw_Server_API.app.core.Provider_Credentials.byok_runtime import ByokResolutionError
 
-from .query_classifier import QueryClassification, is_content_filtered
+from .query_classifier import QueryClassification
 from .runtime_provider_call import (
     attach_runtime_provider_credentials,
     await_runtime_bound_provider_call,
@@ -1368,12 +1370,11 @@ async def research_loop(
             action_dict = _parse_research_action(response_text)
 
         except Exception as exc:  # incl. a policy refusal: the loop is optional, the answer stays moderated
-            if credential_runtime is not None:
-                logger.warning("Research loop provider unavailable")
-                output.metadata["provider_stage"] = {
-                    "failure_code": "provider_unavailable",
-                    "verification_available": False,
-                }
+            refused = isinstance(exc, LLMPolicyRefusal)
+            if refused or credential_runtime is not None:
+                logger.warning("Research loop was refused by moderation" if refused else "Research loop provider unavailable")
+                code = "llm_policy_refused" if refused else "provider_unavailable"
+                output.metadata["provider_stage"] = {"failure_code": code, "verification_available": False}
             else:
                 logger.warning(f"Research loop LLM call failed at iteration {iteration}: {exc!r}")
             break

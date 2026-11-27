@@ -116,7 +116,8 @@ def test_stream_buffer_chars_reads_config_and_env():
     assert load_moderation_surface_config(_Parser({"stream_buffer_chars": "2048"}), {}).stream_buffer_chars == 2048
     cfg = load_moderation_surface_config(_Parser({"stream_buffer_chars": "2048"}), {"MODERATION_STREAM_BUFFER_CHARS": "64"})
     assert cfg.stream_buffer_chars == 64
+    assert load_moderation_surface_config(_Parser({"stream_buffer_chars": "0"}), {}).stream_buffer_chars == 0  # no holdback
     with pytest.raises(ValueError):
-        load_moderation_surface_config(_Parser({"stream_buffer_chars": "0"}), {})
+        load_moderation_surface_config(_Parser({"stream_buffer_chars": "-1"}), {})
     cfg = load_moderation_surface_config(_Parser({f"surface.{SURFACE}": "false"}), {})
     assert cfg.surface_enabled == {SURFACE: False}

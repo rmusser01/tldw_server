@@ -40,12 +40,23 @@ GATEWAY_NAMES = frozenset(
 EXEMPT: frozenset[str] = frozenset({"core/Chat/chat_orchestrator.py", "core/LLM_Calls/gateway.py"})
 _SURFACE = "llm_surface"
 
-# Exempt / caller-moderated id -> app-relative path prefixes (a ``/``-ending entry is a directory) allowed to name it.
+# Exempt / caller-moderated id -> app-relative modules (a ``/``-ending entry is a directory) allowed to name it.
 EXEMPT_ID_MODULES: dict[str, tuple[str, ...]] = {
-    "chat.completions": ("core/Chat/", "api/v1/endpoints/chat.py"),
+    "chat.completions": (
+        "api/v1/endpoints/chat.py",
+        "core/Chat/completion_pipeline.py",
+        "core/Chat/streaming_pipeline.py",
+        "core/Chat/tool_execution_service.py",
+    ),
     "internal.byok_probe": ("core/Provider_Credentials/byok_testing.py",),
-    "internal.first_chat_verifier": ("core/Setup/first_chat_verifier.py",),
-    "internal.eval_judge": ("core/Evaluations/",),
+    "internal.eval_judge": (
+        "core/Evaluations/cli/evals_cli.py",
+        "core/Evaluations/cli/evals_cli_enhanced.py",
+        "core/Evaluations/evaluation_manager.py",
+        "core/Evaluations/ms_g_eval.py",
+        "core/Evaluations/rag_evaluator.py",
+        "core/Evaluations/response_quality_evaluator.py",
+    ),
     "moderation.classifier": ("core/Moderation/classification.py", "core/Moderation/semantic_matcher.py"),
 }
 
@@ -214,6 +225,8 @@ def test_seeded_exempt_id_in_a_new_module_is_flagged() -> None:
     ]
     assert not _allowed("core/Workflows/engine.py", "internal.byok_probe")
     assert not _allowed("core/Chatbooks/x.py", "chat.completions")
+    assert not _allowed("core/Chat/new_module.py", "chat.completions")
+    assert not _allowed("core/Evaluations/new_module.py", "internal.eval_judge")
     assert _allowed("core/Chat/streaming_pipeline.py", "chat.completions")
     assert _allowed("core/Evaluations/ms_g_eval.py", "internal.eval_judge")
     assert exempt_id_uses(ast.parse('f(llm_surface="rag.generation")')) == []
@@ -272,6 +285,27 @@ def test_direct_adapter_reference_counts() -> None:
     assert count_module(ast.parse("get_registry().get_adapter(p).chat(r)")) == 1
 
 
+def surface_value_problems(tree: ast.Module, known: frozenset[str]) -> list[tuple[int, str]]:
+    """``(line, problem)`` for every surface value (keyword, dict key, subscript, setdefault) that is not a
+    registered literal or a Name that is a parameter of an enclosing function (forwarding)."""
+    problems: list[tuple[int, str]] = []
+
+    def visit(node: ast.AST, params: set[str]) -> None:
+        if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef, ast.Lambda)):
+            params = params | _params(node)
+        for v in _surface_values(node):
+            if isinstance(v, ast.Constant) and isinstance(v.value, str):
+                if v.value not in known:
+                    problems.append((v.lineno, f"unknown surface {v.value!r}"))
+            elif not (isinstance(v, ast.Name) and v.id in params):
+                problems.append((v.lineno, "llm_surface must be a registered literal or a forwarded parameter"))
+        for child in ast.iter_child_nodes(node):
+            visit(child, params)
+
+    visit(tree, set())
+    return problems
+
+
 def test_every_surface_literal_is_registered() -> None:
     from tldw_Server_API.app.core.Moderation.surfaces import KNOWN_SURFACES
 
@@ -280,19 +314,23 @@ def test_every_surface_literal_is_registered() -> None:
         relative = path.relative_to(APP_ROOT.resolve())
         if "tests" in relative.parts[:-1]:
             continue
-        for node in ast.walk(tree):
-            if not isinstance(node, ast.Call):
-                continue
-            for kw in node.keywords:
-                if kw.arg != _SURFACE:
-                    continue
-                v = kw.value
-                if isinstance(v, ast.Constant) and isinstance(v.value, str):
-                    if v.value not in KNOWN_SURFACES:
-                        problems.append(f"{relative.as_posix()}:{node.lineno}: unknown surface {v.value!r}")
-                elif not isinstance(v, ast.Name):
-                    problems.append(f"{relative.as_posix()}:{node.lineno}: llm_surface must be a literal or a forwarded parameter")
+        problems += [f"{relative.as_posix()}:{line}: {text}" for line, text in surface_value_problems(tree, KNOWN_SURFACES)]
     assert problems == [], "\n".join(problems)
+
+
+def test_seeded_bad_surface_values_are_flagged() -> None:
+    bad = ast.parse(
+        'f(llm_surface="nope.x")\nx = {"llm_surface": "nope.y"}\nk["llm_surface"] = "nope.z"\n'
+        "f(llm_surface=SOME_GLOBAL)\ndef w(llm_surface):\n    f(llm_surface=llm_surface)\n    k['llm_surface'] = other"
+    )
+    found = surface_value_problems(bad, frozenset({"rag.generation"}))
+    assert [text for _, text in found] == [
+        "unknown surface 'nope.x'",
+        "unknown surface 'nope.y'",
+        "unknown surface 'nope.z'",
+        "llm_surface must be a registered literal or a forwarded parameter",
+        "llm_surface must be a registered literal or a forwarded parameter",
+    ]
 
 
 # --- The ratchet --------------------------------------------------------------------------------
