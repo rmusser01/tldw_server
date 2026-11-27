@@ -36,6 +36,7 @@ from tldw_Server_API.app.core.Moderation.surfaces import CALLER_MODERATED_SURFAC
 
 INPUT_REFUSAL = "Input violates moderation policy"
 OUTPUT_REFUSAL = "Output violates moderation policy"
+INPUT_UNCHECKED_REFUSAL = "Input could not be checked against moderation policy"
 _MODERATED_ROLES = frozenset({"user", "tool"})  # chat's MODERATED_ROLES
 _DEFAULT_BUFFER_CHARS = 1024
 _SKIP = object()  # stored on the call: resolved, nothing to moderate
@@ -81,7 +82,8 @@ def _stream_buffer_chars() -> int:
 # --------------------------------------------------------------------------- guardian
 
 # ponytail: one SupervisedPolicyEngine per user id, never evicted (it holds a compiled-rule cache with
-# its own 60 s TTL); an unbounded number of distinct users is the ceiling. Add an LRU if that matters.
+# its own 60 s TTL); the ceiling is an unbounded number of distinct users, and a user whose Guardian DB is
+# deleted keeps a stale engine. Upgrade path: an LRU with a size cap.
 _GUARDIAN_ENGINES: dict[int, Any] = {}
 _GUARDIAN_LOCK = threading.Lock()
 
@@ -176,6 +178,21 @@ def _moderate_content(content: Any, policy: Any, note: Callable[[str], None]) ->
     return content if parts is None else parts
 
 
+@contextlib.contextmanager
+def _input_check_refusal(surface: str | None, provider: str | None, user_id: int | None) -> Iterator[None]:
+    """A crash while checking input refuses the call (fail closed) as a policy refusal, never as a provider failure."""
+    try:
+        yield
+    except LLMPolicyRefusal:
+        raise
+    except Exception as exc:
+        logger.warning(
+            "moderation input check failed ({}) surface={} provider={} user_id={}",
+            type(exc).__name__, surface, provider, user_id,
+        )
+        raise LLMPolicyRefusal(INPUT_UNCHECKED_REFUSAL) from exc
+
+
 def _moderate_input(
     messages: list[dict], policy: Any, surface: str | None, provider: str | None, user_id: int | None
 ) -> list[dict]:
@@ -206,10 +223,11 @@ def moderate_input_messages_for_surface(
 ) -> list[dict]:
     """Input moderation for one surface: the same list when nothing changes, a new list on redact,
     ``LLMPolicyRefusal`` on block. Only ``user`` and ``tool`` text is moderated, as in chat."""
-    policy = resolve_policy(surface, user_id) if policy is None else policy
-    if policy is None:
-        return messages
-    return _moderate_input(messages, policy, surface, None, user_id)
+    with _input_check_refusal(surface, None, user_id):
+        policy = resolve_policy(surface, user_id) if policy is None else policy
+        if policy is None:
+            return messages
+        return _moderate_input(messages, policy, surface, None, user_id)
 
 
 def _moderate_output(
@@ -366,7 +384,8 @@ class _StreamState:
                     emit = (emit or "") + held
                 elif held:
                     pre.append(_content_frame(index, held))
-            if text is None or (emit == text and not moderator.held):
+            # provider_response can carry other parts of the same event, so a content chunk that has one is rebuilt
+            if text is None or (emit == text and not moderator.held and "provider_response" not in chunk):
                 new_choices.append(choice)
                 continue
             changed = True
@@ -377,17 +396,31 @@ class _StreamState:
             new_choices.append({**{k: v for k, v in choice.items() if k != "logprobs"}, "delta": new_delta})
         if not changed:
             return [*pre, item]
-        return [*pre, *_rebuilt(chunk, new_choices)]
+        return [*pre, *_rebuilt(item, chunk, new_choices)]
 
 
-def _rebuilt(chunk: dict, choices: list) -> list[str]:
-    """The changed chunk without ``provider_response``, or nothing when it only carried held text."""
+def _rebuilt(item: str, chunk: dict, choices: list) -> list[str]:
+    """The changed chunk without ``provider_response``, or nothing when it only carried held text.
+    Non-``data:`` lines of the item (``event:``) are kept; the first ``data:`` line is replaced."""
     rebuilt = {k: v for k, v in chunk.items() if k != "provider_response"}
     rebuilt["choices"] = choices
     carries = any(k not in _CHUNK_METADATA_KEYS for k in rebuilt) or any(
         not isinstance(c, dict) or set(c) - {"index", "delta"} or c.get("delta") for c in choices
     )
-    return [sse_data(rebuilt)] if carries else []
+    if not carries:
+        return []
+    lines = item.splitlines()
+    if all(line.startswith("data:") for line in lines if line):
+        return [sse_data(rebuilt)]
+    new_data = sse_data(rebuilt).strip()
+    out: list[str] = []
+    for line in lines:
+        if not line.startswith("data:"):
+            out.append(line)
+        elif new_data:
+            out.append(new_data)
+            new_data = ""
+    return ["\n".join(out) + "\n\n"]
 
 
 def _close(source: Any) -> None:
@@ -395,6 +428,25 @@ def _close(source: Any) -> None:
     if callable(close):
         with contextlib.suppress(Exception):
             close()
+
+
+class _SyncStream:
+    """The sync wrapper. A generator's ``finally`` never runs if it is closed before its first ``next()``,
+    so ``close()`` closes the source itself."""
+
+    def __init__(self, source: Any, state: _StreamState) -> None:
+        self._source = source
+        self._gen = _sync_stream(source, state)
+
+    def __iter__(self) -> _SyncStream:
+        return self
+
+    def __next__(self) -> Any:
+        return next(self._gen)
+
+    def close(self) -> None:
+        self._gen.close()
+        _close(self._source)
 
 
 def _sync_stream(source: Any, state: _StreamState) -> Iterator[Any]:
@@ -439,13 +491,14 @@ def _policy_of(call: GatewayCall) -> Any | None:
 
 def pre_call(call: GatewayCall) -> None:
     """Resolve the policy once, store it on the call, then moderate the request's messages."""
-    policy = _policy_of(call)
-    messages = call.request.get("messages")
-    if policy is None or not isinstance(messages, list):
-        return
-    moderated = _moderate_input(messages, policy, call.surface, call.provider, call.user_id)
-    if moderated is not messages:
-        call.request["messages"] = moderated
+    with _input_check_refusal(call.surface, call.provider, call.user_id):
+        policy = _policy_of(call)
+        messages = call.request.get("messages")
+        if policy is None or not isinstance(messages, list):
+            return
+        moderated = _moderate_input(messages, policy, call.surface, call.provider, call.user_id)
+        if moderated is not messages:
+            call.request["messages"] = moderated
 
 
 def _moderate_result(call: GatewayCall, result: dict, policy: Any) -> dict:
@@ -467,9 +520,8 @@ def _moderate_result(call: GatewayCall, result: dict, policy: Any) -> dict:
         changed = True
         new_message = {**message, "content": new}
         new_choice = {k: v for k, v in choice.items() if k not in ("provider_response", "logprobs")}
-        if action == "block":
-            new_message.pop("tool_calls", None)
-            new_message.pop("function_call", None)
+        if action == "block":  # nothing of the refused message survives: reasoning, tool calls, unknown fields
+            new_message = {"role": message.get("role", "assistant"), "content": OUTPUT_REFUSAL}
             new_choice["finish_reason"] = "content_filter"
         out.append({**new_choice, "message": new_message})
     if not changed:
@@ -477,10 +529,42 @@ def _moderate_result(call: GatewayCall, result: dict, policy: Any) -> dict:
     return {**{k: v for k, v in result.items() if k != "provider_response"}, "choices": out}
 
 
+def _refused(result: Any) -> Any:
+    """The refusal in place of ``result``, whose text was never checked; usage is kept for a dict."""
+    if isinstance(result, dict):
+        kept = {k: v for k, v in result.items() if k in ("id", "object", "created", "model", "usage")}
+        choice = {"index": 0, "message": {"role": "assistant", "content": OUTPUT_REFUSAL}, "finish_reason": "content_filter"}
+        return {**kept, "choices": [choice]}
+    state = _StreamState(None, None, None, None)
+    if hasattr(result, "__aiter__"):
+        async def refused_async() -> AsyncIterator[Any]:
+            for frame in state._block(0):
+                yield frame
+            aclose = getattr(result, "aclose", None)
+            if callable(aclose):
+                with contextlib.suppress(Exception):
+                    await aclose()
+
+        return refused_async()
+    if hasattr(result, "__iter__") and not isinstance(result, (str, bytes)):
+        def refused_sync() -> Iterator[Any]:
+            try:
+                yield from state._block(0)
+            finally:
+                _close(result)
+
+        return refused_sync()
+    return result
+
+
 def post_call(call: GatewayCall, result: Any) -> Any:
     """Moderate the provider's answer: a dict (non-stream) or a sync/async stream iterator. Never raises."""
     try:
         policy = _policy_of(call)
+    except Exception as exc:  # fail closed: moderation is on for all we know, and nothing was checked
+        logger.warning("moderation policy resolution failed ({}) surface={}", type(exc).__name__, call.surface)
+        return _refused(result)
+    try:
         if policy is None or not policy.output_enabled:
             return result
         if isinstance(result, dict):
@@ -489,7 +573,7 @@ def post_call(call: GatewayCall, result: Any) -> Any:
         if hasattr(result, "__aiter__"):
             return _async_stream(result, state)
         if hasattr(result, "__iter__") and not isinstance(result, (str, bytes)):
-            return _sync_stream(result, state)
+            return _SyncStream(result, state)
     except Exception as exc:
         logger.warning("moderation post hook failed ({}) surface={}", type(exc).__name__, call.surface)
     return result

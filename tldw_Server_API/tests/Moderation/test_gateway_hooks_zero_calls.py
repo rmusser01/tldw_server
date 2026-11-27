@@ -3,6 +3,8 @@
 
 from __future__ import annotations
 
+import types
+
 import pytest
 
 import tldw_Server_API.app.core.Moderation.gateway_hooks as hooks_mod
@@ -10,6 +12,7 @@ from tldw_Server_API.app.core.exceptions import LLMPolicyRefusal
 from tldw_Server_API.app.core.LLM_Calls import gateway
 from tldw_Server_API.app.core.Moderation.policy_evaluator import PolicyEvaluator
 from tldw_Server_API.app.core.Moderation.surfaces import MODERATED_SURFACES
+from tldw_Server_API.app.core.Usage.llm_call_context import llm_call_context
 from tldw_Server_API.tests.Moderation.conftest import DONE, PROVIDER, finish_frame, openai_frame, reply
 
 pytestmark = pytest.mark.unit
@@ -33,11 +36,24 @@ def evaluator_spy(monkeypatch):
 
 @pytest.fixture
 def guardian_files(monkeypatch, tmp_path):
-    """Guardian is on, but the user has no DB: nothing may be created."""
+    """Guardian is on, the user DB root is tmp_path and the real resolver runs: the user has no DB, none may be created."""
+    import tldw_Server_API.app.core.DB_Management.guardian_db_resolver as resolver
     import tldw_Server_API.app.core.feature_flags as flags
 
+    monkeypatch.setenv("USER_DB_BASE_DIR", str(tmp_path))
     monkeypatch.setattr(flags, "is_guardian_enabled", lambda: True)
-    return tmp_path
+    real = resolver.resolve_existing_guardian_db_for_user_id
+    outcomes: list[str] = []
+
+    def spy(user_id):
+        try:
+            return real(user_id)
+        except FileNotFoundError:
+            outcomes.append("missing")
+            raise
+
+    monkeypatch.setattr(resolver, "resolve_existing_guardian_db_for_user_id", spy)
+    return types.SimpleNamespace(root=tmp_path, outcomes=outcomes)
 
 
 def _call(surface: str, stream: bool):
@@ -57,14 +73,16 @@ def test_global_off_makes_zero_evaluator_calls(
     hooks_mod.register_moderation_gateway_hooks()
     stub_llm_registry.reply = reply("forbidden secret")
     stub_llm_registry.items = [openai_frame("forbidden secret"), finish_frame(), DONE]
-    result = _call(surface, stream)
+    with llm_call_context(user_id=7):
+        result = _call(surface, stream)
     if stream:
         assert list(result) == stub_llm_registry.items
     else:
         assert result == reply("forbidden secret")
     assert stub_llm_registry.requests[0]["messages"][0]["content"] == "forbidden secret"
     assert evaluator_spy == []
-    assert list(guardian_files.rglob("*guardian*")) == []
+    assert guardian_files.outcomes == ["missing"]  # the real resolver ran and found no DB
+    assert [p for p in guardian_files.root.rglob("*") if p.suffix == ".db" or "guardian" in p.name.lower()] == []
 
 
 @pytest.mark.parametrize("stream", [False, True], ids=["non-stream", "stream"])

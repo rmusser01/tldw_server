@@ -14,6 +14,7 @@ from tldw_Server_API.app.core.LLM_Calls import gateway
 from tldw_Server_API.app.core.LLM_Calls.gateway import GatewayCall
 from tldw_Server_API.app.core.Moderation.gateway_hooks import (
     INPUT_REFUSAL,
+    INPUT_UNCHECKED_REFUSAL,
     OUTPUT_REFUSAL,
     StreamModerator,
     moderate_input_messages_for_surface,
@@ -114,12 +115,13 @@ def test_input_text_function_same_list_when_unchanged(moderation_hooks):
 
 def test_output_block_non_stream_content_filter_keeps_usage(moderation_hooks, stub_llm_registry):
     stub_llm_registry.reply = reply("a forbidden answer", provider_response={"raw": "forbidden"})
-    stub_llm_registry.reply["choices"][0]["message"]["tool_calls"] = [{"id": "t"}]
+    stub_llm_registry.reply["choices"][0]["message"].update(
+        tool_calls=[{"id": "t"}], reasoning_content="forbidden reasoning", unknown_field="forbidden extra"
+    )
     result = _call()
     choice = result["choices"][0]
-    assert choice["message"]["content"] == OUTPUT_REFUSAL
+    assert choice["message"] == {"role": "assistant", "content": OUTPUT_REFUSAL}
     assert choice["finish_reason"] == "content_filter"
-    assert "tool_calls" not in choice["message"]
     assert result["usage"] == USAGE
     assert "forbidden" not in json.dumps(result)
 
@@ -171,7 +173,8 @@ def test_stream_redact_drops_provider_response(moderation_hooks, stub_llm_regist
     first, second = _parse(out[0]), out[1]
     assert first["choices"][0]["delta"]["content"] == "a [X]"
     assert "provider_response" not in first
-    assert second is stub_llm_registry.items[1] or second == stub_llm_registry.items[1]
+    # a content chunk with a provider_response is rebuilt without it, even when its text is unchanged
+    assert _parse(second)["choices"] == [{"delta": {"content": "clean"}}] and "provider_response" not in _parse(second)
     assert "secret" not in "".join(out)
 
 
@@ -478,8 +481,12 @@ def test_evaluator_failure_on_output_blocks(moderation_hooks, stub_llm_registry,
 
     stub_llm_registry.reply = reply("anything")
     monkeypatch.setattr(moderation_hooks, "evaluate_action", boom)
-    with pytest.raises(RuntimeError):  # input fails closed by refusing the call
+    with pytest.raises(LLMPolicyRefusal) as raised:  # input fails closed, as a refusal and not a provider failure
         _call([{"role": "user", "content": "x"}])
+    assert raised.value.detail == INPUT_UNCHECKED_REFUSAL and isinstance(raised.value.__cause__, RuntimeError)
+    assert stub_llm_registry.requests == []
+    with pytest.raises(LLMPolicyRefusal):
+        moderate_input_messages_for_surface([{"role": "user", "content": "x"}], surface=SURFACE, user_id=None)
     call = GatewayCall(surface=SURFACE, provider=PROVIDER, request={}, stream=False, user_id=None)
     call._moderation_policy = moderation_hooks.get_effective_policy(None, surface=SURFACE)
     assert hooks_mod.post_call(call, reply("anything"))["choices"][0]["message"]["content"] == OUTPUT_REFUSAL
@@ -508,3 +515,54 @@ def test_register_is_idempotent_remove_resets_and_reregisters(make_service):
     remove()  # a second remove is harmless
     hooks_mod.register_moderation_gateway_hooks()
     assert len(gateway._POLICY_HOOKS) == 1
+
+
+def test_zero_holdback_multi_part_google_event_leaks_nothing(moderation_hooks, stub_llm_registry, buffer_chars):
+    buffer_chars(0)
+    event = {"candidates": [{"content": {"parts": [{"text": "fine part "}, {"text": "a secret part"}]}}]}
+    stub_llm_registry.items = [
+        sse({"choices": [{"delta": {"content": "fine part "}}], "provider_response": event}),
+        sse({"choices": [{"delta": {"content": "a secret part"}}], "provider_response": event}),
+        DONE,
+    ]
+    out = list(_call(stream=True))
+    assert "secret" not in "".join(out) and "provider_response" not in "".join(out)
+    assert _text(out) == "fine part a [X] part"
+
+
+def test_post_call_resolution_failure_fails_closed(moderation_hooks, monkeypatch, stub_llm_registry):
+    def boom(*a, **k):
+        raise RuntimeError("boom")
+
+    monkeypatch.setattr(moderation_hooks, "get_effective_policy", boom)
+    call = GatewayCall(surface=SURFACE, provider=PROVIDER, request={}, stream=False, user_id=None)
+    out = hooks_mod.post_call(call, reply("a secret"))
+    assert out["choices"][0]["message"]["content"] == OUTPUT_REFUSAL and out["usage"] == USAGE
+    call = GatewayCall(surface=SURFACE, provider=PROVIDER, request={}, stream=True, user_id=None)
+    stream = list(hooks_mod.post_call(call, iter([openai_frame("a secret"), DONE])))
+    assert _text(stream) == OUTPUT_REFUSAL and stream[-1] == DONE and "secret" not in "".join(stream)
+
+
+def test_changed_multi_line_item_keeps_non_data_lines(moderation_hooks, stub_llm_registry, buffer_chars):
+    buffer_chars(0)
+    item = 'event: message\nid: 7\ndata: {"choices":[{"index":0,"delta":{"content":"a secret"}}]}\n\n'
+    stub_llm_registry.items = [item, DONE]
+    out = list(_call(stream=True))
+    lines = out[0].splitlines()
+    assert lines[:2] == ["event: message", "id: 7"] and lines[2].startswith("data: ")
+    assert json.loads(lines[2][6:])["choices"][0]["delta"]["content"] == "a [X]" and out[0].endswith("\n\n")
+
+
+def test_closing_the_sync_wrapper_before_first_next_closes_the_source(moderation_hooks):
+    closed = []
+
+    class Source:
+        def __iter__(self):
+            return iter([openai_frame("x")])
+
+        def close(self):
+            closed.append(1)
+
+    call = GatewayCall(surface=SURFACE, provider=PROVIDER, request={}, stream=True, user_id=None)
+    hooks_mod.post_call(call, Source()).close()
+    assert closed == [1]
