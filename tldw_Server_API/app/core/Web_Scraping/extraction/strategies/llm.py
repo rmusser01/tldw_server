@@ -11,7 +11,8 @@ from typing import Any, Optional
 from bs4 import BeautifulSoup
 from loguru import logger
 
-from tldw_Server_API.app.core.exceptions import LLMQuotaExceededError
+from tldw_Server_API.app.core.exceptions import LLMPolicyRefusal, LLMQuotaExceededError
+from tldw_Server_API.app.core.LLM_Calls.provider_results import raise_if_content_filtered
 
 from ...observability import bounded_code, bounded_stage, sanitized_host
 from .. import throttles
@@ -177,11 +178,13 @@ def call_llm_provider(
                     max_tokens=settings.get("max_tokens"),
                     response_format=settings.get("response_format"),
                     app_config=app_config,
+                    llm_surface="web.extraction",
                 )
+                raise_if_content_filtered(response)
                 dependencies.cancellation_checkpoint()
                 return response, False
-        except LLMQuotaExceededError:
-            raise  # the user's limit: final, so not retried and not reported as a failed extraction
+        except (LLMQuotaExceededError, LLMPolicyRefusal):
+            raise  # the user's limit or a moderation refusal: final, so not retried and not reported as a failed extraction
         except Exception as exc:  # noqa: BLE001 - provider SDKs use unrelated exception hierarchies
             dependencies.cancellation_checkpoint()
             _log_provider_failure(exc, stage=stage, url=url)

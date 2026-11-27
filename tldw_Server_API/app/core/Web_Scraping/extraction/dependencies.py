@@ -7,6 +7,7 @@ from collections.abc import Iterator
 from contextlib import contextmanager
 from contextvars import ContextVar
 from dataclasses import dataclass
+from functools import partial
 from typing import Any, Callable
 
 
@@ -66,7 +67,7 @@ def build_default_dependencies() -> ExtractionDependencies:
     return ExtractionDependencies(
         validate_selector_rules=validate_selector_rules,
         extract_schema_fields=extract_schema_fields,
-        perform_chat_api_call=perform_chat_api_call,
+        perform_chat_api_call=partial(perform_chat_api_call, llm_surface="web.extraction"),
         increment_counter=default_increment_counter,
         observe_histogram=default_observe_histogram,
         log_counter=default_log_counter,

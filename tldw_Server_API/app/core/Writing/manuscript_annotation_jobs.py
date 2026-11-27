@@ -9,6 +9,7 @@ from typing import Any
 
 from tldw_Server_API.app.core.DB_Management.ManuscriptDB import ManuscriptDBHelper
 from tldw_Server_API.app.core.Jobs.manager import JobManager
+from tldw_Server_API.app.core.LLM_Calls.provider_results import raise_if_content_filtered
 from tldw_Server_API.app.core.Writing.manuscript_annotations import (
     VALID_ANNOTATION_CATEGORIES,
     build_scene_review_prompt,
@@ -149,7 +150,9 @@ async def process_scene_annotation_review_job(
         api_endpoint=payload["provider"],
         model=payload["model"],
         temp=0.2,
+        llm_surface="writing.manuscript",
     )
+    raise_if_content_filtered(llm_response)  # a refused review is a failed job, not an empty review
     raw_text = _extract_content(llm_response)
     try:
         parsed_annotations = parse_scene_review_response(

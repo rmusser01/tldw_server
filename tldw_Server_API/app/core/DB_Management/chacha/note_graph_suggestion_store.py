@@ -179,6 +179,7 @@ class NoteGraphSuggestionStore:
         "notes_graph_capabilities_changed_before_provider": "retry_generation",
         "notes_graph_fingerprint_stale": "refresh_note",
         "notes_graph_fts_not_ready": "contact_administrator",
+        "notes_graph_provider_policy_refused": "refresh_note",
         "notes_graph_provider_retry_policy_unsupported": "configure_provider",
         "notes_graph_provider_unavailable": "retry_generation",
         "notes_graph_source_too_large": "refresh_note",

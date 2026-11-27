@@ -81,6 +81,7 @@ const RUN_ERROR_CODES = [
   "notes_graph_publication_receipt_mismatch",
   "notes_graph_publication_receipt_missing",
   "notes_graph_publication_state_missing",
+  "notes_graph_provider_policy_refused",
   "notes_graph_provider_retry_policy_unsupported",
   "notes_graph_provider_unavailable",
   "notes_graph_source_changed",

@@ -18,7 +18,7 @@ from typing import TYPE_CHECKING, Any
 
 from loguru import logger
 
-from tldw_Server_API.app.core.exceptions import LLMQuotaExceededError
+from tldw_Server_API.app.core.exceptions import LLMPolicyRefusal, LLMQuotaExceededError
 
 if TYPE_CHECKING:
     from tldw_Server_API.app.core.RAG.rag_service.database_retrievers import (
@@ -332,8 +332,8 @@ class FVAPipeline:
                         # Keep original verification on timeout
                         final_verification = original_verification
 
-                    except LLMQuotaExceededError:
-                        raise  # the user's limit fails the claim; it does not keep the unchallenged verdict
+                    except (LLMQuotaExceededError, LLMPolicyRefusal):
+                        raise  # a final refusal fails the claim; it does not keep the unchallenged verdict
                     except Exception as e:
                         logger.error(f"Falsification error for claim {claim.id}: {e}")
                         # Keep original verification on error
@@ -417,9 +417,9 @@ class FVAPipeline:
             *[process_with_semaphore(c) for c in claims],
             return_exceptions=True,
         )
-        refusal = next((r for r in results if isinstance(r, LLMQuotaExceededError)), None)
+        refusal = next((r for r in results if isinstance(r, (LLMQuotaExceededError, LLMPolicyRefusal))), None)
         if refusal is not None:
-            raise refusal  # the user's limit fails the batch; a refused claim is not dropped from it
+            raise refusal  # a final refusal fails the batch; a refused claim is not dropped from it
 
         # Filter out exceptions
         valid_results: list[FVAResult] = [

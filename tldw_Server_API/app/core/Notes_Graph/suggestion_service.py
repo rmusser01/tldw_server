@@ -94,6 +94,7 @@ class SuggestionWorkerCancelled(SuggestionWorkerError):
 
 _GENERATION_ERROR_CODES = {
     "notes_graph_provider_call_failed": SuggestionErrorCode.PROVIDER_UNAVAILABLE,
+    "notes_graph_provider_policy_refused": SuggestionErrorCode.PROVIDER_POLICY_REFUSED,
     "notes_graph_provider_call_policy_unsupported": SuggestionErrorCode.PROVIDER_RETRY_POLICY_UNSUPPORTED,
     "notes_graph_suggestion_input_too_large": SuggestionErrorCode.SOURCE_TOO_LARGE,
     "notes_graph_suggestion_stale_evidence": SuggestionErrorCode.FINGERPRINT_STALE,

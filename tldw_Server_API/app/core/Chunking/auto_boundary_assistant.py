@@ -9,6 +9,7 @@ import json
 import re
 from collections.abc import Callable
 from dataclasses import dataclass
+from functools import partial
 from typing import Any, Protocol
 
 from loguru import logger
@@ -19,6 +20,7 @@ from tldw_Server_API.app.core.Chat.bounded_daemon import (
     await_owned_worker,
 )
 from tldw_Server_API.app.core.Chat.chat_helpers import extract_response_content
+from tldw_Server_API.app.core.exceptions import LLMPolicyRefusal
 from tldw_Server_API.app.core.LLM_Calls.adapter_registry import get_registry
 from tldw_Server_API.app.core.LLM_Calls.adapter_utils import (
     normalize_provider,
@@ -26,6 +28,7 @@ from tldw_Server_API.app.core.LLM_Calls.adapter_utils import (
     resolve_provider_model,
 )
 from tldw_Server_API.app.core.LLM_Calls.provider_metadata import provider_requires_api_key
+from tldw_Server_API.app.core.LLM_Calls.provider_results import raise_if_content_filtered
 from tldw_Server_API.app.core.Provider_Credentials.llm_provider_overrides import (
     capture_provider_override_call_snapshot,
 )
@@ -204,6 +207,13 @@ class ChatAutoChunkBoundaryAssistant:
                     self._call_chat(request, availability),
                     timeout=max(0.001, float(request.timeout_sec or _DEFAULT_TIMEOUT_SECONDS)),
                 )
+                raise_if_content_filtered(raw_response)
+            except LLMPolicyRefusal:
+                # Optional assist: a refusal leaves the deterministic chunking, labelled as one, never retried.
+                return AutoChunkBoundaryAssistantResult.fallback(
+                    reason="ai_assist_policy_refused",
+                    rationale="Boundary assist was refused by moderation policy.",
+                )
             except asyncio.TimeoutError:
                 return AutoChunkBoundaryAssistantResult.fallback(
                     reason="ai_assist_timeout",
@@ -341,7 +351,7 @@ class ChatAutoChunkBoundaryAssistant:
         if chat_call is None:
             from tldw_Server_API.app.core.Chat.chat_service import perform_chat_api_call_async
 
-            chat_call = perform_chat_api_call_async
+            chat_call = partial(perform_chat_api_call_async, llm_surface="chunking.boundaries")
 
         call_kwargs: dict[str, Any] = {
             "api_provider": availability.provider,

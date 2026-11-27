@@ -81,7 +81,8 @@ class ChatRulesAnswerGenerator:
 async def _default_chat_call(**kwargs: Any) -> Any:
     from tldw_Server_API.app.core.Chat.chat_service import perform_chat_api_call_async
 
-    return await perform_chat_api_call_async(**kwargs)
+    kwargs.pop("llm_surface", None)  # the surface is this module's, never the caller's
+    return await perform_chat_api_call_async(**kwargs, llm_surface="rpg.rules")
 
 
 def _user_prompt(*, query: str, evidence: list[RuleLookupItem]) -> str:
