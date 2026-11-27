@@ -33,6 +33,7 @@ Base commit 9dc8ad084e. ADR required: no. ADR-003 governs the existing use of Jo
 Acceptance reconciliation for #2021. The API guide records owner-scoped advisory preflight and monitor guidance, targeted Retry with the stored source recipe, same-tab replay of unresolved commands, and durable Jobs and variant recovery. The published guide mirrors the source.
 Verified on remote dev base 9dc8ad084e with 328 backend VN generation and recovery tests, 369 VN frontend tests, three Chromium recovery scenarios, and 34 published-doc refresh tests. Scoped ESLint, frontend typecheck, strict MkDocs build, and git diff --check passed. Bandit is inapplicable because this change touches Markdown and TypeScript test fixtures.
 The automated checks use test workers and mocked providers or API responses. #2021 remains open for qualification on a target deployment with actual queues, databases, storage, image provider/model, and GPU runtime where used. Verify Redis on deployments that depend on it. Local Redis binaries are available, but no live VN generation rollout was run.
+Pull request: https://github.com/rmusser01/tldw_server/pull/3667
 <!-- SECTION:IMPLEMENTATION_NOTES:END -->
 
 ## Final Summary
