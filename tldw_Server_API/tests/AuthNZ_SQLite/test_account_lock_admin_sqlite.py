@@ -63,6 +63,17 @@ async def test_admin_unlock_needs_step_up_and_clears_the_lock(admin_client) -> N
     assert login(ctx.client, "alice", ctx.password)["access_token"]
 
 
+async def test_admin_unlock_with_a_wrong_password_is_refused(admin_client) -> None:
+    ctx = admin_client
+    admin = _admin_headers(ctx)
+    await lock_user(ctx.alice_id)
+    response = ctx.client.post(
+        _unlock(ctx.alice_id), json={"reason": REASON, "admin_password": "Wrong-Pass-2026!"}, headers=admin
+    )
+    assert response.status_code == 403 and response.json() == {"detail": "Admin reauthentication failed"}
+    assert (await _row(ctx.alice_id))["security_locked_at"] is not None
+
+
 async def test_admin_unlock_also_suspends_recent_keys_and_kills_old_tokens(admin_client) -> None:
     ctx = admin_client
     admin = _admin_headers(ctx)

@@ -174,6 +174,7 @@ async def test_sign_in_waits_for_an_uncommitted_lock_and_is_refused_pg(lock_db) 
     locker = await asyncpg.connect(
         host=pg.host, port=int(pg.port), user=pg.user, password=pg.password, database=lock_db.db_name
     )
+    sign_in = None
     try:
         lock_tx = locker.transaction()
         await lock_tx.start()
@@ -188,6 +189,9 @@ async def test_sign_in_waits_for_an_uncommitted_lock_and_is_refused_pg(lock_db) 
         with pytest.raises(AccountSecurityLockedError):
             await sign_in
     finally:
+        if sign_in is not None:  # a failed assert above leaves it waiting on the uncommitted lock
+            sign_in.cancel()
+            await asyncio.gather(sign_in, return_exceptions=True)
         await locker.close()
     assert await lock_db.pool.fetchval("SELECT COUNT(*) FROM sessions WHERE user_id = $1", lock_db.user_id) == 0
 
