@@ -3,12 +3,15 @@
 from __future__ import annotations
 
 import struct
+from collections.abc import Sequence
 from pathlib import Path
 from typing import Any
 
-from tldw_Server_API.app.core.AuthNZ.repos.generated_files_repo import SOURCE_FEATURE_VN_ASSETS
+from tldw_Server_API.app.core.AuthNZ.repos.generated_files_repo import AuthnzGeneratedFilesRepo, SOURCE_FEATURE_VN_ASSETS
 from tldw_Server_API.app.core.DB_Management.db_path_utils import DatabasePaths
 from tldw_Server_API.app.core.Utils.path_utils import safe_join
+from tldw_Server_API.app.core.VN_Assets.constants import ITEM_REVIEW_STATUS_APPROVED
+from tldw_Server_API.app.core.VN_Assets.vn_asset_schemas import VNAssetItemResponse
 
 VN_ASSET_CONTENT_NOT_FOUND = "vn_asset_content_not_found"
 VN_ASSET_INVALID_IMAGE = "vn_asset_invalid_image"
@@ -100,6 +103,34 @@ def generated_file_size_bytes(record: dict[str, Any], fallback: int | None = Non
     except (TypeError, ValueError):
         return 0
     return max(size, 0)
+
+
+async def registered_pack_storage(
+    files_repo: AuthnzGeneratedFilesRepo,
+    items: Sequence[VNAssetItemResponse],
+    *,
+    owner_user_id: int,
+) -> tuple[int, int]:
+    """Count live registrations attributed to pack items, including the approved subset."""
+    references = {vn_asset_source_ref(item.id): item for item in items if item.generated_file_id is not None}
+    file_ids = sorted({item.generated_file_id for item in items if item.generated_file_id is not None})
+    approved_ids = {item.generated_file_id for item in items if item.review_status == ITEM_REVIEW_STATUS_APPROVED}
+    registered_bytes = 0
+    approved_bytes = 0
+    # Bound the AuthNZ query even for packs above the current item limit.
+    for offset in range(0, len(file_ids), 500):
+        for record in await files_repo.get_files_by_ids(file_ids[offset:offset + 500]):
+            file_id = int(record["id"])
+            item = references.get(record.get("source_ref"))
+            if item is None or item.generated_file_id != file_id or not generated_file_matches_vn_asset(
+                record, user_id=owner_user_id, item_id=item.id,
+            ):
+                continue
+            size = generated_file_size_bytes(record)
+            registered_bytes += size
+            if file_id in approved_ids:
+                approved_bytes += size
+    return registered_bytes, approved_bytes
 
 
 def _detect_png_dimensions(image_bytes: bytes) -> tuple[int, int]:

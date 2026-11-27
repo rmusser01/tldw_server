@@ -191,6 +191,7 @@ def build_authored_recipe(
         for key in ("steps", "cfg_scale", "sampler"):
             if key in dimensions and key not in extra_params:
                 extra_params[key] = dimensions[key]
+        width, height = requested_generation_dimensions(dimensions, width=slot.get("width"), height=slot.get("height"))
         recipes.append({
             "slot_id": int(slot["id"]),
             "slot_key": slot["slot_key"],
@@ -206,8 +207,8 @@ def build_authored_recipe(
             },
             "requested_backend": _first_text(slot.get("backend_override"), pack.get("default_backend")),
             "requested_model": _first_text(slot.get("model_override"), pack.get("default_model")),
-            "width": _positive_int(slot.get("width")) or _positive_int(dimensions.get("width")),
-            "height": _positive_int(slot.get("height")) or _positive_int(dimensions.get("height")),
+            "width": width,
+            "height": height,
             "format": (_first_text(dimensions.get("format"), dimensions.get("image_format"), "png") or "png").lower(),
             "extra_params": extra_params,
             "seeds": [seed + index if seed is not None else None for index in range(count)],
@@ -255,11 +256,21 @@ def _json_object(value: Any) -> dict[str, Any]:
     return dict(loaded) if isinstance(loaded, Mapping) else {}
 
 
+def requested_generation_dimensions(
+    defaults: Mapping[str, Any], *, width: Any, height: Any,
+) -> tuple[int | None, int | None]:
+    """Resolve each requested dimension from the slot, then the pack defaults."""
+    return (
+        _positive_int(width) or _positive_int(defaults.get("width")),
+        _positive_int(height) or _positive_int(defaults.get("height")),
+    )
+
+
 def _positive_int(value: Any) -> int | None:
     """Return a positive integer or None for absent and invalid values."""
     try:
         parsed = int(value)
-    except (TypeError, ValueError):
+    except (TypeError, ValueError, OverflowError):
         return None
     return parsed if parsed > 0 else None
 

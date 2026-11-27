@@ -1,6 +1,7 @@
 import sqlite3
 from collections.abc import Generator, Iterator
 from types import SimpleNamespace
+from unittest.mock import AsyncMock
 
 import pytest
 from fastapi import FastAPI, Request
@@ -8,6 +9,7 @@ from fastapi.testclient import TestClient
 from pydantic import ValidationError
 
 from tldw_Server_API.app.api.v1.API_Deps.ChaCha_Notes_DB_Deps import get_chacha_db_for_user
+from tldw_Server_API.app.api.v1.endpoints import vn_assets
 from tldw_Server_API.app.api.v1.endpoints.vn_assets import router as vn_assets_router
 from tldw_Server_API.app.api.v1.schemas.vn_asset_schemas import (
     VNAssetBulkReviewRequest,
@@ -228,6 +230,92 @@ def test_generation_preflight_uses_server_default_without_claiming_worker_health
     assert data["local_workers_enabled"] is True
 
 
+@pytest.mark.parametrize("partial_estimate", [False, True])
+def test_generation_preflight_reports_owned_storage_and_advisory_estimate(
+    client: TestClient,
+    service: VNAssetPackService,
+    character_id: int,
+    monkeypatch: pytest.MonkeyPatch,
+    partial_estimate: bool,
+) -> None:
+    pack = service.create_pack(
+        VNAssetPackCreate(
+            title="Storage preflight",
+            primary_character_id=character_id,
+            default_dimensions={"width": "320", "height": 256},
+        ),
+    )
+    slot = service.create_slot(
+        pack.id, VNAssetSlotCreate(asset_type="sprite", slot_key="neutral", variant_count=2, width=640),
+    )
+    service.create_slot(
+        pack.id,
+        VNAssetSlotCreate(asset_type="sprite", slot_key="happy", variant_count=1, width=60000 if partial_estimate else None),
+    )
+    rows = [
+        service.repo.create_item(pack_id=pack.id, slot_id=slot.id, variant_index=index, generated_file_id=file_id)
+        for index, file_id in enumerate([101, 101, 102, 103, 104, 105])
+    ]
+    service.repo.update_item_review(rows[1]["id"], review_status="approved")
+    registered_files = []
+    for row, size in zip([rows[index] for index in [0, 2, 3, 4]], [100, 250, 800, 900], strict=True):
+        registered_files.append({
+            "id": row["generated_file_id"],
+            "user_id": 43 if row is rows[3] else 42,
+            "source_feature": "vn_assets",
+            "source_ref": f"vn_asset_item:{row['id']}",
+            "is_deleted": row is rows[4],
+            "file_size_bytes": size,
+        })
+    files = SimpleNamespace(get_files_by_ids=AsyncMock(return_value=registered_files))
+    quota = AsyncMock(return_value=(False, {}))
+    storage = AsyncMock(
+        return_value=SimpleNamespace(get_generated_files_repo=AsyncMock(return_value=files), check_combined_quota=quota),
+    )
+    monkeypatch.setattr(vn_assets, "get_storage_service", storage)
+
+    response = client.get(f"/api/v1/vn/vn-assets/packs/{pack.id}/generation/preflight")
+
+    assert response.status_code == 200
+    estimate = 2 * 640 * 256 * 4 + (0 if partial_estimate else 320 * 256 * 4)
+    assert response.json()["storage"] == {
+        "registered_bytes": 350,
+        "approved_bytes": 100,
+        "estimated_output_bytes": estimate,
+        "unknown_output_count": int(partial_estimate),
+        "estimate_fits_quota": None if partial_estimate else False,
+    }
+    files.get_files_by_ids.assert_awaited_once_with([101, 102, 103, 104, 105])
+    if partial_estimate:
+        quota.assert_not_awaited()
+    else:
+        quota.assert_awaited_once_with(42, estimate)
+    assert service.repo.list_batches(pack.id) == []
+
+
+def test_generation_preflight_keeps_estimate_when_storage_is_unavailable(
+    client: TestClient, service: VNAssetPackService, character_id: int, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    pack = service.create_pack(VNAssetPackCreate(title="Estimate only", primary_character_id=character_id))
+    slot = service.create_slot(
+        pack.id, VNAssetSlotCreate(asset_type="sprite", slot_key="neutral", width=320, height=256, variant_count=1),
+    )
+    service.repo.create_item(pack_id=pack.id, slot_id=slot.id, generated_file_id=101)
+    monkeypatch.setattr(vn_assets, "get_storage_service", AsyncMock(side_effect=OSError("unavailable")))
+
+    response = client.get(f"/api/v1/vn/vn-assets/packs/{pack.id}/generation/preflight")
+
+    assert response.status_code == 200
+    assert response.json()["slots"][0]["slot_id"] == slot.id
+    assert response.json()["storage"] == {
+        "registered_bytes": None,
+        "approved_bytes": None,
+        "estimated_output_bytes": 320 * 256 * 4,
+        "unknown_output_count": 0,
+        "estimate_fits_quota": None,
+    }
+
+
 def test_generation_preflight_checks_ownership_before_reading_configuration(
     client: TestClient,
     service: VNAssetPackService,
@@ -241,11 +329,14 @@ def test_generation_preflight_checks_ownership_before_reading_configuration(
 
     registry = Mock()
     monkeypatch.setattr(preflight, "get_registry", registry)
+    storage = AsyncMock()
+    monkeypatch.setattr(vn_assets, "get_storage_service", storage)
     pack = service.create_pack(VNAssetPackCreate(title="Private", primary_character_id=character_id))
     current_user_id["value"] = 43
     response = client.get(f"/api/v1/vn/vn-assets/packs/{pack.id}/generation/preflight")
     assert response.status_code == 404
     registry.assert_not_called()
+    storage.assert_not_awaited()
 
 
 @pytest.mark.parametrize("auth_kind", ["user", "api_key"])

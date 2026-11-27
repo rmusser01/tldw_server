@@ -329,6 +329,9 @@ for (const viewport of [{ width: 1440, height: 1000 }, { width: 390, height: 844
   test(`VN generation retries a failed slot and refreshes progress at ${viewport.width}px`, async ({ page }, testInfo) => {
     await page.setViewportSize(viewport);
     await seedAuth(page);
+    await page.route(/\/api\/v1\/users\/me\/profile(?:\?.*)?$/, (route) => fulfillJson(route, 200, {
+      user: { id: 1, username: 'smoke', is_active: true },
+    }));
     const requests: Array<Record<string, unknown>> = [];
     let retried = false;
     const slot = {
@@ -339,7 +342,7 @@ for (const viewport of [{ width: 1440, height: 1000 }, { width: 390, height: 844
       const path = new URL(route.request().url()).pathname.replace('/api/v1/vn/vn-assets', '');
       if (path === '/starter-matrices') return fulfillJson(route, 200, { matrices: [] });
       if (path === '/packs') return fulfillJson(route, 200, [
-        { id: 7, title: 'Recovery pack', primary_character_id: 42, status: 'draft' },
+        { id: 7, owner_user_id: 1, title: 'Recovery pack', primary_character_id: 42, status: 'draft' },
       ]);
       if (path === '/packs/7/slots') return fulfillJson(route, 200, [
         retried ? { ...slot, status: 'reviewing', last_error: null } : slot,
@@ -354,6 +357,13 @@ for (const viewport of [{ width: 1440, height: 1000 }, { width: 390, height: 844
         warnings: ['Local generation workers are not both enabled. Enable them or confirm that separate workers are running.'],
         slots: [{ slot_id: 12, backend: null, model: null, status: 'unavailable',
           message: 'Enable the selected image backend before retrying.' }],
+        storage: {
+          registered_bytes: 524288,
+          approved_bytes: 0,
+          estimated_output_bytes: 2097152,
+          unknown_output_count: 0,
+          estimate_fits_quota: false,
+        },
       });
       if (path === '/packs/7/generation') return fulfillJson(route, 200, {
         status: retried ? 'completed' : 'failed',
@@ -371,6 +381,11 @@ for (const viewport of [{ width: 1440, height: 1000 }, { width: 390, height: 844
     await waitForAppShell(page, SMOKE_LOAD_TIMEOUT);
     const retry = page.getByRole('button', { name: 'Retry sprite_neutral' });
     await expect(retry).toBeEnabled();
+    await expect(page.getByText('Stored in this pack')).toBeVisible();
+    const storageEstimate = page.getByText('2 MB', { exact: true });
+    await storageEstimate.scrollIntoViewIfNeeded();
+    await expect(storageEstimate).toBeInViewport();
+    await expect(page.getByText('Generation may exceed your available storage.')).toBeVisible();
     await waitForVisualSettle(page, SMOKE_LOAD_TIMEOUT);
     await page.screenshot({ path: testInfo.outputPath('generation-failure.png'), fullPage: true });
     await retry.click();

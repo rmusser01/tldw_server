@@ -2187,6 +2187,38 @@ describe('VNAssetsWorkbench', () => {
     expect(mocks.getVNAssetGenerationPreflight).toHaveBeenCalledTimes(2);
   });
 
+  it('discards storage responses from before owner revalidation', async () => {
+    existingFailedPack();
+    const storagePreflight = (bytes: number) => ({
+      local_workers_enabled: true, warnings: [], slots: [],
+      storage: {
+        registered_bytes: bytes, approved_bytes: 0, estimated_output_bytes: 0,
+        unknown_output_count: 0, estimate_fits_quota: null,
+      },
+    });
+    let resolveOldStorage!: (value: ReturnType<typeof storagePreflight>) => void;
+    mocks.getVNAssetGenerationPreflight
+      .mockResolvedValueOnce(storagePreflight(1024))
+      .mockImplementationOnce(() => new Promise((resolve) => { resolveOldStorage = resolve; }))
+      .mockResolvedValue(storagePreflight(3072));
+    const user = userEvent.setup();
+    render(<VNAssetsWorkbench />);
+    await screen.findByText('1 KB');
+    await user.click(screen.getByRole('button', { name: 'Refresh generation status' }));
+    await waitFor(() => expect(mocks.getVNAssetGenerationPreflight).toHaveBeenCalledTimes(2));
+
+    const principal = { user: { id: 1, is_active: true } };
+    let resolvePrincipal!: (value: typeof principal) => void;
+    mocks.profile.mockImplementationOnce(() => new Promise((resolve) => { resolvePrincipal = resolve; }));
+    act(() => window.dispatchEvent(new CustomEvent('tldw:auth-credentials-changed', { detail: { authenticated: true } })));
+    await act(async () => resolveOldStorage(storagePreflight(2048)));
+    expect(screen.queryByText('2 KB')).not.toBeInTheDocument();
+    expect(screen.queryByText('1 KB')).not.toBeInTheDocument();
+
+    await act(async () => resolvePrincipal(principal));
+    expect(await screen.findByText('3 KB')).toBeVisible();
+  });
+
   it('loads final items after observing terminal generation status', async () => {
     existingFailedPack();
     const user = userEvent.setup();

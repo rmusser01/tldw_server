@@ -2,6 +2,7 @@ import React from 'react';
 import { Ban, Play, RefreshCw, RotateCcw } from 'lucide-react';
 import { Badge } from '@web/components/ui/Badge';
 import { Button } from '@web/components/ui/Button';
+import { formatFileSize } from '@web/lib/utils';
 import type { VNAssetGenerationPreflight, VNAssetGenerationStatus, VNAssetSlot } from '@web/types/vn-assets';
 
 export interface GenerationMonitorProps {
@@ -48,6 +49,7 @@ export default function GenerationMonitor({
   const canStartGeneration = slots.length > 0 && !generationActive && !busy;
   const canCancelGeneration = generationActive && !busy;
   const failedSlots = slots.filter((slot) => slot.status === 'failed' || slot.last_error);
+  const storage = preflight?.storage;
   const legacyRetryUnavailable = (slotId: number): boolean => {
     const sourceAvailable = generation?.failed_slot_recipe_available?.[slotId];
     if (sourceAvailable !== undefined) return !sourceAvailable;
@@ -89,6 +91,40 @@ export default function GenerationMonitor({
           <dd className="font-medium">{generation?.failed_count ?? 0}</dd>
         </div>
       </dl>
+      {storage && (
+        <div className="mt-4 border-t border-border pt-3 text-sm">
+          <dl className="grid grid-cols-1 gap-x-4 gap-y-2 sm:grid-cols-3">
+            <div>
+              <dt className="text-text-muted">Stored in this pack</dt>
+              <dd className="font-medium tabular-nums">
+                {storage.registered_bytes === null ? 'Unavailable' : formatFileSize(storage.registered_bytes)}
+              </dd>
+            </div>
+            <div>
+              <dt className="text-text-muted">Approved assets</dt>
+              <dd className="font-medium tabular-nums">
+                {storage.approved_bytes === null ? 'Unavailable' : formatFileSize(storage.approved_bytes)}
+              </dd>
+            </div>
+            <div>
+              <dt className="text-text-muted">Estimated new storage</dt>
+              <dd className="font-medium tabular-nums">
+                {storage.estimated_output_bytes === null ? 'Unavailable' : formatFileSize(storage.estimated_output_bytes)}
+              </dd>
+            </div>
+          </dl>
+          {storage.unknown_output_count > 0 && (
+            <p className="mt-2 text-text-muted">
+              {storage.unknown_output_count === 1
+                ? 'One planned variant has no size estimate.'
+                : `${storage.unknown_output_count} planned variants have no size estimate.`}
+            </p>
+          )}
+          {storage.estimate_fits_quota === false && (
+            <p role="alert" className="mt-2 text-warn">Generation may exceed your available storage.</p>
+          )}
+        </div>
+      )}
       <div className="mt-4 flex flex-wrap gap-2">
         <Button
           className="gap-2"

@@ -15,7 +15,9 @@ from typing import Any
 import aiofiles
 import aiofiles.os
 from fastapi import APIRouter, Depends, File, Form, HTTPException, Response, UploadFile, status
+from fastapi.concurrency import run_in_threadpool
 from fastapi.responses import FileResponse
+from loguru import logger
 from pydantic import BaseModel, Field
 
 from tldw_Server_API.app.api.v1.API_Deps.auth_deps import User, get_request_user, rbac_rate_limit
@@ -71,6 +73,7 @@ from tldw_Server_API.app.core.VN_Assets.storage import (
     VN_ASSET_CONTENT_NOT_FOUND,
     generated_file_matches_vn_asset,
     image_format_from_mime_type,
+    registered_pack_storage,
     resolve_vn_asset_storage_path,
 )
 from tldw_Server_API.app.core.VN_Platform.errors import (
@@ -1884,17 +1887,40 @@ async def get_manifest(
     response_model=VNAssetGenerationPreflightResponse,
     dependencies=[Depends(get_request_user), Depends(rbac_rate_limit("vn_assets.preflight", per_user=True))],
 )
-def get_generation_preflight(
+async def get_generation_preflight(
     pack_id: int,
     service: VNAssetPackService = Depends(_service),
 ) -> VNAssetGenerationPreflightResponse:
-    """Return owner-scoped configuration diagnostics without starting generation."""
-    try:
+    """Return owner-scoped configuration and storage estimates for generation."""
+
+    def read_pack_data() -> tuple[VNAssetGenerationPreflightResponse, list[VNAssetItemResponse]]:
         pack = service.get_pack(pack_id)
         slots = service.list_slots(pack_id)
-        return generation_preflight(pack, slots)
+        return generation_preflight(pack, slots), service.list_items(pack_id)
+
+    try:
+        preflight, items = await run_in_threadpool(read_pack_data)
     except ValueError as exc:
         raise _handle_value_error(exc) from exc
+
+    storage = preflight.storage
+    has_registered_items = any(item.generated_file_id is not None for item in items)
+    estimate = storage.estimated_output_bytes
+    if not has_registered_items:
+        storage.registered_bytes = storage.approved_bytes = 0
+    try:
+        if has_registered_items or (estimate and storage.unknown_output_count == 0):
+            storage_service = await get_storage_service()
+            if has_registered_items:
+                files_repo = await storage_service.get_generated_files_repo()
+                storage.registered_bytes, storage.approved_bytes = await registered_pack_storage(
+                    files_repo, items, owner_user_id=service.owner_user_id,
+                )
+            if estimate and storage.unknown_output_count == 0:
+                storage.estimate_fits_quota, _ = await storage_service.check_combined_quota(service.owner_user_id, estimate)
+    except Exception as exc:
+        logger.warning("VN storage preflight unavailable for pack {} ({})", pack_id, type(exc).__name__)
+    return preflight
 
 
 @router.get("/packs/{pack_id}/readiness", response_model=VNAssetReadinessResponse)

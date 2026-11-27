@@ -76,7 +76,7 @@ Dry-run cleanup requests are intentionally not persisted as idempotent mutations
 | `POST` | `/packs/{pack_id}/prompt-preview` | Preview assembled prompt text and truncation diagnostics. |
 | `POST` | `/packs/{pack_id}/generate` | Enqueue a parent generation batch job. |
 | `GET` | `/packs/{pack_id}/generation` | Read latest generation batch status. |
-| `GET` | `/packs/{pack_id}/generation/preflight` | Inspect advisory local generation configuration. |
+| `GET` | `/packs/{pack_id}/generation/preflight` | Inspect local generation configuration and advisory pack storage. |
 | `POST` | `/packs/{pack_id}/generation/cancel` | Request cancellation for active generation. |
 | `POST` | `/packs/{pack_id}/slots/{slot_id}/retry` | Retry generation for one slot. |
 | `POST` | `/packs/{pack_id}/items/{item_id}/regenerate` | Regenerate one item variant. |
@@ -173,6 +173,22 @@ public model identifier return `null`; local model file paths are not exposed.
 Each slot reports `configured`,
 `missing_configuration`, `unavailable`, or `unknown`, with guidance when needed.
 This read requires pack ownership and creates no jobs.
+The workbench shows the response's `storage` fields beside the generation controls.
+`registered_bytes` counts live generated-file registrations attributed to items in
+the selected pack. `approved_bytes` is the subset referenced by an approved item.
+Each registration counts once. The totals use registered file sizes and exclude
+orphaned bytes and files owned outside this pack.
+
+`estimated_output_bytes` uses four bytes per pixel and the configured variant
+counts for an all-slot start. Slot dimensions take precedence over pack defaults.
+`unknown_output_count` counts variants whose dimensions are absent or outside
+the local image-generation limits. The byte estimate covers the known dimensions.
+Provider output dimensions and image encoding can change the actual size.
+
+The Storage quota service compares a complete, non-empty estimate with available
+quota. The response returns `null` for `estimate_fits_quota` when the comparison is
+unavailable. The generation worker enforces quota against actual output bytes.
+
 The named `vn_assets.preflight` policy applies the standard per-user rate class
 (120 requests/minute, burst 240 per API process); stricter user or role limits still apply.
 Rate-limited responses use HTTP 429 with `Retry-After`.

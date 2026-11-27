@@ -253,6 +253,16 @@ class VNAssetSlotPreflight(BaseModel):
     message: str | None = None
 
 
+class VNAssetGenerationStorage(BaseModel):
+    """Registered pack usage and advisory estimate for default generation."""
+
+    registered_bytes: int | None = None
+    approved_bytes: int | None = None
+    estimated_output_bytes: int | None = None
+    unknown_output_count: int = 0
+    estimate_fits_quota: bool | None = None
+
+
 class VNAssetGenerationPreflightResponse(BaseModel):
     """Advisory checks; local flags do not establish external worker health."""
 
@@ -261,6 +271,7 @@ class VNAssetGenerationPreflightResponse(BaseModel):
     local_workers_enabled: bool
     warnings: list[str] = Field(default_factory=list)
     slots: list[VNAssetSlotPreflight] = Field(default_factory=list)
+    storage: VNAssetGenerationStorage = Field(default_factory=VNAssetGenerationStorage)
 
 
 class VNAssetGenerationStatusResponse(BaseModel):

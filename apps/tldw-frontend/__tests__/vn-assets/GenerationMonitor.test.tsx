@@ -16,6 +16,37 @@ const slots = [
 ];
 
 describe('GenerationMonitor', () => {
+  it('reports pack storage and an advisory quota warning without disabling generation', () => {
+    render(
+      <GenerationMonitor
+        slots={slots}
+        preflight={{
+          scope: 'api_process_configuration',
+          worker_health: 'unknown',
+          local_workers_enabled: true,
+          warnings: [],
+          slots: [],
+          storage: {
+            registered_bytes: 3072,
+            approved_bytes: 1024,
+            estimated_output_bytes: 2097152,
+            unknown_output_count: 0,
+            estimate_fits_quota: false,
+          },
+        }}
+        onStartGeneration={vi.fn()}
+      />
+    );
+
+    expect(screen.getByText('Stored in this pack')).toBeVisible();
+    expect(screen.getByText('3 KB')).toBeVisible();
+    expect(screen.getByText('Approved assets')).toBeVisible();
+    expect(screen.getByText('1 KB')).toBeVisible();
+    expect(screen.getByText('2 MB')).toBeVisible();
+    expect(screen.getByRole('alert')).toHaveTextContent('Generation may exceed your available storage.');
+    expect(screen.getByRole('button', { name: 'Start generation' })).toBeEnabled();
+  });
+
   it('offers a new start instead of retry for a legacy batch without a recipe', () => {
     render(
       <GenerationMonitor
