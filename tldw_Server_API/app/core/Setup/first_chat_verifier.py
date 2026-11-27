@@ -73,6 +73,7 @@ async def _call_chat_completion(*, provider: str, model: str, prompt: str) -> An
             model=model,
             messages_payload=[{"role": "user", "content": prompt}],
             stream=False,
+            llm_surface="internal.first_chat_verifier",
         )
 
 

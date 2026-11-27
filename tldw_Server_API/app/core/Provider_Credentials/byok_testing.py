@@ -664,6 +664,7 @@ async def test_provider_credentials(
                         streaming=False,
                         app_config=provider_credentials.app_config,
                         credentials_resolved=True,
+                        llm_surface="internal.byok_probe",
                         **{
                             PROVIDER_CALL_CREDENTIALS_CONTEXT_KEY:
                                 provider_credentials,

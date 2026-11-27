@@ -11,13 +11,13 @@ import tldw_Server_API.app.core.Moderation.gateway_hooks as hooks_mod
 from tldw_Server_API.app.core.exceptions import LLMPolicyRefusal
 from tldw_Server_API.app.core.LLM_Calls import gateway
 from tldw_Server_API.app.core.Moderation.policy_evaluator import PolicyEvaluator
-from tldw_Server_API.app.core.Moderation.surfaces import MODERATED_SURFACES
+from tldw_Server_API.app.core.Moderation.surfaces import MODERATED_SURFACES, UNCLASSIFIED_SURFACE
 from tldw_Server_API.app.core.Usage.llm_call_context import llm_call_context
 from tldw_Server_API.tests.Moderation.conftest import DONE, PROVIDER, finish_frame, openai_frame, reply
 
 pytestmark = pytest.mark.unit
 
-SURFACES = sorted(MODERATED_SURFACES)
+SURFACES = sorted(MODERATED_SURFACES | {UNCLASSIFIED_SURFACE})
 
 
 @pytest.fixture

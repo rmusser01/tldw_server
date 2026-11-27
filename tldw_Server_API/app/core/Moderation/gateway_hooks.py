@@ -32,7 +32,11 @@ from tldw_Server_API.app.core.exceptions import LLMPolicyRefusal
 from tldw_Server_API.app.core.LLM_Calls.gateway import GatewayCall, add_policy_hooks
 from tldw_Server_API.app.core.LLM_Calls.sse import sse_data, sse_done
 from tldw_Server_API.app.core.Moderation.moderation_service import get_moderation_service
-from tldw_Server_API.app.core.Moderation.surfaces import CALLER_MODERATED_SURFACES, EXEMPT_SURFACES
+from tldw_Server_API.app.core.Moderation.surfaces import (
+    CALLER_MODERATED_SURFACES,
+    EXEMPT_SURFACES,
+    UNCLASSIFIED_SURFACE,
+)
 
 INPUT_REFUSAL = "Input violates moderation policy"
 OUTPUT_REFUSAL = "Output violates moderation policy"
@@ -128,18 +132,34 @@ def _with_guardian(policy: Any, user_id: int | None) -> Any:
 # --------------------------------------------------------------------------- policy
 
 
+_WARNED_UNSURFACED: set[str] = set()
+
+
+def _warn_unsurfaced(provider: str | None) -> None:
+    key = str(provider)
+    with _GUARDIAN_LOCK:
+        first = key not in _WARNED_UNSURFACED
+        _WARNED_UNSURFACED.add(key)
+    if first:
+        logger.warning("unsurfaced LLM call provider={}", provider)
+
+
 def resolve_policy(call_or_surface: GatewayCall | str | None, user_id: int | None = None) -> Any | None:
     """The policy to apply, or ``None`` for a skip.
 
-    Skips: a ``None`` surface (until Task 11), a caller-moderated or exempt surface, re-entry
-    from a hook, and a disabled policy. The policy user is ``str(user_id)``; ``None`` means the
+    Skips: a caller-moderated or exempt surface, re-entry from a hook, and a disabled policy. A
+    ``None`` surface is moderated as ``unclassified`` (the backstop), with one warning per provider. The policy user is ``str(user_id)``; ``None`` means the
     default policy.
     """
     surface = call_or_surface.surface if isinstance(call_or_surface, GatewayCall) else call_or_surface
     if isinstance(call_or_surface, GatewayCall) and user_id is None:
         user_id = call_or_surface.user_id
-    if surface is None or surface in CALLER_MODERATED_SURFACES or surface in EXEMPT_SURFACES or _IN_HOOK.get():
+    if surface in CALLER_MODERATED_SURFACES or surface in EXEMPT_SURFACES or _IN_HOOK.get():
         return None
+    if surface is None:
+        surface = UNCLASSIFIED_SURFACE
+        if isinstance(call_or_surface, GatewayCall):
+            _warn_unsurfaced(call_or_surface.provider)
     policy = get_moderation_service().get_effective_policy(None if user_id is None else str(user_id), surface=surface)
     policy = _with_guardian(policy, user_id)
     return policy if policy.enabled else None

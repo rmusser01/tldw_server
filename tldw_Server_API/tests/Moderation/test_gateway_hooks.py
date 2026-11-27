@@ -326,13 +326,43 @@ def test_stream_moderator_unit(moderation_hooks):
 # ------------------------------------------------------------------ skips and policy
 
 
-@pytest.mark.parametrize("surface", ["chat.completions", "internal.eval_judge", "moderation.classifier", None])
-def test_caller_moderated_exempt_and_none_surfaces_skip(moderation_hooks, stub_llm_registry, surface):
+@pytest.mark.parametrize(
+    "surface", ["chat.completions", "internal.eval_judge", "internal.byok_probe", "internal.first_chat_verifier"]
+)
+def test_exempt_surfaces_are_never_moderated(moderation_hooks, stub_llm_registry, surface):
     stub_llm_registry.reply = reply("forbidden secret")
     result = _call([{"role": "user", "content": "forbidden secret"}], surface=surface)
     assert result["choices"][0]["message"]["content"] == "forbidden secret"
     assert stub_llm_registry.requests[0]["messages"][0]["content"] == "forbidden secret"
     assert resolve_policy(surface, None) is None
+
+
+def test_exempt_classifier_call_is_not_moderated(moderation_hooks, stub_llm_registry):
+    stub_llm_registry.reply = reply("forbidden secret")
+    result = _call([{"role": "user", "content": "forbidden secret"}], surface="moderation.classifier")
+    assert result["choices"][0]["message"]["content"] == "forbidden secret"
+    assert stub_llm_registry.requests[0]["messages"][0]["content"] == "forbidden secret"
+    assert resolve_policy("moderation.classifier", None) is None
+
+
+def test_unsurfaced_call_is_moderated_as_unclassified(moderation_hooks, stub_llm_registry):
+    with pytest.raises(LLMPolicyRefusal):
+        _call([{"role": "user", "content": "forbidden secret"}], surface=None)
+    assert stub_llm_registry.requests == []
+    assert resolve_policy(None, None) is not None
+
+
+def test_unsurfaced_call_warns_once_per_provider(moderation_hooks, stub_llm_registry):
+    hooks_mod._WARNED_UNSURFACED.clear()
+    stub_llm_registry.reply = reply("fine")
+    lines: list[str] = []
+    sink = logger.add(lambda m: lines.append(str(m)), level="WARNING")
+    try:
+        _call(surface=None)
+        _call(surface=None)
+    finally:
+        logger.remove(sink)
+    assert sum(f"unsurfaced LLM call provider={PROVIDER}" in line for line in lines) == 1
 
 
 def test_policy_resolved_once_per_call(moderation_hooks, stub_llm_registry, monkeypatch):

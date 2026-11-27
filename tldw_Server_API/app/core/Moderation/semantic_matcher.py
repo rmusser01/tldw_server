@@ -153,6 +153,7 @@ class SemanticMatcher:
                 system_message="You are a content classifier. Respond with only the category name or 'none'.",
                 temp=0.0,
                 streaming=False,
+                llm_surface="moderation.classifier",
             )
             result_text = str(response).strip().lower()
 

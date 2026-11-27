@@ -14,6 +14,10 @@ Surfaced means the keyword's value is a string literal, or a Name that is a para
 function (forwarding). A module-level constant is not surfaced and a ``**splat`` is not a surface.
 chat_orchestrator.py and gateway.py (the definitions) and in-app ``tests`` packages are skipped.
 
+R10: an exempt or caller-moderated surface id may appear as an ``llm_surface`` literal (keyword or dict key)
+only in its designated modules (``EXEMPT_ID_MODULES``). User-controlled data that reaches a gateway call
+therefore cannot be written, in code, to skip moderation; a new module using such an id fails the lint.
+
 Lock gains in with ``python -m tldw_Server_API.tests.lint.test_unmoderated_llm_calls_guard --tighten``.
 """
 
@@ -35,6 +39,15 @@ GATEWAY_NAMES = frozenset(
 )
 EXEMPT: frozenset[str] = frozenset({"core/Chat/chat_orchestrator.py", "core/LLM_Calls/gateway.py"})
 _SURFACE = "llm_surface"
+
+# Exempt / caller-moderated id -> app-relative path prefixes (a ``/``-ending entry is a directory) allowed to name it.
+EXEMPT_ID_MODULES: dict[str, tuple[str, ...]] = {
+    "chat.completions": ("core/Chat/", "api/v1/endpoints/chat.py"),
+    "internal.byok_probe": ("core/Provider_Credentials/byok_testing.py",),
+    "internal.first_chat_verifier": ("core/Setup/first_chat_verifier.py",),
+    "internal.eval_judge": ("core/Evaluations/",),
+    "moderation.classifier": ("core/Moderation/classification.py", "core/Moderation/semantic_matcher.py"),
+}
 
 RATCHET = _ceilings.Ratchet(
     baseline=Path(__file__).resolve().with_name("unmoderated_llm_calls_baseline.json"),
@@ -138,6 +151,56 @@ def measure(root: Path = APP_ROOT) -> dict[str, dict[str, int]]:
         if count := count_module(tree):
             found[key] = {"references": count}
     return found
+
+
+# --- R10: exempt ids stay in their modules --------------------------------------------------------
+
+
+def exempt_id_uses(tree: ast.Module) -> list[tuple[int, str]]:
+    """``(line, id)`` for every ``llm_surface`` literal naming an exempt or caller-moderated id."""
+    found = []
+    for node in ast.walk(tree):
+        pairs = []
+        if isinstance(node, ast.Call):
+            pairs = [(kw.value, kw.value) for kw in node.keywords if kw.arg == _SURFACE]
+        elif isinstance(node, ast.Dict):
+            pairs = [(v, v) for k, v in zip(node.keys, node.values) if isinstance(k, ast.Constant) and k.value == _SURFACE]
+        for value, _ in pairs:
+            if isinstance(value, ast.Constant) and value.value in EXEMPT_ID_MODULES:
+                found.append((value.lineno, value.value))
+    return found
+
+
+def _allowed(relative: str, surface_id: str) -> bool:
+    return any(relative == p or (p.endswith("/") and relative.startswith(p)) for p in EXEMPT_ID_MODULES[surface_id])
+
+
+def test_exempt_surface_ids_are_registered_exempt() -> None:
+    from tldw_Server_API.app.core.Moderation.surfaces import CALLER_MODERATED_SURFACES, EXEMPT_SURFACES
+
+    assert set(EXEMPT_ID_MODULES) == set(EXEMPT_SURFACES) | set(CALLER_MODERATED_SURFACES)
+
+
+def test_exempt_surface_ids_appear_only_in_their_modules() -> None:
+    problems = []
+    for path, tree in parse_tree(APP_ROOT.resolve()).items():
+        relative = path.relative_to(APP_ROOT.resolve())
+        if "tests" in relative.parts[:-1]:
+            continue
+        for line, surface_id in exempt_id_uses(tree):
+            if not _allowed(relative.as_posix(), surface_id):
+                problems.append(f"{relative.as_posix()}:{line}: {surface_id!r} is reserved to {EXEMPT_ID_MODULES[surface_id]}")
+    assert problems == [], "\n".join(problems)
+
+
+def test_seeded_exempt_id_in_a_new_module_is_flagged() -> None:
+    bad = ast.parse('perform_chat_api_call(llm_surface="internal.byok_probe")\nx = {"llm_surface": "chat.completions"}')
+    assert [u[1] for u in exempt_id_uses(bad)] == ["internal.byok_probe", "chat.completions"]
+    assert not _allowed("core/Workflows/engine.py", "internal.byok_probe")
+    assert not _allowed("core/Chatbooks/x.py", "chat.completions")
+    assert _allowed("core/Chat/streaming_pipeline.py", "chat.completions")
+    assert _allowed("core/Evaluations/ms_g_eval.py", "internal.eval_judge")
+    assert exempt_id_uses(ast.parse('f(llm_surface="rag.generation")')) == []
 
 
 # --- Self-tests ---------------------------------------------------------------------------------
