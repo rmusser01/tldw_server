@@ -82,7 +82,7 @@ from tldw_Server_API.app.core.DB_Management.ChaChaNotes_DB import (
 from tldw_Server_API.app.core.DB_Management.media_db.legacy_transcripts import (
     upsert_transcript,
 )
-from tldw_Server_API.app.core.exceptions import AudioQuotaStoreUnavailable
+from tldw_Server_API.app.core.exceptions import AudioQuotaStoreUnavailable, LLMPolicyRefusal
 from tldw_Server_API.app.core.Ingestion_Media_Processing.Audio.audio_stream_protocol import (
     AUDIO_CHAT_ENDPOINT,
     AudioProtocolConfig,
@@ -99,7 +99,6 @@ from tldw_Server_API.app.core.Ingestion_Media_Processing.Audio.stt_policy import
     get_websocket_auth_principal,
 )
 from tldw_Server_API.app.core.LLM_Calls.adapter_utils import (
-    normalize_provider,
     provider_auth_is_resolved,
 )
 from tldw_Server_API.app.core.LLM_Calls.sse import is_done_line
@@ -144,7 +143,6 @@ import tldw_Server_API.app.core.Audio.tts_service as _tts_service
 import tldw_Server_API.app.core.AuthNZ.settings as _settings
 import tldw_Server_API.app.core.Character_Chat.chat_settings_validation as _chat_settings_validation
 import tldw_Server_API.app.core.Ingestion_Media_Processing.Audio.stt_policy as _stt_policy
-import tldw_Server_API.app.core.LLM_Calls.adapter_registry as _adapter_registry
 import tldw_Server_API.app.core.LLM_Calls.bounded_daemon as _bounded_daemon
 import tldw_Server_API.app.core.LLM_Calls.provider_metadata as _provider_metadata
 import tldw_Server_API.app.core.Metrics.stt_metrics as _stt_metrics
@@ -2406,24 +2404,6 @@ async def websocket_audio_chat_stream(
             messages_payload = list(chat_history)
             messages_payload.append({"role": "user", "content": transcript_text})
 
-            request_payload = {
-                "messages": messages_payload,
-                "system_message": llm_system_prompt,
-                "model": llm_model,
-                "api_key": provider_api_key,
-                "temperature": llm_temperature,
-                "max_tokens": llm_max_tokens,
-                "stream": True,
-                "user": str(user_id_for_usage),
-                "app_config": app_config,
-                "credentials_resolved": provider_credentials.credentials_resolved,
-                PROVIDER_CALL_CREDENTIALS_CONTEXT_KEY: provider_credentials,
-            }
-            if provider_llm_extra_params:
-                for key, value in provider_llm_extra_params.items():
-                    if request_payload.get(key) is None:
-                        request_payload[key] = value
-
             async def _fallback_stream() -> Any:
                 return await _chat_service.perform_chat_api_call_async(
                     api_endpoint=llm_provider,
@@ -2434,8 +2414,9 @@ async def websocket_audio_chat_stream(
                     max_tokens=llm_max_tokens,
                     streaming=True,
                     system_message=llm_system_prompt,
-                    user_identifier=str(user_id_for_usage),
-                    extra_body=provider_llm_extra_params,
+                    user=str(user_id_for_usage),
+                    llm_surface="voice.chat_stream",
+                    **provider_llm_extra_params,
                     app_config=app_config,
                     credentials_resolved=provider_credentials.credentials_resolved,
                     **{
@@ -2473,65 +2454,13 @@ async def websocket_audio_chat_stream(
                 return source
 
             async def _acquire_stream() -> Any:
-                adapter = _adapter_registry.get_registry().get_adapter(normalize_provider(llm_provider))
-                if adapter is None:
-                    source = await await_bounded_owned_operation(
-                        _await_and_store(_fallback_stream()),
-                        timeout_seconds=AUDIO_STREAM_FACTORY_TIMEOUT_SECONDS,
-                        timeout_message="audio-stream-factory timed out",
-                        on_abandoned=_cleanup_abandoned_turn,
-                        cleanup_claimed=cleanup_claimed,
-                    )
-                else:
-                    try:
-                        stream_method = adapter.astream
-                        if inspect.iscoroutinefunction(stream_method):
-                            source = await await_bounded_owned_operation(
-                                _await_and_store(
-                                    stream_method(
-                                        request_payload,
-                                        timeout=AUDIO_STREAM_FACTORY_TIMEOUT_SECONDS,
-                                    )
-                                ),
-                                timeout_seconds=AUDIO_STREAM_FACTORY_TIMEOUT_SECONDS,
-                                timeout_message="audio-stream-factory timed out",
-                                on_abandoned=_cleanup_abandoned_turn,
-                                cleanup_claimed=cleanup_claimed,
-                            )
-                        else:
-                            def invoke_sync_factory() -> Any:
-                                candidate = stream_method(
-                                    request_payload,
-                                    timeout=AUDIO_STREAM_FACTORY_TIMEOUT_SECONDS,
-                                )
-                                stream_holder["source"] = candidate
-                                return candidate
-
-                            stream_candidate = await _run_bounded_audio_sync_call(
-                                invoke_sync_factory,
-                                name="audio-stream-factory",
-                                timeout_seconds=AUDIO_STREAM_FACTORY_TIMEOUT_SECONDS,
-                                on_abandoned=_cleanup_abandoned_turn,
-                                cleanup_claimed=cleanup_claimed,
-                            )
-                            if inspect.isawaitable(stream_candidate):
-                                source = await await_bounded_owned_operation(
-                                    _await_and_store(stream_candidate),
-                                    timeout_seconds=AUDIO_STREAM_FACTORY_TIMEOUT_SECONDS,
-                                    timeout_message="audio-stream-factory timed out",
-                                    on_abandoned=_cleanup_abandoned_turn,
-                                    cleanup_claimed=cleanup_claimed,
-                                )
-                            else:
-                                source = stream_candidate
-                    except NotImplementedError:
-                        source = await await_bounded_owned_operation(
-                            _await_and_store(_fallback_stream()),
-                            timeout_seconds=AUDIO_STREAM_FACTORY_TIMEOUT_SECONDS,
-                            timeout_message="audio-stream-factory timed out",
-                            on_abandoned=_cleanup_abandoned_turn,
-                            cleanup_claimed=cleanup_claimed,
-                        )
+                source = await await_bounded_owned_operation(
+                    _await_and_store(_fallback_stream()),
+                    timeout_seconds=AUDIO_STREAM_FACTORY_TIMEOUT_SECONDS,
+                    timeout_message="audio-stream-factory timed out",
+                    on_abandoned=_cleanup_abandoned_turn,
+                    cleanup_claimed=cleanup_claimed,
+                )
                 stream_holder["source"] = source
                 return source
 
@@ -2539,6 +2468,16 @@ async def websocket_audio_chat_stream(
                 llm_stream = await _acquire_stream()
             except asyncio.CancelledError:
                 raise
+            except LLMPolicyRefusal as exc:
+                await _send_stream_payload(
+                    _audio_ws_error_payload(
+                        code="llm_policy_refused",
+                        message=str(exc.detail),
+                        request_id=request_id,
+                        extra={"provider": llm_provider},
+                    )
+                )
+                return "", "llm_policy_refused", None
             except Exception as exc:  # noqa: BLE001 - provider failures are normalized
                 logger.error(
                     "Audio LLM stream acquisition failed error_type={}",

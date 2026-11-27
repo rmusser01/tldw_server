@@ -1157,6 +1157,7 @@ Respond conversationally and get straight to the point."""
                 api_key=None,
                 temp=0.7,
                 max_tokens=150,
+                llm_surface="voice.assistant",
             )
 
             if not response:
