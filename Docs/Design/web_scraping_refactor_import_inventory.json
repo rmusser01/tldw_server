@@ -1745,7 +1745,7 @@
       {
         "import_kind": "from",
         "imported_name": "CookieManager",
-        "line": 543,
+        "line": 571,
         "module": "tldw_Server_API.app.core.Web_Scraping.enhanced_web_scraping",
         "path": "tldw_Server_API/tests/Web_Scraping/test_phase5_enhanced_browser.py",
         "target_name": "enhanced_web_scraping"
@@ -1753,7 +1753,7 @@
       {
         "import_kind": "from",
         "imported_name": "EnhancedWebScraper",
-        "line": 543,
+        "line": 571,
         "module": "tldw_Server_API.app.core.Web_Scraping.enhanced_web_scraping",
         "path": "tldw_Server_API/tests/Web_Scraping/test_phase5_enhanced_browser.py",
         "target_name": "enhanced_web_scraping"

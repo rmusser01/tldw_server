@@ -513,6 +513,34 @@ async def test_late_browser_scope_guard_cannot_continue_after_admission_closes()
 
 
 @pytest.mark.asyncio
+async def test_cross_origin_browser_request_preserves_native_fetch_metadata():
+    from types import SimpleNamespace
+    from unittest.mock import AsyncMock, Mock
+
+    from tldw_Server_API.app.core.Web_Scraping.orchestration import article_browser as browser
+
+    adapter = SimpleNamespace(_decision_allowed=AsyncMock(return_value=True), _parent=None, _reserve_parent=Mock())
+    policy = browser._BrowserRequestPolicy(
+        URL, {"sEC-feTCH-Mode": "navigate", "X-Private": "private"}, adapter, browser._AcquisitionOutcome()
+    )
+    policy._transfer_sessions = SimpleNamespace(track=AsyncMock())
+    session = SimpleNamespace(send=AsyncMock())
+    await policy.handle(
+        {
+            "requestId": "request",
+            "request": {
+                "url": "https://example.org/asset",
+                "headers": {"Sec-Fetch-Mode": "no-cors", "X-Private": "private"},
+            },
+        },
+        session,
+    )
+    session.send.assert_awaited_once_with(
+        "Fetch.continueRequest", {"requestId": "request", "headers": [{"name": "Sec-Fetch-Mode", "value": "no-cors"}]}
+    )
+
+
+@pytest.mark.asyncio
 @pytest.mark.parametrize(
     "dom",
     [
