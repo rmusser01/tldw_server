@@ -2,9 +2,11 @@
 
 from __future__ import annotations
 
+from functools import partial
 from typing import Any, Awaitable, Callable
 
 from tldw_Server_API.app.core.Chat.chat_service import perform_chat_api_call_async
+from tldw_Server_API.app.core.exceptions import LLMPolicyRefusal
 from tldw_Server_API.app.core.LLM_Calls.adapter_registry import get_registry
 from tldw_Server_API.app.core.Workflows.adapters._common import extract_openai_content
 
@@ -36,7 +38,7 @@ def _render_notes(evidence_notes: list[Any], *, max_items: int = 20) -> str:
 class SynthesisProvider:
     """Generate structured synthesis payloads from collected research evidence."""
 
-    def __init__(self, *, chat_fn: ChatFn = perform_chat_api_call_async) -> None:
+    def __init__(self, *, chat_fn: ChatFn = partial(perform_chat_api_call_async, llm_surface="research")) -> None:
         self._chat_fn = chat_fn
 
     async def summarize(
@@ -91,6 +93,13 @@ class SynthesisProvider:
             **extensions,
         )
         choices = response.get("choices") if isinstance(response, dict) else None
+        if (
+            isinstance(choices, list)
+            and choices
+            and isinstance(choices[0], dict)
+            and choices[0].get("finish_reason") == "content_filter"
+        ):
+            raise LLMPolicyRefusal("Output violates moderation policy")  # not synthesis text
         if (
             isinstance(choices, list)
             and choices

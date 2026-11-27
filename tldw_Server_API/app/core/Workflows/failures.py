@@ -11,6 +11,7 @@ _NON_RETRIABLE_REASONS: set[str] = {
     "acp_governance_blocked",
     "session_access_denied",
     "invariant_violation",
+    "400",  # an LLM policy refusal (LLMPolicyRefusal): the same input is refused again
     "402",  # an LLM quota refusal (LLMQuotaExceededError): the limit does not reset between attempts
 }
 

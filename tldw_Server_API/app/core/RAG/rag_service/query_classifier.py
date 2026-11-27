@@ -19,6 +19,7 @@ from typing import Any
 
 from loguru import logger
 
+from tldw_Server_API.app.core.exceptions import LLMPolicyRefusal
 from tldw_Server_API.app.core.LLM_Calls.structured_output import (
     StructuredOutputOptions,
     StructuredOutputParseError,
@@ -227,6 +228,14 @@ def _detect_intent_heuristic(q_lower: str) -> str:
 # LLM-based classifier
 # ---------------------------------------------------------------------------
 
+def is_content_filtered(raw_response: Any) -> bool:
+    """True when moderation replaced the answer (finish_reason content_filter): never parse, retry or reuse it."""
+    try:
+        return (raw_response["choices"][0].get("finish_reason") or "") == "content_filter"
+    except (AttributeError, IndexError, KeyError, TypeError):
+        return False
+
+
 def _parse_classification_response(raw: str) -> dict[str, Any]:
     """Parse LLM JSON response, handling common formatting issues."""
     text = raw.strip()
@@ -314,12 +323,16 @@ async def classify_query(
 
         raw_response = await asyncio.wait_for(
             await_runtime_bound_provider_call(
-                perform_chat_api_call_async(**call_kwargs),
+                perform_chat_api_call_async(**call_kwargs, llm_surface="rag.auxiliary"),
                 credential_runtime=credential_runtime,
                 credential_handle=credential_handle,
             ),
             timeout=timeout_sec,
         )
+
+        if is_content_filtered(raw_response):
+            logger.warning("Query classification was refused by moderation, using the heuristic")
+            return _heuristic_classify(query, chat_history)
 
         # Extract text content from response
         response_text = ""
@@ -365,6 +378,8 @@ async def classify_query(
             stage_metadata["verification_available"] = True
         return classification
 
+    except LLMPolicyRefusal:
+        raise  # the user's input is refused: not a heuristic route
     except Exception as exc:
         logger.warning(
             "LLM query classification failed ({exc_type}), falling back to heuristic",
@@ -468,12 +483,16 @@ async def reformulate_query(
 
         raw_response = await asyncio.wait_for(
             await_runtime_bound_provider_call(
-                perform_chat_api_call_async(**call_kwargs),
+                perform_chat_api_call_async(**call_kwargs, llm_surface="rag.auxiliary"),
                 credential_runtime=credential_runtime,
                 credential_handle=credential_handle,
             ),
             timeout=timeout_sec,
         )
+
+        if is_content_filtered(raw_response):
+            logger.warning("Query reformulation was refused by moderation, returning original query")
+            return query
 
         # Extract text content from response
         response_text = ""
@@ -506,6 +525,8 @@ async def reformulate_query(
             )
         return query
 
+    except LLMPolicyRefusal:
+        raise  # the user's input is refused: not a heuristic route
     except Exception as exc:
         logger.warning(
             "Query reformulation failed ({exc_type}), returning original query",

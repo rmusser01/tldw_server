@@ -186,7 +186,7 @@ async def run_llm_adapter(config: dict[str, Any], context: dict[str, Any]) -> di
     call_args = {k: v for k, v in call_args.items() if v is not None}
 
     if stream:
-        stream_iter = await perform_chat_api_call_async(**call_args)
+        stream_iter = await perform_chat_api_call_async(**call_args, llm_surface="workflows.step")
         text = ""
         async for line in stream_iter:
             if not line:
@@ -220,7 +220,7 @@ async def run_llm_adapter(config: dict[str, Any], context: dict[str, Any]) -> di
             text += raw
         return {"text": text, "streamed": True}
 
-    response = await perform_chat_api_call_async(**call_args)
+    response = await perform_chat_api_call_async(**call_args, llm_surface="workflows.step")
     text = extract_openai_content(response) or ""
     out: dict[str, Any] = {"text": text}
     metadata: dict[str, Any] = {}
@@ -291,6 +291,7 @@ async def run_llm_with_tools_adapter(config: dict[str, Any], context: dict[str, 
                 return {"__status__": "cancelled"}
 
             response = await perform_chat_api_call_async(
+                llm_surface="workflows.step",
                 messages=messages,
                 api_provider=provider,
                 model=model,
@@ -400,6 +401,7 @@ async def run_llm_compare_adapter(config: dict[str, Any], context: dict[str, Any
             try:
                 messages = [{"role": "user", "content": prompt}]
                 response = await perform_chat_api_call_async(
+                    llm_surface="workflows.step",
                     messages=messages,
                     api_provider=provider,
                     model=model,
@@ -492,6 +494,7 @@ Provide specific, actionable feedback."""
 
         messages = [{"role": "user", "content": critique_prompt}]
         response = await perform_chat_api_call_async(
+            llm_surface="workflows.step",
             messages=messages,
             api_provider=provider,
             model=model,
@@ -515,6 +518,7 @@ Revise the content to address the critique while maintaining the original intent
 
             messages = [{"role": "user", "content": revise_prompt}]
             response = await perform_chat_api_call_async(
+                llm_surface="workflows.step",
                 messages=messages,
                 api_provider=provider,
                 model=model,

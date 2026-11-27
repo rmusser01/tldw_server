@@ -30,7 +30,7 @@ from tldw_Server_API.app.core.LLM_Calls.structured_output import (
 )
 from tldw_Server_API.app.core.Provider_Credentials.byok_runtime import ByokResolutionError
 
-from .query_classifier import QueryClassification
+from .query_classifier import QueryClassification, is_content_filtered
 from .runtime_provider_call import (
     attach_runtime_provider_credentials,
     await_runtime_bound_provider_call,
@@ -1338,7 +1338,7 @@ async def research_loop(
 
             raw_response = await asyncio.wait_for(
                 await_runtime_bound_provider_call(
-                    perform_chat_api_call_async(**call_kwargs),
+                    perform_chat_api_call_async(**call_kwargs, llm_surface="rag.auxiliary"),
                     credential_runtime=credential_runtime,
                     credential_handle=credential_handle,
                 ),
@@ -1361,13 +1361,13 @@ async def research_loop(
             else:
                 response_text = str(raw_response)
 
-            if not response_text.strip():
-                logger.warning("Empty LLM response in research loop, stopping")
+            if is_content_filtered(raw_response) or not response_text.strip():
+                logger.warning("Empty or moderated LLM response in research loop, stopping")
                 break
 
             action_dict = _parse_research_action(response_text)
 
-        except Exception as exc:
+        except Exception as exc:  # incl. a policy refusal: the loop is optional, the answer stays moderated
             if credential_runtime is not None:
                 logger.warning("Research loop provider unavailable")
                 output.metadata["provider_stage"] = {

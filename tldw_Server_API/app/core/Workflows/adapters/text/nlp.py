@@ -17,7 +17,7 @@ from typing import Any
 
 from loguru import logger
 
-from tldw_Server_API.app.core.exceptions import LLMQuotaExceededError
+from tldw_Server_API.app.core.exceptions import LLMPolicyRefusal, LLMQuotaExceededError
 from tldw_Server_API.app.core.LLM_Calls.tokenizer_resolver import (
     resolve_tiktoken_encoding_or_default,
 )
@@ -108,6 +108,7 @@ Text:
 
         messages = [{"role": "user", "content": prompt}]
         response = await perform_chat_api_call_async(
+            llm_surface="workflows.step",
             messages=messages,
             api_provider=config.get("provider"),
             model=config.get("model"),
@@ -122,7 +123,7 @@ Text:
 
         return {"keywords": keywords, "scored_keywords": scored_keywords, "method": "llm"}
 
-    except LLMQuotaExceededError:
+    except (LLMQuotaExceededError, LLMPolicyRefusal):
         raise
     except Exception:
         logger.exception("Keyword extract error")
@@ -175,6 +176,7 @@ Text: {text[:3000]}"""
 
         messages = [{"role": "user", "content": prompt}]
         response = await perform_chat_api_call_async(
+            llm_surface="workflows.step",
             messages=messages,
             api_provider=config.get("provider"),
             model=config.get("model"),
@@ -200,7 +202,7 @@ Text: {text[:3000]}"""
                 return {"sentiment": "negative", "score": -0.7, "confidence": 0.6}
             return {"sentiment": "neutral", "score": 0.0, "confidence": 0.5}
 
-    except LLMQuotaExceededError:
+    except (LLMQuotaExceededError, LLMPolicyRefusal):
         raise
     except Exception:
         logger.exception("Sentiment analyze error")
@@ -318,6 +320,7 @@ Text:
 
         messages = [{"role": "user", "content": prompt}]
         response = await perform_chat_api_call_async(
+            llm_surface="workflows.step",
             messages=messages,
             api_provider=config.get("provider"),
             model=config.get("model"),
@@ -342,7 +345,7 @@ Text:
         topics = [{"label": line.strip(), "keywords": []} for line in result_text.split("\n") if line.strip()]
         return {"topics": topics[:num_topics]}
 
-    except LLMQuotaExceededError:
+    except (LLMQuotaExceededError, LLMPolicyRefusal):
         raise
     except Exception:
         logger.exception("Topic model error")
@@ -417,6 +420,7 @@ Example:
 
         messages = [{"role": "user", "content": user_prompt}]
         response = await perform_chat_api_call_async(
+            llm_surface="workflows.step",
             messages=messages,
             api_provider=provider,
             model=model,
@@ -444,7 +448,7 @@ Example:
             "text_length": len(text),
         }
 
-    except LLMQuotaExceededError:
+    except (LLMQuotaExceededError, LLMPolicyRefusal):
         raise
     except Exception:
         logger.exception("Entity extract adapter error")

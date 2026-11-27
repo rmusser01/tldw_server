@@ -317,6 +317,7 @@ async def _persona_pre_summarize_items(
         )
         try:
             response = await perform_chat_api_call_async(
+                llm_surface="workflows.step",
                 messages=[{"role": "user", "content": user_prompt}],
                 api_provider=provider,
                 model=model,
@@ -1043,6 +1044,7 @@ Write the complete script now."""
 
         messages = [{"role": "user", "content": prompt}]
         response = await perform_chat_api_call_async(
+            llm_surface="workflows.step",
             messages=messages,
             api_provider=config.get("provider"),
             model=config.get("model"),

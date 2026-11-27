@@ -518,6 +518,7 @@ Example: [{"headers": ["Name", "Value"], "rows": [["A", "1"], ["B", "2"]]}]"""
 
                 messages = [{"role": "user", "content": f"Extract tables from:\n\n{content[:10000]}"}]
                 response = await perform_chat_api_call_async(
+                    llm_surface="workflows.step",
                     messages=messages,
                     system_message=system_prompt,
                     max_tokens=4000,

@@ -15,6 +15,9 @@ from typing import Any, Optional
 
 from loguru import logger
 
+from tldw_Server_API.app.core.exceptions import LLMPolicyRefusal
+
+from .query_classifier import is_content_filtered
 from .runtime_provider_call import (
     attach_runtime_provider_credentials,
     await_runtime_bound_provider_call,
@@ -105,12 +108,15 @@ async def _reformulate_query(
 
         raw = await asyncio.wait_for(
             await_runtime_bound_provider_call(
-                perform_chat_api_call_async(**call_kwargs),
+                perform_chat_api_call_async(**call_kwargs, llm_surface="rag.auxiliary"),
                 credential_runtime=credential_runtime,
                 credential_handle=credential_handle,
             ),
             timeout=10.0,
         )
+
+        if is_content_filtered(raw):
+            return query  # moderation replaced the rewrite: search the original query
 
         text = ""
         if isinstance(raw, str):
@@ -140,6 +146,8 @@ async def _reformulate_query(
             )
         return query
 
+    except LLMPolicyRefusal:
+        raise
     except Exception:
         logger.debug("Media query reformulation failed; using original query")
         if credential_runtime is not None and stage_metadata is not None:

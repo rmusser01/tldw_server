@@ -149,6 +149,7 @@ Return exactly {max_rewrites} rewritten queries, one per line. No numbering, no 
 
         messages = [{"role": "user", "content": user_prompt}]
         response = await perform_chat_api_call_async(
+            llm_surface="workflows.step",
             messages=messages,
             api_provider=provider,
             model=model,
@@ -381,6 +382,7 @@ Generate {num_hypothetical} hypothetical document(s). If multiple, separate with
 
         messages = [{"role": "user", "content": user_prompt}]
         response = await perform_chat_api_call_async(
+            llm_surface="workflows.step",
             messages=messages,
             api_provider=provider,
             model=model,

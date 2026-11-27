@@ -19,7 +19,6 @@
   "core/Provider_Credentials/byok_testing.py": {"references": 1, "reason": "moved from core/AuthNZ/byok_testing.py (TASK-13950.17)"},
   "core/WebSearch/Web_Search.py": {"references": 1, "reason": null},
   "core/Web_Scraping/WebSearch_APIs.py": {"references": 1, "reason": null},
-  "core/Workflows/adapters/llm/translate.py": {"references": 1, "reason": null},
   "core/Writing/note_title.py": {"references": 1, "reason": null},
   "services/quiz_generator.py": {"references": 1, "reason": null}
 }

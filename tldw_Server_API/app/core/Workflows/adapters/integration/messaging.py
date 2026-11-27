@@ -967,6 +967,7 @@ async def run_character_chat_adapter(config: dict[str, Any], context: dict[str, 
 
             effective_system_prompt = system_prompt or (char_data.get("system_prompt") if char_data else None)
             llm_response = await perform_chat_api_call_async(
+                llm_surface="workflows.step",
                 api_endpoint=api_name,
                 messages_payload=messages_payload,
                 system_message=effective_system_prompt,

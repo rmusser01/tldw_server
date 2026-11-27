@@ -19,6 +19,7 @@ from tldw_Server_API.app.core.LLM_Calls.structured_output import (
     parse_structured_output,
 )
 
+from .query_classifier import is_content_filtered
 from .runtime_provider_call import (
     attach_runtime_provider_credentials,
     await_runtime_bound_provider_call,
@@ -231,12 +232,15 @@ async def generate_suggestions(
 
         raw_response = await asyncio.wait_for(
             await_runtime_bound_provider_call(
-                perform_chat_api_call_async(**call_kwargs),
+                perform_chat_api_call_async(**call_kwargs, llm_surface="rag.auxiliary"),
                 credential_runtime=credential_runtime,
                 credential_handle=credential_handle,
             ),
             timeout=max(0.1, float(llm_timeout_sec)),
         )
+
+        if is_content_filtered(raw_response):
+            raise ValueError("content_filter")  # moderation replaced the list: heuristic suggestions below
 
         # Extract text from response
         response_content = ""
@@ -262,7 +266,7 @@ async def generate_suggestions(
                 stage_metadata["verification_available"] = True
             return _finalize_suggestions(suggestions, query, num_suggestions)
 
-    except Exception as exc:
+    except Exception as exc:  # includes a policy refusal: suggestions are optional, the answer was moderated
         logger.debug(f"Suggestion generation LLM call failed: {_safe_exception_type(exc)}")
 
     # Fallback to heuristic suggestions

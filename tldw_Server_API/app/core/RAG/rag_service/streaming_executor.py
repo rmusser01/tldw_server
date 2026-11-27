@@ -18,6 +18,7 @@ from tldw_Server_API.app.core.Chat.Chat_Deps import (
 )
 from tldw_Server_API.app.core.LLM_Calls.provider_results import ADMIN_POLICY_CODES, ADMIN_REFUSAL_STATUS
 from tldw_Server_API.app.core.Provider_Credentials.byok_runtime import ByokResolutionError
+from tldw_Server_API.app.core.exceptions import LLMPolicyRefusal
 from tldw_Server_API.app.core.RAG.exceptions import RAGDatabaseError
 from tldw_Server_API.app.core.RAG.rag_service.agentic_chunker import (
     agentic_rag_pipeline,
@@ -79,6 +80,7 @@ _RAG_PROVIDER_ERROR_MESSAGES = {
     "model_denied": "The selected model is disabled by administrator policy.",
     "provider_configuration_invalid": "The selected provider configuration is invalid.",
     "provider_unavailable": "The selected provider is currently unavailable.",
+    "llm_policy_refused": "Input violates moderation policy",
 }
 
 _EXTRA_CONTROL_KEYS = {
@@ -99,6 +101,9 @@ def _pipeline_context(extra_context: dict[str, Any]) -> dict[str, Any]:
 
 def classify_rag_provider_error(exc: BaseException) -> tuple[str, int, str] | None:
     """Return a bounded public code, status, and message for typed provider failures."""
+    if isinstance(exc, LLMPolicyRefusal):  # moderation refused the call: its own 400, not an internal error
+        code = LLMPolicyRefusal.failure_code
+        return code, 400, _RAG_PROVIDER_ERROR_MESSAGES[code]
     if isinstance(exc, ByokResolutionError):
         code = getattr(exc, "policy_code", exc.code)
         code = code if code in _RAG_PROVIDER_ERROR_MESSAGES else "provider_configuration_invalid"
