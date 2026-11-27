@@ -170,7 +170,6 @@ One helper in AuthNZ, `blocked_owner_ids()` / `owner_blocked(user_id)`: true whe
 - The alert is in-app. A user with no other signed-in browser sees it on their next sign-in, not before.
 - Any signed-in browser session can lock, including an intruder's. The cost to the owner is one email round trip. Requiring the password first was rejected: the password may be what leaked.
 - Only one previous email address is kept. If the owner changes their email and an intruder holding the password changes it again within 7 days, lock mail goes to the oldest and the newest address; the one in between gets only the change notice.
-- **Decision owed when PR 3 is planned:** if an intruder holding the password changes both the email and the password, the lock mail reaches the owner's previous address for 7 days, but the unlock link then also reaches the intruder and the owner cannot change the email back without the new password. PR 3 must decide whether a link sent to the previous address within 7 days may restore that address, or whether forgot-password within 7 days also mails the previous address. Either choice briefly gives the holder of the old mailbox power over the account.
 - The notice to the old address can be abused to mail a third party (set an account's email to their address, then change it away). Bounded by the follow-up rate-limit task (TASK-15641).
 - Administrators can still change their own email through the admin endpoints without a password; admin sessions are outside this threat model.
 - Org and team API keys owned by a locked user stop working for the whole team until unlock.
@@ -216,6 +215,27 @@ An independent reviewer checked the first draft against the code. What changed:
 - The WebUI already toasts every stream notification (`NotificationToastBridge`); the toast is skipped for `new_sign_in` so the banner is the one surface.
 - Mark-read returns `refused_ids`; all-refused is 403 `new_sign_in_protected`.
 - Known limit: cancelling a snooze is not covered by the silence rule. Snoozing dismisses the alert and only an allowed session can snooze; the reminder task can be changed or deleted with any credential through `PATCH`/`DELETE /api/v1/tasks/{task_id}`, and the fired reminder is an ordinary `reminder_due` notification, so gating the one route would close nothing.
+
+## Changes from the PR 3 plan (2026-11-26)
+
+The lock is built as `Docs/superpowers/plans/2026-11-26-account-lock-backend.md`; the record is `Docs/ADR/104-account-security-lock.md`. Where this section and the sections above disagree, this section wins.
+
+- **Split.** PR 3a is the server; PR 3b is the WebUI and admin UI (lock button, a real `/auth/magic-link` page, "send me a new link", restoring suspended keys on the Active sessions page, the admin Unlock dialog).
+- **The decision owed (owner, 2026-11-26, option A).** A link sent to the previous address within 7 days of an email change takes the account back and wins over a link sent to the newer address. It restores that address, replaces the password with an unusable one, ends every session and token, suspends recent keys, removes SSO links added since the change, and signs the redeemer in. Cost: for 7 days after an email change the holder of the old mailbox can take the account whenever it is locked. Options rejected: first click wins, restore the address but keep the password, sign in only, and mailing the previous address from forgot-password.
+- **Lock only when the link can be opened (Q3).** Multi-user mode, `EMAIL_PROVIDER=smtp`, `PUBLIC_WEB_BASE_URL` set, verified email; otherwise the availability answer names the missing one.
+- **Suspended keys are restored from the Active sessions page (Q4)**, through `POST /users/api-keys/{key_id}/unsuspend`; no new API-keys page.
+- **An inactive owner's API key answers 401 "Invalid API key" (Q5)** instead of 400, which also closes the gap where inactive users' keys worked on MCP.
+- **No MFA step on unlock (Q6).** The design asked for one. Enrolling MFA needs no password today, so an intruder could enrol an authenticator and make every unlock link ask for a code the owner does not have. Follow-up TASK-15672: MFA enrolment requires the password and magic-link sign-in and unlock get an MFA step.
+- **423, not 401.** A locked account answers 423 `account_locked`; a token issued before `credentials_valid_after` answers 401. Sessions the lock revokes carry `revoke_reason="account_locked"`, and the 423 is given only while the user is locked at that moment.
+- **Unlock accepts only unlock links.** On a locked account `magic-link/verify` accepts only `purpose="account_unlock"` tokens. Every magic link is refused when its email claim is no longer the account's address (or its take-back address), before it is spent and again after the session is created.
+- **Old credentials stay dead.** `users.credentials_valid_after` (a whole second after the lock second) refuses access, refresh and reset tokens and MFA challenges issued before it; recent API keys are suspended (`api_keys.suspended_at`) and rotating one is refused. Unlock runs in a fixed order and waits until that second has begun.
+- **Take-back details.** It locks fresh first, repeats at most 3 times when its compare-and-set loses and then leaves the account locked, and is refused with the account locked when another account holds the address. A self-service email change to an address another account released in the last 7 days is refused (`email_recently_released`).
+- **Integrations.** Chat integrations refuse a locked owner: Slack and Discord when the resolved owner id is all digits, ACP trigger webhooks, Telegram approvals (left pending). MCP demo tokens and service tokens are not checked.
+- **Admin.** Security unlock needs the step-up check and is audited; an administrator's own email change needs step-up; impersonating a locked user is refused; `is_locked` is removed from the update request; `reset_admin_password` also clears the lock.
+- **Audit.** Lock, unlock, lock mail and key restore are written through the existing lazy audit helper; cap evictions are audited too. Audit failures never fail a lock, unlock or sign-in; the key restore's audit is mandatory.
+- **Mail.** SMTP gets a fixed 15-second connection timeout; no new settings.
+- **Older defect fixed on the way.** Password reset now revokes the user's sessions after its commit.
+- **Not changed.** The "Known limits" above stand; the ADR lists the limits the build added.
 
 ## Left to the builder
 

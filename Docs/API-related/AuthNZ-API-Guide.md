@@ -648,6 +648,48 @@ curl -X POST \
 }
 ```
 
+#### Account lock
+
+A signed-in browser session can lock its own account when it suspects someone else is using it. See `Docs/ADR/104-account-security-lock.md` for the reasoning. Multi-user mode only.
+
+| Route | Who | Purpose |
+| --- | --- | --- |
+| `GET /api/v1/auth/account/lock-availability` | interactive browser session | Whether the caller can lock, and the masked addresses the unlock link would go to |
+| `POST /api/v1/auth/account/lock` | interactive browser session | Lock the caller's own account |
+| `POST /api/v1/users/api-keys/{key_id}/unsuspend` | interactive browser session | Restore one API key the lock suspended |
+| `POST /api/v1/admin/users/{user_id}/security-unlock` | administrator, with the step-up check | Unlock an account its owner locked |
+
+Unlock itself is the existing `POST /api/v1/auth/magic-link/verify` with the token from the emailed link. API keys, virtual keys, service tokens and impersonation tokens cannot lock, check availability or unsuspend (403 `interactive_session_required`).
+
+**Availability.** `GET /auth/account/lock-availability` answers:
+
+```json
+{"available": false, "reason": "public_url_not_configured", "sent_to": ["o***@example.org"]}
+```
+
+`reason` is `null` when available, otherwise the first missing condition: `single_user_mode`, `mail_not_configured` (`EMAIL_PROVIDER` is not `smtp`), `public_url_not_configured` (`PUBLIC_WEB_BASE_URL` is empty) or `email_not_verified`. `sent_to` lists the masked addresses a link would be mailed to: the current address and, for 7 days after an email change, the previous one.
+
+**Lock.** `POST /auth/account/lock` takes no body and answers:
+
+```json
+{"locked": true, "email_sent": true, "sent_to": ["o***@example.org"]}
+```
+
+It answers 409 `{"code": "lock_unavailable", "reason": "..."}` when availability is false and 423 `account_locked` when the account is already locked. The lock is set before any mail goes out, so `email_sent: false` means the account is locked and no link was delivered; the owner asks for a new link from the sign-in page (`magic-link/request` or `forgot-password` mail it again).
+
+**What stops.** Every session and token of the account is refused with 423 and `{"detail": {"code": "account_locked", "message": "..."}}`: access, refresh and MFA sign-in tokens, sign-in by password, magic link (other than an unlock link) and password reset. API keys of the account, including org and team keys it owns, are refused as an invalid key. The lock ends every session. Streams and WebSockets that are already open run until they next authenticate; public share links already created keep working.
+
+**What comes back.** The unlock link (valid for `MAGIC_LINK_EXPIRE_MINUTES`, 15 by default) unlocks the account and signs the redeemer in. Sessions and tokens issued before the unlock stay dead (a token issued before the unlock gets the ordinary 401, not the 423). API keys created in the 7 days before the lock stay suspended: `GET /users/api-keys` shows `suspended_at` on them, and `POST /users/api-keys/{key_id}/unsuspend` restores one (it answers the key's metadata, or 404 `api_key_not_suspended`). A suspended key cannot be rotated (409 `api_key_suspended`).
+
+**Previous address.** For 7 days after the account's email was changed, the lock mail also goes to the previous address, and that link takes the account back: it restores the previous address, replaces the password (the owner signs in by the emailed link and sets a new one), ends every session and token, suspends recent API keys, removes SSO links added since the change, and makes the link sent to the newer address useless. It is refused, and the account stays locked, when another account holds the previous address. Changing your email to an address another account released in the last 7 days is refused with `email_recently_released`.
+
+**Administrator unlock.** `POST /admin/users/{user_id}/security-unlock` takes the same body as the other privileged admin actions (`reason`, and `admin_password` or `admin_reauth_token`) and answers `{"unlocked": true}`, or `{"unlocked": false}` when the account was not locked. The unlock keeps recent API keys suspended and leaves old tokens dead. Admin user listings carry `security_locked_at`. Impersonating a locked user is refused. Changing an administrator's own email through `PUT /admin/users/{id}` needs the same step-up check. `is_locked` is no longer accepted by `PUT /admin/users/{id}`.
+
+Other routes: a locked account's `magic-link/request` and `forgot-password` keep their generic answer and mail the "account locked" message. Slack and Discord job owners that are numeric user ids, ACP trigger webhooks and Telegram approvals of a locked owner are refused.
+
+Known limits are in the ADR. Until the WebUI redeems links by a click, paste the token into the token field in Settings.
+
+
 ## Error Handling
 
 ### HTTP Status Codes
@@ -662,6 +704,7 @@ curl -X POST \
 | 403 | Forbidden | Authenticated but not authorized |
 | 404 | Not Found | Resource not found |
 | 409 | Conflict | Resource conflict (e.g., duplicate username) |
+| 423 | Locked | The account is locked by its owner (`account_locked`) |
 | 422 | Unprocessable Entity | Validation error |
 | 429 | Too Many Requests | Rate limit exceeded |
 | 500 | Internal Server Error | Server error |
@@ -679,6 +722,10 @@ curl -X POST \
 | `REGISTRATION_DISABLED` | Registration is not enabled | Contact admin |
 | `PASSWORD_TOO_WEAK` | Password doesn't meet requirements | Use stronger password |
 | `SESSION_EXPIRED` | Session has expired | Login again |
+| `account_locked` | The account's owner locked it (HTTP 423) | Use the link mailed to the account's address, or ask an administrator |
+| `lock_unavailable` | The account cannot be locked now (409); `reason` says why | See `GET /auth/account/lock-availability` |
+| `api_key_suspended` | The API key is suspended by an account lock (409 on rotate) | Restore it with `POST /users/api-keys/{key_id}/unsuspend` |
+| `email_recently_released` | The address left another account in the last 7 days | Try again later |
 
 ### Error Handling Best Practices
 
