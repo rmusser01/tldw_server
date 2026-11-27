@@ -36,6 +36,7 @@ Independent review verified owner isolation, replay, pagination, and confirmed e
 Verification from this branch passed 256 VN asset tests covering the cleanup, API, idempotency, and repository suites. The OpenAPI fingerprint and path union matched. Scoped Ruff, Bandit, and pre-commit passed. The suite used previously cached tokenizer encodings to run offline.
 
 An interrupted run remains in progress and preserves its last durable checkpoint. The active file may require inspection because its final state can be uncertain.
+Pull request [#3655](https://github.com/rmusser01/tldw_server/pull/3655) targets dev.
 <!-- SECTION:IMPLEMENTATION_NOTES:END -->
 
 ## Final Summary
