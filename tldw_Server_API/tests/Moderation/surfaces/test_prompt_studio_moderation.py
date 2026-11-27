@@ -321,15 +321,19 @@ def test_a_resolved_flag_without_a_handle_and_without_a_key_fails_closed(stub_ll
     assert "credentials_resolved" not in stub_llm_registry.requests[0]
 
 
+async def _refuse(**_kwargs):
+    raise LLMPolicyRefusal("Input violates moderation policy")
+
+
+def _refusing_executor():
+    return SimpleNamespace(_call_llm=_refuse)
+
+
 @pytest.mark.asyncio
 async def test_a_refused_quality_score_call_is_not_the_base_score():
     from tldw_Server_API.app.core.Prompt_Management.prompt_studio.prompt_quality import PromptQualityScorer
 
-    class _Refusing:
-        async def _call_llm(self, **_kwargs):
-            raise LLMPolicyRefusal("Input violates moderation policy")
-
-    scorer = PromptQualityScorer(executor=_Refusing(), scorer_model="m")
+    scorer = PromptQualityScorer(executor=_refusing_executor(), scorer_model="m")
     with pytest.raises(LLMPolicyRefusal):
         await scorer.score_prompt_async(system_text="You are helpful.", user_text="x", model_config={"provider": PROVIDER})
 
@@ -338,12 +342,8 @@ async def test_a_refused_quality_score_call_is_not_the_base_score():
 async def test_a_refusal_is_not_an_optimizer_fallback_prompt():
     from tldw_Server_API.app.core.Prompt_Management.prompt_studio.optimization_strategies import GeneticOptimizer
 
-    class _Refusing:
-        async def _call_llm(self, **_kwargs):
-            raise LLMPolicyRefusal("Input violates moderation policy")
-
     optimizer = GeneticOptimizer.__new__(GeneticOptimizer)
-    optimizer.executor = _Refusing()
+    optimizer.executor = _refusing_executor()
     with pytest.raises(LLMPolicyRefusal):
         await optimizer._mutate({"user_prompt": "p", "system_prompt": "s"})
 
