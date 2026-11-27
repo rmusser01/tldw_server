@@ -157,15 +157,17 @@ def _whole_second(value: datetime) -> datetime:
     return value.replace(microsecond=0)
 
 
-async def _revoke_sessions(user_id: int) -> None:
-    """Sign every session out; a failure is logged and the unlock goes on (the iat rule covers the tokens)."""
+async def _revoke_sessions(
+    user_id: int, *, reason: str = ACCOUNT_RESTORED_REVOKE_REASON, revoked_by: int | None = None
+) -> None:
+    """Sign every session out; a failure is logged and the caller goes on (the lock or the iat rule covers the tokens)."""
     from tldw_Server_API.app.core.AuthNZ.session_manager import get_session_manager
 
     try:
         manager = await get_session_manager()
-        await manager.revoke_all_user_sessions(user_id, reason=ACCOUNT_RESTORED_REVOKE_REASON)
+        await manager.revoke_all_user_sessions(user_id, reason=reason, revoked_by=revoked_by)
     except _ACCOUNT_LOCK_NONCRITICAL_EXCEPTIONS as exc:
-        logger.warning("Revoking sessions during unlock failed for user {}: {}", user_id, type(exc).__name__)
+        logger.warning("Revoking sessions of user {} ({}) failed: {}", user_id, reason, type(exc).__name__)
 
 
 async def _restore_address(users: AuthnzUsersRepo, user_id: int, address: str, password_hash: str) -> bool:
@@ -344,6 +346,8 @@ async def unsuspend_api_key(*, user_id: int, key_id: int) -> dict | None:
 
 @dataclass(frozen=True)
 class LockAvailability:
+    """Whether the account can be locked, why not, and the masked addresses the unlock link would go to."""
+
     available: bool
     reason: str | None
     sent_to: list[str]  # masked addresses the unlock link would go to
@@ -351,6 +355,8 @@ class LockAvailability:
 
 @dataclass(frozen=True)
 class LockResult:
+    """What a lock did: when, whether the unlock mail went out, and to which masked addresses."""
+
     locked_at: datetime
     email_sent: bool
     sent_to: list[str]  # masked addresses that were mailed
@@ -437,13 +443,7 @@ async def lock_account(
     locked_at = await set_lock(user_id)
     if locked_at is None:
         raise AccountSecurityLockedError()
-    try:
-        from tldw_Server_API.app.core.AuthNZ.session_manager import get_session_manager
-
-        manager = await get_session_manager()
-        await manager.revoke_all_user_sessions(user_id, reason=ACCOUNT_LOCK_REVOKE_REASON, revoked_by=user_id)
-    except _ACCOUNT_LOCK_NONCRITICAL_EXCEPTIONS as exc:
-        logger.warning("Revoking sessions during lock failed for user {}: {}", user_id, type(exc).__name__)
+    await _revoke_sessions(user_id, reason=ACCOUNT_LOCK_REVOKE_REASON, revoked_by=user_id)
     sent_to: list[str] = []
     try:
         sent_to = await send_lock_mail(

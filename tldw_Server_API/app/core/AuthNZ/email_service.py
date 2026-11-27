@@ -1069,6 +1069,7 @@ class EmailService:
         )
 
     def _magic_link_url(self, token: str, *, base_url: Optional[str] = None, link_path: Optional[str] = None) -> str:
+        """The sign-in/unlock link for ``token``, built like every magic link (hosted path, then legacy)."""
         return self._resolve_public_web_base_url(
             base_url=base_url,
             hosted_default_path="/auth/magic-link",

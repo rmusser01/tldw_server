@@ -442,11 +442,6 @@ class StorageQuotaResponse(BaseModel):
     }
 
 
-#
-# End of auth_schemas.py
-#######################################################################################################################
-
-
 class AccountLockResponse(BaseModel):
     """Result of locking one's own account."""
 
@@ -461,3 +456,9 @@ class LockAvailabilityResponse(BaseModel):
     available: bool
     reason: str | None = None
     sent_to: list[str]
+
+
+#
+# End of auth_schemas.py
+#######################################################################################################################
+
