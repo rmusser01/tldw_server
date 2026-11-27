@@ -2507,7 +2507,7 @@ async def moderate_input_messages(
     except _CHAT_NONCRITICAL_EXCEPTIONS:
         req_user_id = None
 
-    eff_policy = moderation_service.get_effective_policy(str(req_user_id) if req_user_id is not None else client_id)
+    eff_policy = moderation_service.get_effective_policy(str(req_user_id) if req_user_id is not None else client_id, surface="chat.completions")
 
     # Guardian policy overlay: merge supervised rules into eff_policy
     _guardian_rule_name_visible = None

@@ -715,7 +715,7 @@ class _FakeModerationService:
     def __init__(self, base_policy):
         self._policy = base_policy
 
-    def get_effective_policy(self, user_id=None):
+    def get_effective_policy(self, user_id=None, surface=None):
         return self._policy
 
     def evaluate_action_with_match(self, text, policy, phase):

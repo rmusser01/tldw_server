@@ -31,7 +31,7 @@ class _Moderation:
         self.policy = policy
         self.action = action
 
-    def get_effective_policy(self, _user_id: str) -> ModerationPolicy:
+    def get_effective_policy(self, _user_id: str, surface=None) -> ModerationPolicy:
         return self.policy
 
     def evaluate_action_with_match(self, text: str, _policy: ModerationPolicy, _phase: str):

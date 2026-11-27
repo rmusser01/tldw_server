@@ -470,13 +470,13 @@ def test_effective_policy_identity_and_rule_aliasing_are_unchanged():
     service._global_policy = policy
     service._user_overrides = {}
 
-    assert service.get_effective_policy("user-1") is policy
+    assert service.get_effective_policy("user-1", surface=None) is policy
 
     service._policy_compiler = PolicyCompiler()
     service._user_overrides = {
         "user-1": {"input_action": "warn"},
     }
-    overlaid = service.get_effective_policy("user-1")
+    overlaid = service.get_effective_policy("user-1", surface=None)
 
     assert overlaid is not policy
     assert overlaid.block_patterns is not policy.block_patterns

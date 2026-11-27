@@ -31,6 +31,31 @@ Configuration ([Moderation] in `tldw_Server_API/Config_Files/config.txt`)
   - `blocklist_write_debounce_ms` (int): debounce window for blocklist writes in milliseconds (default 0=disabled). Useful to coalesce rapid edits from the Web UI.
 - ENV overrides: `MODERATION_*` keys mirror the above.
 
+Per-surface keys
+- Every LLM call names a surface id. `[Moderation] surface.<id> = true|false` narrows the default policy for that surface: `false` turns the global default off there; `true` or unset inherits it. A key cannot turn moderation on when `enabled = false`.
+- Order: the surface key narrows the global default, then an explicit per-user override `enabled` coalesces over it (an explicit `true` re-enables), then the Guardian overlay forces `enabled = true`. Callers that pass no surface (admin effective-policy endpoints, the workflow moderation step) get no narrowing.
+- An id that is not in the table below logs one warning and is ignored. The keys are config-only (no env variable). `MODERATION_STREAM_BUFFER_CHARS` / `stream_buffer_chars` (default 1024) sizes the output stream buffer.
+- Caller-moderated (the caller already moderates): `chat.completions`.
+- Exempt (never moderated): `internal.byok_probe`, `internal.first_chat_verifier`, `internal.eval_judge`, `moderation.classifier`.
+- Fallback for a call that names no surface: `unclassified` (moderated).
+- Moderated surfaces:
+  - chat: `chat.completions.router`, `chat.prompt_improvement`, `chat.document_generation`, `chat.macros`, `chat.dialogue_workflows`, `sharing.workspace_chat`
+  - messages and character: `messages`, `character.completion`, `character.roleplay_resume`, `character.router`, `character.memory_extraction`
+  - voice: `voice.speech_chat`, `voice.chat_stream`, `voice.realtime`, `voice.assistant`
+  - workflows, RAG and research: `workflows.step`, `rag.generation`, `rag.auxiliary`, `research`
+  - study and prompts: `study.assistant`, `study.packs`, `study.quizzes`, `prompt_studio`
+  - media and audio: `media.summarization`, `media.document_insights`, `audio.insights`
+  - automation, documents and generation: `scheduled_tasks.automation`, `chunking.boundaries`, `claims.extraction`, `notes.graph_suggestions`, `rpg.rules`, `skills.execution`, `slides.generation`, `slides.standalone_html`
+  - web and writing: `web.search`, `web.extraction`, `writing.manuscript`, `writing.note_title`
+  - everything else: `vn_play`, `mcp.model_completion`, `evaluations`, `data_tables.generation`, `explainer`
+- Example:
+  ```
+  [Moderation]
+  enabled = True
+  surface.rag.generation = false
+  surface.web.search = false
+  ```
+
 Blocklist Grammar
 - Literal: `confidential project`
 - Regex: `/secret\s+token/` (case-insensitive by default)

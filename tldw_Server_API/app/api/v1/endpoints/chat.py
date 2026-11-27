@@ -3971,7 +3971,7 @@ async def create_chat_completion(
                                         req_user_id = getattr(request.state, "user_id", None)
                                 except _CHAT_ENDPOINT_NONCRITICAL_EXCEPTIONS:
                                     req_user_id = None
-                                policy = moderation.get_effective_policy(str(req_user_id) if req_user_id is not None else client_id)
+                                policy = moderation.get_effective_policy(str(req_user_id) if req_user_id is not None else client_id, surface="chat.completions")
                                 action, redacted, matched, category = moderation.evaluate_action(content_text, policy, 'input')
                                 if action and action != 'pass':
                                     inj_mod['action'] = action

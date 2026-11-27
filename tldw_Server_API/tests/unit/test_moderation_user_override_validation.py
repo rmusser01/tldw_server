@@ -320,7 +320,7 @@ def test_effective_policy_compilation_sanitizes_rule_warning_logs() -> None:
     messages: list[str] = []
     sink_id = moderation_service_module.logger.add(lambda message: messages.append(str(message)), level="WARNING")
     try:
-        policy = svc.get_effective_policy("test-user")
+        policy = svc.get_effective_policy("test-user", surface=None)
     finally:
         moderation_service_module.logger.remove(sink_id)
 

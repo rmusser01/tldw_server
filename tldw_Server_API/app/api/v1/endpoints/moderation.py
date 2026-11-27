@@ -598,7 +598,7 @@ async def test_moderation(
                 chat_type=runtime.chat_type,
             )
 
-    effective_policy = service.get_effective_policy(user_id)
+    effective_policy = service.get_effective_policy(user_id, surface=None)
     result = service.evaluate_text(payload.text, effective_policy, payload.phase)
 
     action = result.action
@@ -623,7 +623,7 @@ async def test_moderation(
             # when the base policy itself didn't produce the warn.
             base_result = base_service.evaluate_text(
                 payload.text,
-                base_service.get_effective_policy(user_id),
+                base_service.get_effective_policy(user_id, surface=None),
                 payload.phase,
             )
             if base_result.action == "pass":

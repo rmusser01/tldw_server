@@ -82,7 +82,7 @@ class _FakeModerationService:
     def __init__(self, base_policy: ModerationPolicy):
         self._policy = base_policy
 
-    def get_effective_policy(self, user_id=None):
+    def get_effective_policy(self, user_id=None, surface=None):
         return self._policy
 
     def evaluate_action_with_match(self, text, policy, phase):
@@ -402,7 +402,7 @@ class TestGuardianModerationProxy:
 
         base_svc = _make_moderation_service(ModerationPolicy(enabled=False))
         proxy = GuardianModerationProxy(base_svc, engine, "child1")
-        result_policy = proxy.get_effective_policy("child1")
+        result_policy = proxy.get_effective_policy("child1", surface=None)
 
         assert result_policy.enabled is True
         assert len(result_policy.block_patterns) >= 1
@@ -425,7 +425,7 @@ class TestGuardianModerationProxy:
         base_svc = _make_moderation_service(base_policy)
 
         proxy = GuardianModerationProxy(base_svc, engine, "child1")
-        result = proxy.get_effective_policy("child1")
+        result = proxy.get_effective_policy("child1", surface=None)
 
         assert result is base_policy
 
