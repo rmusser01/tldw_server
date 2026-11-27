@@ -273,11 +273,13 @@ vi.mock("@/components/Common/QuickIngest/AddContentStep", async () => {
     AddContentStep: ({
       onQuickProcess,
       quickProcessWarning,
+      oneScreen,
     }: {
       onQuickProcess?: () => void
       quickProcessWarning?: string | null
+      oneScreen?: boolean
     }) => {
-      if (mocks.useActualAddContentStep) return <ActualAddContentStep onQuickProcess={onQuickProcess} quickProcessWarning={quickProcessWarning} />
+      if (mocks.useActualAddContentStep) return <ActualAddContentStep oneScreen={oneScreen} onQuickProcess={onQuickProcess} quickProcessWarning={quickProcessWarning} />
       const context = actual.useIngestWizard() as any
       const { state, setQueueItems } = context
       return (
@@ -578,6 +580,26 @@ function CatalogueProbe() {
 }
 
 describe("QuickIngestWizardModal session runtime", () => {
+  it("restores unsent source text and focus after replacement review", async () => {
+    mocks.useActualAddContentStep = true
+    const quick = resolvePresetMap().quick
+    useQuickIngestSessionStore.getState().createDraftSession({
+      selectedPreset: "custom",
+      presetConfig: { ...quick, common: { ...quick.common, overwrite_existing: true } },
+      queueItems: [{ id: "existing", kind: "url", url: "https://source.test/existing", detectedType: "web", icon: "Globe", fileSize: 0, validation: { valid: true } }],
+    })
+    render(<RuntimeIngestModal open onClose={vi.fn()} />)
+    fireEvent.click(await screen.findByRole("button", { name: "Text" }))
+    const passage = "Remember to verify the transcript."
+    fireEvent.change(screen.getByRole("textbox", { name: "Pasted text input" }), { target: { value: passage } })
+    fireEvent.click(screen.getByRole("button", { name: "Review replacements" }))
+    expect(screen.queryByRole("textbox", { name: "Pasted text input" })).toBeNull()
+    fireEvent.click(screen.getByRole("button", { name: "Back to sources" }))
+    expect(screen.getByRole("textbox", { name: "Pasted text input" })).toHaveValue(passage)
+    expect(screen.getByRole("button", { name: "Review replacements" })).toHaveFocus()
+    expect(mocks.startQuickIngestSession).not.toHaveBeenCalled()
+  })
+
   it.each([
     { storeRemote: true, reviewBeforeStorage: false, action: "Save 1 source" },
     { storeRemote: true, reviewBeforeStorage: true, action: "Create 1 review draft" },
