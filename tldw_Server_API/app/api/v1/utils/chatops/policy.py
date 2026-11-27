@@ -324,6 +324,25 @@ def policy_error_response(
     )
 
 
+async def locked_actor_error(actor_user_id: str | None) -> dict[str, Any] | None:
+    """A policy error for an actor id that names a security-locked tldw user.
+
+    Slack and Discord have no account link: only an all-digit actor id is read as a tldw user id.
+    A failed lookup propagates; it is never read as "not locked".
+    """
+    if not actor_user_id or not actor_user_id.isdigit():
+        return None
+    from tldw_Server_API.app.core.AuthNZ.account_lock import is_user_security_locked
+
+    if not await is_user_security_locked(int(actor_user_id)):
+        return None
+    return {
+        "status_code": 403,
+        "error": "account_locked",
+        "message": "This account is locked",
+    }
+
+
 def action_route(runtime: ChatOpsPolicyRuntime, action: str) -> str:
     """Map a ChatOps command to its internal route."""
     routes = {
