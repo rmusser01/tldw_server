@@ -35,6 +35,7 @@ from tldw_Server_API.app.core.LLM_Calls.adapter_utils import (
     split_system_message,
 )
 from tldw_Server_API.app.core.LLM_Calls.gateway import perform_chat_api_call
+from tldw_Server_API.app.core.LLM_Calls.provider_results import raise_if_content_filtered
 from tldw_Server_API.cli.utils.llm_store import LLMStoreGroup
 
 DEPRECATION_MSG = (
@@ -88,6 +89,7 @@ def _call_adapter_text(
         **extra_kwargs,
         llm_surface=llm_surface,
     )
+    raise_if_content_filtered(response)
     return extract_response_content(response) or str(response)
 
 

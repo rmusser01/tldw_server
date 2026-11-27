@@ -365,6 +365,7 @@ async def run_claims(rcfg: RagRunConfig, state: "PipelineState") -> None:
             def _analyze(api_name: str, input_data: Any, custom_prompt_arg: Optional[str] = None,
                          api_key: Optional[str] = None, system_message: Optional[str] = None,
                          temp: Optional[float] = None, **kwargs):
+                kwargs["llm_surface"] = "rag.auxiliary"
                 if state.claims_handle is None:
                     return sgl.analyze(
                         api_name,

@@ -725,6 +725,7 @@ async def agentic_rag_pipeline(
                 def _analyze(api_name: str, input_data: Any, custom_prompt_arg: str | None = None,
                              api_key: str | None = None, system_message: str | None = None,
                              temp: float | None = None, **kwargs):
+                    kwargs["llm_surface"] = "rag.auxiliary"
                     if claims_handle is None:
                         return sgl.analyze(
                             api_name,

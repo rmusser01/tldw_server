@@ -510,7 +510,7 @@ async def run_audio_jobs_worker(stop_event: asyncio.Event | None = None) -> None
                     updated_payload["chunks"] = chunks
                     next_type = payload.get("perform_analysis") and "audio_analyze" or "audio_store"
                 elif jtype == "audio_analyze":
-                    from tldw_Server_API.app.core.exceptions import LLMQuotaExceededError
+                    from tldw_Server_API.app.core.exceptions import LLMPolicyRefusal, LLMQuotaExceededError
                     from tldw_Server_API.app.core.LLM_Calls.Summarization_General_Lib import (
                         SummaryProviderError,
                         analyze,
@@ -542,6 +542,9 @@ async def run_audio_jobs_worker(stop_event: asyncio.Event | None = None) -> None
                                 )
                         except SummaryProviderError as exc:
                             code, message = exc.code, str(exc)
+                        except LLMPolicyRefusal as exc:
+                            # The same text is refused again: no retry; keep the transcript and record why.
+                            code, message = exc.failure_code, "analysis refused by moderation policy"
                         except LLMQuotaExceededError as exc:
                             # A quota window does not reset in seconds: no retry, and no LLM call was made.
                             code, message = exc.failure_code, f"LLM quota exceeded ({exc.category})"

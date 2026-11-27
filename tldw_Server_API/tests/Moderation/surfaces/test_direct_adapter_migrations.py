@@ -102,6 +102,24 @@ async def _wordbench(text: str, provider: str = PROVIDER, **extra: Any) -> Any:
     )
 
 
+async def _eval_cli(module: str, text: str, provider: str, **extra: Any) -> Any:
+    import importlib
+
+    helper = importlib.import_module(f"tldw_Server_API.app.core.Evaluations.cli.{module}")._call_adapter_text
+    return await asyncio.to_thread(
+        helper, api_endpoint=provider, messages_payload=_user(text), model=MODEL["v"], api_key="k",
+        llm_surface="evaluations", **extra,
+    )
+
+
+async def _evals_cli(text: str, provider: str = PROVIDER, **extra: Any) -> Any:
+    return await _eval_cli("evals_cli", text, provider, **extra)
+
+
+async def _evals_cli_enhanced(text: str, provider: str = PROVIDER, **extra: Any) -> Any:
+    return await _eval_cli("evals_cli_enhanced", text, provider, **extra)
+
+
 async def _data_tables(text: str, provider: str = PROVIDER, **extra: Any) -> Any:
     from tldw_Server_API.app.core.Data_Tables import jobs_worker
 
@@ -173,6 +191,8 @@ async def _note_title(text: str, provider: str = "openai", **extra: Any) -> Any:
 SITES: dict[str, tuple[str, Callable[..., Awaitable[Any]], bool, bool]] = {
     "eval_runner": ("evaluations", _eval_runner, True, True),
     "wordbench": ("evaluations", _wordbench, True, True),
+    "evals_cli": ("evaluations", _evals_cli, True, True),
+    "evals_cli_enhanced": ("evaluations", _evals_cli_enhanced, True, True),
     "data_tables": ("data_tables.generation", _data_tables, True, True),
     "explainer": ("explainer", _explainer, True, True),
     "audio_insights": ("audio.insights", _audio_insights, True, True),
@@ -393,9 +413,8 @@ async def test_the_gateway_model_validation_runs_for_each_moved_site(site, liste
         ("evaluations", _eval_runner, {"llm_surface": HOSTILE}),
         ("internal.eval_judge", _ms_g_eval, {"llm_surface": HOSTILE}),
         ("evaluations", _wordbench, {"llm_surface": HOSTILE}),
-        ("explainer", _explainer, {"EXPLAINER_GENERATOR_LLM_SURFACE": HOSTILE}),
     ],
-    ids=["eval_runner", "ms_g_eval", "wordbench", "explainer"],
+    ids=["eval_runner", "ms_g_eval", "wordbench"],
 )
 async def test_a_smuggled_llm_surface_is_ignored(surface, driver, extra, spy, provider):
     with contextlib.suppress(Exception):
@@ -403,20 +422,35 @@ async def test_a_smuggled_llm_surface_is_ignored(surface, driver, extra, spy, pr
     assert spy == [surface]
 
 
-@pytest.mark.parametrize("driver", [_eval_runner, _web_apis])
-async def test_a_smuggled_llm_surface_does_not_unmoderate_a_generation_call(driver, moderation_hooks, provider):
+async def test_a_smuggled_llm_surface_does_not_unmoderate_a_generation_call(moderation_hooks, provider):
     """A surface key in the helper's extra kwargs would otherwise reach the gateway and skip the policy."""
-    if driver is _web_apis:
-        from tldw_Server_API.app.core.Web_Scraping import WebSearch_APIs
-
-        with pytest.raises(LLMPolicyRefusal):
-            await asyncio.to_thread(
-                WebSearch_APIs._call_adapter_text, api_endpoint=PROVIDER, messages_payload=_user("forbidden words"),
-                model="m", api_key="k", llm_surface="web.search", **{"extra": 1},
-            )
-        return
     with pytest.raises(LLMPolicyRefusal):
-        await driver("forbidden words", llm_surface=HOSTILE)
+        await _eval_runner("forbidden words", llm_surface=HOSTILE)
+    assert provider.requests == []
+
+
+async def test_a_smuggled_llm_surface_in_the_audio_adapter_kwargs_is_dropped(spy, moderation_hooks, provider):
+    from tldw_Server_API.app.core.Ingestion_Media_Processing.Audio.Audio_Streaming_Insights import LiveMeetingInsights
+
+    with pytest.raises(LLMPolicyRefusal):
+        await asyncio.to_thread(
+            LiveMeetingInsights._adapter_chat_call,
+            api_endpoint=PROVIDER, messages_payload=_user("forbidden words"), model="m", temp=0.1, max_tokens=5,
+            llm_surface=HOSTILE,
+        )
+    assert spy == ["audio.insights"] and provider.requests == []
+
+
+@pytest.mark.parametrize("module", ["WebSearch.Web_Search", "Web_Scraping.WebSearch_APIs"])
+async def test_a_smuggled_llm_surface_through_the_web_summarize_wrapper_is_moderated(module, moderation_hooks, provider):
+    import importlib
+
+    mod = importlib.import_module(f"tldw_Server_API.app.core.{module}")
+    with pytest.raises(LLMPolicyRefusal):
+        await asyncio.to_thread(
+            mod.summarize, input_data="forbidden words", custom_prompt_arg=None, api_name=PROVIDER, api_key="k",
+            model_override="m", app_config={}, input_is_literal_text=True, llm_surface=HOSTILE,
+        )
     assert provider.requests == []
 
 
@@ -559,3 +593,135 @@ def test_rag_gap_analysis_names_the_auxiliary_surface():
         if isinstance(node, ast.Call) and getattr(node.func, "id", None) == "llm_analyze"
     ]
     assert [getattr(s, "value", None) for s in surfaces] == ["rag.auxiliary"]
+
+
+@pytest.mark.provider_inventory
+async def test_document_insights_runs_the_gateway_model_validation(listed_model, provider, context):  # noqa: F811
+    """R6: the model-inventory check runs for the endpoint, and passes for a listed model."""
+    context.client.post("/api/v1/media/7/insights", json={"force": True, "model": "listed-model"})
+    assert "openai" in listed_model
+    assert provider.requests and provider.requests[0]["model"] == "listed-model"
+
+
+# ---- fix round 1 -------------------------------------------------------------------------------------------------
+
+
+def test_ms_g_eval_resolved_credentials_without_a_handle_or_key_do_not_fall_back_to_the_server_key(provider):
+    from tldw_Server_API.app.core.Chat.Chat_Deps import ChatConfigurationError
+    from tldw_Server_API.app.core.Evaluations import ms_g_eval
+
+    with pytest.raises(ChatConfigurationError):
+        ms_g_eval._call_adapter_text(
+            api_endpoint="openai", messages_payload=_user("hi"), model="m", api_key=None, credentials_resolved=True
+        )
+    assert provider.requests == []
+
+
+async def test_qa3_refused_prediction_is_a_sample_error_not_an_aborted_run_or_a_label(moderation_hooks, provider, tmp_path):
+    from tldw_Server_API.app.core.Evaluations.unified_evaluation_service import UnifiedEvaluationService
+
+    service = UnifiedEvaluationService(db_path=str(tmp_path / "e.db"), enable_webhooks=False)
+
+    async def store(**_kwargs: Any) -> str:
+        return "eval-1"
+
+    service._store_evaluation_result = store  # type: ignore[method-assign]
+    provider.reply = reply("SUPPORTED")
+    items = [{"id": 1, "question": "forbidden words", "label": "SUPPORTED"}, {"id": 2, "question": "fine", "label": "SUPPORTED"}]
+    out = await service.evaluate_qa3(items, generate_predictions=True, api_name=PROVIDER)
+    results = out["results"]["results"]
+    assert results[0]["error"] == "llm_policy_refused" and "pred" not in results[0]
+    assert results[1]["pred"] == "SUPPORTED"
+    assert out["results"]["accuracy"] == 1.0  # the refused sample is in no average
+
+
+async def test_xml_import_records_a_refused_summary_without_storing_it(moderation_hooks, provider, tmp_path, monkeypatch):
+    from tldw_Server_API.app.core.Ingestion_Media_Processing import XML_Ingestion_Lib as xml
+
+    stored: dict[str, Any] = {}
+
+    class _Repo:
+        def add_media_with_keywords(self, **kwargs: Any) -> str:
+            stored.update(kwargs)
+            return "ok"
+
+    class _Ctx:
+        def __enter__(self):
+            return object()
+
+        def __exit__(self, *_a):
+            return False
+
+    monkeypatch.setattr(xml, "managed_media_database", lambda **_k: _Ctx())
+    monkeypatch.setattr(xml, "get_media_repository", lambda _db: _Repo())
+    monkeypatch.setattr(xml, "analyze", lambda *_a, **_k: (_ for _ in ()).throw(LLMPolicyRefusal("Input violates moderation policy")))
+    source = tmp_path / "d.xml"
+    source.write_text("<root><a>forbidden words</a></root>", encoding="utf-8")
+    message = await asyncio.to_thread(
+        xml.import_xml_handler, str(source), "t", "a", "", None, None, True, PROVIDER, "k"
+    )
+    assert stored.get("summary") == "No summary provided"
+    assert "refused by moderation policy" in message
+
+
+# ---- RAG optional stages: a refusal is "unverified/skipped", never a score or a heuristic grade -------------------
+
+
+async def _refusing(*_a: Any, **_k: Any) -> Any:
+    raise LLMPolicyRefusal("Input violates moderation policy")
+
+
+@pytest.mark.parametrize("propagate_errors", [False, True])
+async def test_faithfulness_refusal_is_unscored_not_zero(propagate_errors):
+    from tldw_Server_API.app.core.RAG.rag_service.faithfulness import FaithfulnessEvaluator
+
+    class _LLM:
+        async def generate(self, prompt: str) -> str:
+            raise LLMPolicyRefusal("Input violates moderation policy")
+
+    result = await FaithfulnessEvaluator(_LLM(), propagate_errors=propagate_errors).evaluate_detailed("An answer.", "Some context.")
+    assert result.score is None
+    assert result.to_dict()["failure_code"] == "llm_policy_refused" and result.to_dict()["verification_available"] is False
+
+
+async def test_faithfulness_refused_verification_is_not_an_unsupported_claim():
+    from tldw_Server_API.app.core.RAG.rag_service.faithfulness import FaithfulnessEvaluator
+
+    calls = []
+
+    class _LLM:
+        async def generate(self, prompt: str) -> str:
+            calls.append(prompt)
+            if len(calls) == 1:
+                return '["Paris is the capital of France"]'
+            raise LLMPolicyRefusal("Input violates moderation policy")
+
+    result = await FaithfulnessEvaluator(_LLM()).evaluate_detailed("An answer.", "Some context.")
+    assert result.score is None and result.claims == []
+
+
+async def test_document_grader_refusal_is_a_labelled_no_signal_fallback_not_a_grade():
+    from types import SimpleNamespace
+
+    from tldw_Server_API.app.core.RAG.rag_service.document_grader import DocumentGrader
+
+    def refuse(*_a: Any, **_k: Any) -> Any:
+        raise LLMPolicyRefusal("Input violates moderation policy")
+
+    grader = DocumentGrader(analyze_fn=refuse)
+    graded = await grader.grade_document("q", SimpleNamespace(id="d1", content="text", score=0.9))
+    assert graded.method == "score_fallback"  # the retrieval score stands; no LLM verdict
+    assert graded.metadata == {"error": "llm_policy_refused", "verification_available": False}
+
+
+async def test_knowledge_strips_refusal_skips_the_stage_and_keeps_the_documents():
+    from tldw_Server_API.app.core.RAG.rag_service.knowledge_strips import KnowledgeStripsProcessor
+    from tldw_Server_API.app.core.RAG.rag_service.types import DataSource, Document
+
+    def refuse(*_a: Any, **_k: Any) -> Any:
+        raise LLMPolicyRefusal("Input violates moderation policy")
+
+    docs = [Document(id="d1", content="Some content about the topic. " * 30, source=DataSource.MEDIA_DB, score=0.5, metadata={})]
+    result = await KnowledgeStripsProcessor(analyze_fn=refuse, llm_provider=PROVIDER, llm_model="m").process("topic", docs)
+    assert result.documents == docs and result.strips == []
+    assert result.metadata["failure_code"] == "llm_policy_refused" and result.metadata["verification_available"] is False

@@ -10,6 +10,7 @@ from tldw_Server_API.app.core.Data_Tables import jobs_worker
 from tldw_Server_API.app.core.DB_Management.media_db.native_class import MediaDatabase
 from tldw_Server_API.app.core.exceptions import DataTablesJobError
 from tldw_Server_API.app.core.Jobs.manager import JobManager
+from tldw_Server_API.app.core.LLM_Calls import gateway
 from tldw_Server_API.tests.helpers.run_config_spy import spy_from_kwargs
 
 pytestmark = [pytest.mark.unit, pytest.mark.usefixtures("healthy_no_override_tts_credential_snapshot")]
@@ -102,7 +103,7 @@ def test_close_chacha_db_sanitizes_close_failure_log(monkeypatch):
 
 
 @pytest.mark.asyncio
-async def test_data_tables_worker_generates_rows(monkeypatch, tmp_path):
+async def test_data_tables_worker_generates_rows(monkeypatch, tmp_path, request):
     media_path = tmp_path / "media.db"
     chacha_path = tmp_path / "chacha.db"
     monkeypatch.setenv("JOBS_DB_PATH", str(tmp_path / "jobs.db"))
@@ -144,6 +145,8 @@ async def test_data_tables_worker_generates_rows(monkeypatch, tmp_path):
     }
 
     route_gateway_adapters(monkeypatch, lambda _provider: _StubAdapter(llm_payload))
+    seen: list[tuple] = []
+    request.addfinalizer(gateway.add_policy_hooks(pre_call=lambda call: seen.append((call.surface, call.user_id))))
     monkeypatch.setattr(jobs_worker, "_resolve_model", lambda *_args, **_kwargs: "test-model")
     monkeypatch.setattr(jobs_worker, "provider_requires_api_key", lambda _p: False)
     monkeypatch.setattr(jobs_worker, "resolve_provider_api_key", lambda *_a, **_k: ("", {}))
@@ -177,6 +180,7 @@ async def test_data_tables_worker_generates_rows(monkeypatch, tmp_path):
                            completion_token=job["lease_id"], enforce=True)  # nosec B101 -- actual completion.
     assert jobs_worker.publish_completed_generation(jm, job["id"], expected_uuid=job["uuid"], db=db) == "ready"  # nosec B101 -- actual saved result.
     assert result["row_count"] == 2
+    assert seen == [("data_tables.generation", 1)]  # the job owner is the LLM user: their policy overlay and quota apply
 
     refreshed = db.get_data_table(table_id, include_deleted=True)
     assert refreshed["status"] == "ready"

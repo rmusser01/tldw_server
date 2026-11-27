@@ -8,6 +8,7 @@ from tldw_Server_API.tests.helpers.gateway_routing import route_gateway_adapters
 
 from tldw_Server_API.app.core.DB_Management.Explainer_DB import ExplainerDatabase
 from tldw_Server_API.app.core.exceptions import LLMQuotaExceededError
+from tldw_Server_API.app.core.LLM_Calls import gateway
 from tldw_Server_API.app.core.Explainer.jobs import (
     EXPLAINER_DOMAIN,
     EXPLAINER_JOB_TYPE,
@@ -1008,3 +1009,52 @@ async def test_job_handler_records_the_failure_code_on_the_node(
     loaded = explainer_repo.get_session(session.id, owner_user_id="7")
     assert loaded is not None
     assert loaded.nodes[node_id].generation_metadata["error"] == expected_code
+
+
+@pytest.mark.asyncio()
+async def test_configured_generator_carries_the_job_owner_and_ignores_a_smuggled_surface(
+    explainer_repo: ExplainerRepository,
+    monkeypatch: pytest.MonkeyPatch,
+    request: pytest.FixtureRequest,
+) -> None:
+    """The gateway call sees the job owner as its user and the literal surface, whatever the job payload carries (R10)."""
+
+    class FakeAdapter:
+        def chat(self, request, *, timeout=None):
+            return {
+                "choices": [
+                    {
+                        "message": {
+                            "content": (
+                                '{"children":[{"title":"Child","body":"Body","kind":"explanation",'
+                                '"intent":"explain","outside_knowledge_used":true}]}'
+                            )
+                        }
+                    }
+                ]
+            }
+
+    monkeypatch.setenv("EXPLAINER_GENERATOR_ENABLED", "1")
+    monkeypatch.setenv("EXPLAINER_GENERATOR_PROVIDER", "fake-provider")
+    monkeypatch.setenv("EXPLAINER_GENERATOR_MODEL", "fake-model")
+    route_gateway_adapters(monkeypatch, lambda _provider: FakeAdapter())
+    seen: dict[str, list] = {"calls": []}
+    request.addfinalizer(gateway.add_policy_hooks(pre_call=lambda call: seen["calls"].append((call.surface, call.user_id))))
+    session = _create_session(explainer_repo)
+    job = {
+        "id": 5,
+        "job_type": EXPLAINER_JOB_TYPE,
+        "owner_user_id": "7",
+        "payload": {
+            "session_id": session.id,
+            "node_id": session.root_node_ids[0],
+            "owner_user_id": "7",
+            "intent": "explain",
+            "llm_surface": "internal.byok_probe",
+            "call_args": {"llm_surface": "internal.byok_probe"},
+        },
+    }
+
+    await handle_explainer_node_expansion_job(job, repo=explainer_repo, generator=make_configured_explainer_generator())
+
+    assert seen["calls"] == [("explainer", 7)]

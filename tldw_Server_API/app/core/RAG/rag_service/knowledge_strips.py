@@ -21,6 +21,7 @@ from tldw_Server_API.app.core.Chat.bounded_daemon import (
     await_bounded_sync_call,
     await_owned_worker,
 )
+from tldw_Server_API.app.core.exceptions import LLMPolicyRefusal
 from tldw_Server_API.app.core.LLM_Calls.structured_output import (
     StructuredOutputOptions,
     parse_structured_output,
@@ -278,26 +279,44 @@ class KnowledgeStripsProcessor:
             )
 
         # Step 2: Score each strip for relevance
-        if self._analyze:
-            if self.credential_runtime is not None and self.credential_handle is None:
-                try:
-                    self.credential_handle = await self.credential_runtime.resolve(
-                        self.llm_provider,
-                        model=self.llm_model,
-                    )
-                    if self.credential_handle is None:
-                        raise RuntimeError("provider unavailable")
-                except Exception:
-                    logger.warning("LLM strip grading credentials unavailable")
-                    self._llm_unavailable = True
-                    all_strips = self._score_strips_heuristic(query, all_strips)
+        try:
+            if self._analyze:
+                if self.credential_runtime is not None and self.credential_handle is None:
+                    try:
+                        self.credential_handle = await self.credential_runtime.resolve(
+                            self.llm_provider,
+                            model=self.llm_model,
+                        )
+                        if self.credential_handle is None:
+                            raise RuntimeError("provider unavailable")
+                    except Exception:
+                        logger.warning("LLM strip grading credentials unavailable")
+                        self._llm_unavailable = True
+                        all_strips = self._score_strips_heuristic(query, all_strips)
+                    else:
+                        all_strips = await self._score_strips_llm(query, all_strips)
                 else:
                     all_strips = await self._score_strips_llm(query, all_strips)
             else:
-                all_strips = await self._score_strips_llm(query, all_strips)
-        else:
-            # Use heuristic scoring
-            all_strips = self._score_strips_heuristic(query, all_strips)
+                # Use heuristic scoring
+                all_strips = self._score_strips_heuristic(query, all_strips)
+        except LLMPolicyRefusal:
+            # Moderation refused the grading call: the stage is skipped, the documents stay as they were, and no
+            # heuristic grade stands in for the model's.
+            return KnowledgeStripsResult(
+                strips=[],
+                documents=list(documents),
+                total_strips=total_strips,
+                relevant_strips=0,
+                filtered_strips=0,
+                avg_relevance=0.0,
+                processing_time_ms=int((time.time() - start_time) * 1000),
+                metadata={
+                    "strip_size_tokens": self.strip_size_tokens,
+                    "verification_available": False,
+                    "failure_code": "llm_policy_refused",
+                },
+            )
 
         # Step 3: Filter by minimum relevance
         relevant_strips = [
@@ -488,6 +507,8 @@ Respond with a JSON array of objects.
                     if 0 <= strip_num < len(batch):
                         batch[strip_num].relevance_score = min(1.0, max(0.0, relevance))
 
+            except LLMPolicyRefusal:
+                raise
             except Exception:
                 logger.warning("LLM strip scoring failed, falling back to heuristic")
                 if self.credential_runtime is not None:
@@ -601,7 +622,7 @@ async def process_knowledge_strips(
                 )
 
             def _analyze(*args, **kwargs):
-                return sgl.analyze(*args, **kwargs)
+                return sgl.analyze(*args, **{**kwargs, "llm_surface": "rag.auxiliary"})
 
             analyze_fn = _analyze
         except ImportError:
@@ -641,5 +662,8 @@ async def process_knowledge_strips(
         metadata["verification_available"] = not unavailable
         if unavailable:
             metadata["failure_code"] = "provider_unavailable"
+
+    if result.metadata.get("failure_code") == "llm_policy_refused":
+        metadata.update(verification_available=False, failure_code="llm_policy_refused")
 
     return result.documents, metadata

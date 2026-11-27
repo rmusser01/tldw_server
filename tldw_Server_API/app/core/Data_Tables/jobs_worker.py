@@ -79,6 +79,7 @@ from tldw_Server_API.app.core.LLM_Calls.gateway import perform_chat_api_call
 from tldw_Server_API.app.core.LLM_Calls.provider_identity import canonical_provider_name
 from tldw_Server_API.app.core.LLM_Calls.provider_metadata import provider_requires_api_key
 from tldw_Server_API.app.core.LLM_Calls.provider_results import raise_if_content_filtered
+from tldw_Server_API.app.core.Usage.llm_roots import llm_call_root
 from tldw_Server_API.app.core.LLM_Calls.structured_output import (
     StructuredOutputNoPayloadError,
     StructuredOutputOptions,
@@ -1187,7 +1188,9 @@ async def _handle_job(job: dict[str, Any], jm: JobManager) -> dict[str, Any]:
             db.update_data_table(table_id, status="cancelled", last_error=None, owner_user_id=user_id, expected_generation_job=generation_job, expected_version=expected_version)
             return {"cancelled": True, "table_id": table_id}
 
-        payload_obj = await _generate_table_payload(jm, job_id, model, llm_prompt)
+        # The job owner is the LLM user: their moderation overlay and quota apply (the default executor carries it).
+        with llm_call_root(user_id):
+            payload_obj = await _generate_table_payload(jm, job_id, model, llm_prompt)
 
         raw_columns = payload_obj.get("columns") or payload_obj.get("schema")
         raw_rows = payload_obj.get("rows") or payload_obj.get("data") or payload_obj.get("records")

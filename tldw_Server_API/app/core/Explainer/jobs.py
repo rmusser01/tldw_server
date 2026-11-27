@@ -11,6 +11,7 @@ from dataclasses import dataclass
 from datetime import UTC, datetime
 from typing import Any
 
+from tldw_Server_API.app.core.Usage.llm_roots import llm_call_root
 from tldw_Server_API.app.core.Explainer.grounding import GroundedExplainerChild, resolve_grounded_children
 from tldw_Server_API.app.core.Explainer.models import (
     ExplainerEvidenceState,
@@ -231,7 +232,8 @@ async def handle_explainer_node_expansion_job(
         )
         generation: dict[str, Any] | None = None
         if not _source_only_without_evidence(session=session, source_context=source_context):
-            generation = await _call_generator(generator, prompt)
+            with llm_call_root(owner_user_id):  # the job owner is the LLM user: their policy overlay and quota apply
+                generation = await _call_generator(generator, prompt)
         children = resolve_grounded_children(
             generation=generation,
             grounding=session.grounding,

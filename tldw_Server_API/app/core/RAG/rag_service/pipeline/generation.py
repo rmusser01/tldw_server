@@ -146,6 +146,7 @@ async def synthesize_multi_turn(rcfg: RagRunConfig, state: "PipelineState") -> N
                 credentials_resolved=critique_handle is not None,
                 provider_credentials=critique_handle,
                 raise_on_error=critique_handle is not None,
+                llm_surface="rag.auxiliary",
             )
             return up._consume_bound_sgl_response(
                 response,

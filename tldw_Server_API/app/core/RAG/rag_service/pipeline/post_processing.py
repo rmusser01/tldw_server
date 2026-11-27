@@ -9,6 +9,7 @@ import uuid
 from types import SimpleNamespace
 from typing import TYPE_CHECKING, Any
 
+from tldw_Server_API.app.core.exceptions import LLMPolicyRefusal
 from tldw_Server_API.app.core.RAG.rag_service import unified_pipeline as up
 
 from .run_config import RagRunConfig
@@ -395,6 +396,7 @@ async def finalize_run(rcfg: RagRunConfig, state: "PipelineState") -> None:
                                         credentials_resolved=_f_handle is not None,
                                         provider_credentials=_f_handle,
                                         raise_on_error=_f_handle is not None,
+                                        llm_surface="rag.auxiliary",
                                     )
                                     return up._consume_bound_sgl_response(
                                         response,
@@ -478,6 +480,13 @@ async def finalize_run(rcfg: RagRunConfig, state: "PipelineState") -> None:
                 "verification_available": False,
             }
             up.logger.warning("Faithfulness evaluation provider unavailable")
+        except LLMPolicyRefusal:
+            # Not "provider unavailable": the request was refused, so the answer is unverified (no score).
+            state.result.metadata["faithfulness"] = {
+                "failure_code": "llm_policy_refused",
+                "verification_available": False,
+            }
+            up.logger.warning("Faithfulness evaluation refused by moderation policy")
         except Exception as _fe_err:  # noqa: BLE001 - moved from unified_pipeline.py (TASK-13950.24)
             if rcfg.runtime.credential_runtime is not None:
                 state.result.metadata["faithfulness"] = {

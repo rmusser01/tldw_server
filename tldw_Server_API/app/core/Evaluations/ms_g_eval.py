@@ -101,6 +101,14 @@ def _call_adapter_text(
         provider,
         provider_credentials,
     )
+    if (
+        credentials_resolved
+        and provider_credentials is None
+        and provider_requires_api_key(provider)
+        and not provider_auth_is_resolved(provider, api_key=api_key, app_config=app_config, credentials_resolved=True)
+    ):
+        # "Resolved" with no handle and no key must not fall back to the server's key (the gateway would resolve one).
+        raise ChatConfigurationError(provider=provider, message="API key is required for provider.")
     extra_kwargs.pop("llm_surface", None)  # R10
     system_message, cleaned_messages = split_system_message(messages_payload or [])
     if provider_credentials is not None:

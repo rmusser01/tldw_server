@@ -3799,7 +3799,8 @@
           "app_config": null,
           "credentials_resolved": false,
           "provider_credentials": null,
-          "raise_on_error": false
+          "raise_on_error": false,
+          "llm_surface": "rag.auxiliary"
         }
       },
       {
@@ -7332,7 +7333,8 @@
           "app_config": null,
           "credentials_resolved": false,
           "provider_credentials": null,
-          "raise_on_error": false
+          "raise_on_error": false,
+          "llm_surface": "rag.auxiliary"
         }
       },
       {

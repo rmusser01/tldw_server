@@ -87,6 +87,7 @@ def _generate_with_llm(prompt: str, provider: Optional[str], model: Optional[str
                         system_message=None,
                         temp=None,
                         model_override=self.model,
+                        llm_surface="rag.auxiliary",
                     )
                     # sgl.analyze returns string content
                     if isinstance(resp, str):

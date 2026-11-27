@@ -38,6 +38,7 @@ from tldw_Server_API.app.core.Claims_Extraction.output_parser import (
 from tldw_Server_API.app.core.LLM_Calls.Summarization_General_Lib import (
     SummaryProviderError,
 )
+from tldw_Server_API.app.core.exceptions import LLMPolicyRefusal
 from tldw_Server_API.app.core.Provider_Credentials.byok_runtime import ByokResolutionError
 from tldw_Server_API.app.core.testing import is_truthy
 
@@ -255,6 +256,7 @@ class PostGenerationVerifier:
             temp: float | None = None,
             **kwargs: Any,
         ) -> Any:
+            kwargs["llm_surface"] = "rag.auxiliary"
             if credential_handle is None:
                 return sgl.analyze(
                     api_name,
@@ -482,6 +484,13 @@ class PostGenerationVerifier:
                     )
                     claims_payload = (run or {}).get("claims")
                     summary_payload = (run or {}).get("summary")
+        except LLMPolicyRefusal:
+            # Moderation refused the verification call: the answer is unverified, not unsupported.
+            logger.warning("Post-check claims verification refused by moderation policy")
+            outcome.verification_available = False
+            outcome.failure_code = "llm_policy_refused"
+            outcome.reason = "verification_unavailable"
+            return outcome
         except (ByokResolutionError, SummaryProviderError) as exc:
             logger.warning("Post-check claims provider unavailable")
             outcome.verification_available = False
@@ -680,6 +689,8 @@ class PostGenerationVerifier:
                     new_answer = maybe.get("answer") if isinstance(maybe, dict) else str(maybe)
                 else:
                     new_answer = None
+            except LLMPolicyRefusal:
+                raise  # the regenerated answer is moderated like the first: a refusal is not "regen_failed"
             except Exception as e:  # noqa: BLE001 - regeneration best-effort
                 logger.debug(f"Adaptive regeneration failed: {_safe_exception_label(e)}")
                 new_answer = None
@@ -722,6 +733,12 @@ class PostGenerationVerifier:
                     sum2 = (run2 or {}).get("summary") or {}
                 else:
                     sum2 = {}
+            except LLMPolicyRefusal:
+                logger.warning("Adaptive recheck refused by moderation policy")
+                outcome.verification_available = False
+                outcome.failure_code = "llm_policy_refused"
+                outcome.reason = "verification_unavailable"
+                break
             except (ByokResolutionError, SummaryProviderError) as exc:
                 logger.warning("Adaptive recheck provider unavailable")
                 outcome.verification_available = False
