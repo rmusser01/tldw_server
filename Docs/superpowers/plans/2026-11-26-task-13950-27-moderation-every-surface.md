@@ -631,3 +631,13 @@ Chat keeps its own pipeline. The hooks skip `chat.completions`, so chat is moder
 | m3 retry owners | Global "Refusal text" (named sites); Tasks 5, 7, 9 |
 | m4 evals CLIs | Task 11 docs |
 | m5 worker identity | Task 8 test |
+
+## Execution notes
+
+Added at close-out (PR K). The plan above is unchanged; this records what execution added or changed.
+
+- **R10 was added during execution** (from Task 6): a client- or config-controlled mapping must never be able to set `llm_surface`, because a later `**splat` can override a bound partial and an exempt id smuggled through user data would skip moderation. Tasks 7-10 drop the key at each such site with a test, and Task 11 audited every `**splat` gateway call branch-wide and added a static lint that lets each exempt or caller-moderated id appear as an `llm_surface` literal only in its designated modules.
+- **Task 3 was split into parts a and b** (PR C holds the hooks and policy; the app wiring, worker registration and chat endpoint tests followed in part b).
+- **PRs**: A-J are #3649-#3662 (B #3650, C #3652, D #3656, E #3657, F #3658, G #3659, H #3660, I #3661, J #3662); K is the close-out. They were stacked, merged bottom-up, and each stacked base was retargeted to `dev` before its predecessor's branch was deleted.
+- **Test-quality lesson**: the test-quality ratchet counts tautology-suspect assertions, so a test whose assertion cannot fail (a split word in a stream-leak test, an evader fixture that dodges the endpoint-monkeypatch counter) is rejected by review or CI; write the failing case first and drive the real call.
+- **Shard-coverage lesson**: a new test directory belongs to no full-suite shard until it is added to one; the non-required Shard coverage guard caught `tests/Moderation` being silently skipped, so add the directory to a shard in the PR that creates it.

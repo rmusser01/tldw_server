@@ -37,7 +37,7 @@ Per-surface keys
 - An id that is not in the table below logs one warning and is ignored. The keys are config-only (no env variable). `MODERATION_STREAM_BUFFER_CHARS` / `stream_buffer_chars` (default 1024) sizes the output stream buffer.
 - Caller-moderated (the caller already moderates): `chat.completions`.
 - Exempt (never moderated): `internal.byok_probe`, `internal.first_chat_verifier`, `internal.eval_judge`, `moderation.classifier`.
-- Fallback for a call that names no surface: `unclassified` (moderated).
+- Backstop: a call that names no surface is moderated as `unclassified` under the default policy, with one warning (`unsurfaced LLM call provider=...`) per provider per process. `surface.unclassified = false` narrows it like any other id. A new call site should name its surface; a lint fails the build when a gateway call site does not.
 - Moderated surfaces:
   - chat: `chat.completions.router`, `chat.prompt_improvement`, `chat.document_generation`, `chat.macros`, `chat.dialogue_workflows`, `sharing.workspace_chat`
   - messages and character: `messages`, `character.completion`, `character.roleplay_resume`, `character.router`, `character.memory_extraction`
@@ -55,6 +55,20 @@ Per-surface keys
   surface.rag.generation = false
   surface.web.search = false
   ```
+
+Coverage and limits
+- Where it runs: the gateway moderation hooks (registered at app startup and in every LLM worker) moderate the input messages before the provider call and the model output after it, stream and non-stream, on every surface in the table above. Chat (`chat.completions`) keeps its own pipeline, which moderates before the user turn is persisted and writes the audit rows.
+- Refusals: a blocked input or output raises `LLMPolicyRefusal` (HTTP 400 on API surfaces, an `llm_policy_refused` frame on streams and WebSockets). Refusals are not retried and do not fail over to another provider.
+- Exempt, with reasons:
+  - `internal.byok_probe`: fixed `max_tokens=1` provider health probe with no user content.
+  - `internal.first_chat_verifier`: fixed setup prompt.
+  - `internal.eval_judge` (owner decision 2026-11-26): judge calls are measurement; moderating judge input or output would change the scores. The model under evaluation is still moderated (`evaluations`). The evals CLIs are operator tools: they register no hooks, so nothing they call is moderated at all.
+  - `moderation.classifier`: it is the moderation (classifying text with an LLM must not recurse into moderation).
+  - OCR LLM backends (llama.cpp, ChatLLM, Points): transcription of the user's own document, not generation (owner decision); they use raw HTTP and are not on a surface.
+- Reserved ids: an exempt or caller-moderated id may be written as an `llm_surface` literal only in its designated modules (a lint enforces this), and no mapping that carries user, request or config data can set `llm_surface`.
+- Not moderated: text sent as the system message (skills, web search, character cards); content parts that are lists (image or other non-text parts); tool-call arguments; `reasoning_content`; server-side tool-continuation output; the `/llamacpp` passthrough; VN Play's own unwired adapter; the `Local_LLM` handlers (not reachable from a route today).
+- Stream latency: output moderation holds back the last `stream_buffer_chars` characters (default 1024) of a stream so a match that spans chunks is caught before it is sent. A short reply is released only at the end of the stream; a long one trails the model by that many characters. Lower the value for responsiveness, raise it for longer-spanning patterns.
+- Persisted text: hook surfaces moderate only the request sent to the provider and the model reply. A surface may therefore store the user's original, unredacted text (chat redacts before persisting). Hook surfaces write no audit rows, and self-monitoring and topic monitoring do not run on them; these are filed as follow-ups under TASK-13950.
 
 Blocklist Grammar
 - Literal: `confidential project`
