@@ -203,6 +203,7 @@ async def generate_suggestions(
         num_suggestions=num_suggestions,
     )
 
+    refused = False
     try:
         from tldw_Server_API.app.core.Chat.chat_service import perform_chat_api_call_async
 

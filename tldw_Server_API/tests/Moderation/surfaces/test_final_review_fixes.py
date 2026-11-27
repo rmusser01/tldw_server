@@ -154,3 +154,65 @@ async def test_first_chat_input_block_is_raised(moderation_hooks, stub_llm_regis
         await first_chat_verifier.verify_first_chat(provider=PROVIDER, model="m", prompt="forbidden words")
     assert raised.value.status_code == 400
     assert stub_llm_registry.requests == []
+
+
+# ---- N1: the research sites use the origin-aware helper -----------------------------------------------------------
+
+
+async def _provider_filtered(**_kwargs):
+    return THEIRS
+
+
+async def _ours_filtered(**_kwargs):
+    return OURS
+
+
+@pytest.mark.parametrize(("chat", "wording"), [(_provider_filtered, PROVIDER_FILTER_REFUSAL_TEXT), (_ours_filtered, OUTPUT_REFUSAL_TEXT)])
+async def test_research_synthesis_refusal_is_worded_by_origin(chat, wording):
+    from tldw_Server_API.app.core.Research.providers.synthesis import SynthesisProvider
+
+    with pytest.raises(LLMPolicyRefusal) as raised:
+        await SynthesisProvider(chat_fn=chat).summarize(
+            plan=SimpleNamespace(query="q", focus_areas=["a"]), source_registry=[], evidence_notes=[],
+            collection_summary={}, config={"provider": PROVIDER, "model": "m"},
+        )
+    assert raised.value.detail == wording
+
+
+@pytest.mark.parametrize(("chat", "wording"), [(_provider_filtered, PROVIDER_FILTER_REFUSAL_TEXT), (_ours_filtered, OUTPUT_REFUSAL_TEXT)])
+async def test_research_workspace_artifact_refusal_is_worded_by_origin(chat, wording):
+    from tldw_Server_API.app.core.RAG.rag_service.types import Document
+    from tldw_Server_API.app.core.Research_Workspace.artifact_generation import generate_research_workspace_artifact
+
+    with pytest.raises(LLMPolicyRefusal) as raised:
+        await generate_research_workspace_artifact(
+            artifact_type="mindmap", source_documents=[Document(id="d", content="some text", metadata={})],
+            generation_provider=PROVIDER, generation_model="m", verification_provider=None, verification_model=None,
+            temperature=0.1, top_p=1.0, max_tokens=50, chat_fn=chat,
+        )
+    assert raised.value.detail == wording
+
+
+# ---- N2: no suggestions and no refusal is the heuristic fallback --------------------------------------------------
+
+
+async def test_unparseable_suggestion_reply_falls_back_without_an_unbound_name(make_service, stub_llm_registry, monkeypatch):
+    from tldw_Server_API.app.core.RAG.rag_service import suggestion_generator as sg
+
+    class Runtime:
+        async def resolve(self, provider, model=None):
+            return SimpleNamespace(api_key="k", app_config=None)
+
+    async def passthrough(coro, **_kwargs):
+        return await coro
+
+    make_service(enabled=False)
+    stub_llm_registry.reply = reply("not a json list")
+    monkeypatch.setattr(sg, "attach_runtime_provider_credentials", lambda *_a, **_k: None)
+    monkeypatch.setattr(sg, "await_runtime_bound_provider_call", passthrough)
+    stage: dict = {}
+    out = await sg.generate_suggestions(
+        "a query", "an answer", llm_provider=PROVIDER, llm_model="m", credential_runtime=Runtime(), stage_metadata=stage
+    )
+    assert isinstance(out, list)
+    assert stage["failure_code"] == "provider_unavailable"

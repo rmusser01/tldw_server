@@ -47,7 +47,7 @@ class ExpectedToolFailureReason(Enum):
     )
     LLM_POLICY_REFUSED = (
         "llm_policy_refused",
-        "The request was refused by the moderation policy.",
+        "The request was refused.",
         BreakerAction.IGNORE,
     )
 

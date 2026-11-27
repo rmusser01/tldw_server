@@ -66,8 +66,8 @@ def test_contextualization_respects_provider_and_model(chromadb_manager, mock_ch
 
 
 @pytest.mark.unit
-def test_a_refusal_skips_the_outline_and_the_context_header_but_not_the_embedding(chromadb_manager):
-    """Optional enrichment: a moderation refusal is a labelled skip (empty outline, empty header), never an error."""
+def test_a_refusal_gives_an_empty_outline_and_an_empty_context_header(chromadb_manager):
+    """Optional enrichment: a refusal is a labelled skip (empty outline, empty header), never an error, so the caller embeds on."""
     from tldw_Server_API.app.core.exceptions import LLMPolicyRefusal
 
     def refused(*_args, **_kwargs):

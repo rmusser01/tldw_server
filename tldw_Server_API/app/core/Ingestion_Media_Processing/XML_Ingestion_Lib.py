@@ -158,9 +158,9 @@ def import_xml_handler(import_file, title, author, keywords, system_prompt,
                 summary = analyze(api_name, full_text, custom_prompt, api_key)
             except LLMPolicyRefusal as refusal:
                 # Recorded on the item, which is still imported; never retried.
-                logging.warning("XML import: summary refused by moderation policy")
+                logging.warning("XML import: summary was refused")
                 summary = "No summary provided"  # no summary is stored; the refusal is recorded in the result message
-                summary_note = f" Summary skipped: refused by moderation policy ({refusal.failure_code})."
+                summary_note = f" Summary skipped: refused ({refusal.failure_code})."
         else:
             summary = "No summary provided"
 

@@ -6,8 +6,8 @@ from functools import partial
 from typing import Any, Awaitable, Callable
 
 from tldw_Server_API.app.core.Chat.chat_service import perform_chat_api_call_async
-from tldw_Server_API.app.core.exceptions import LLMPolicyRefusal
 from tldw_Server_API.app.core.LLM_Calls.adapter_registry import get_registry
+from tldw_Server_API.app.core.LLM_Calls.provider_results import raise_if_content_filtered
 from tldw_Server_API.app.core.Workflows.adapters._common import extract_openai_content
 
 ChatFn = Callable[..., Awaitable[Any]]
@@ -93,13 +93,7 @@ class SynthesisProvider:
             **extensions,
         )
         choices = response.get("choices") if isinstance(response, dict) else None
-        if (
-            isinstance(choices, list)
-            and choices
-            and isinstance(choices[0], dict)
-            and choices[0].get("finish_reason") == "content_filter"
-        ):
-            raise LLMPolicyRefusal("Output violates moderation policy")  # not synthesis text
+        raise_if_content_filtered(response)  # refused (ours or the provider's): not synthesis text
         if (
             isinstance(choices, list)
             and choices
