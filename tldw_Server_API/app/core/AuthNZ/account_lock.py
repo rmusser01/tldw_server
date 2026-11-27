@@ -1,4 +1,4 @@
-"""The account security lock (TASK-15671): the rule, the lock, the unlock and the take-back.
+"""The account security lock (TASK-15679): the rule, the lock, the unlock and the take-back.
 
 While ``users.security_locked_at`` is set every credential of the account is refused (423). Only the
 link mailed to the account's address, or for 7 days after an email change to its previous address,

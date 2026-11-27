@@ -1,4 +1,4 @@
-"""TASK-15671: the account-lock columns (migration 109, users write guard) and the lock rule.
+"""TASK-15679: the account-lock columns (migration 109, users write guard) and the lock rule.
 
 The state tests (those taking ``lock_db``) also run against PostgreSQL: test_account_lock_postgres.py
 imports them and supplies its own ``lock_db``.

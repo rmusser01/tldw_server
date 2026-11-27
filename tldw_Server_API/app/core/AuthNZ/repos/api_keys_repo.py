@@ -1493,7 +1493,7 @@ class AuthnzApiKeysRepo:
             raise
 
     async def suspend_keys_created_since(self, *, user_id: int, since: datetime, now: datetime) -> int:
-        """Suspend the user's active, unsuspended keys created after ``since``; return how many (TASK-15671).
+        """Suspend the user's active, unsuspended keys created after ``since``; return how many (TASK-15679).
 
         ``created_at`` is written by the database default (UTC text on SQLite, a naive session-time-zone
         TIMESTAMP on PostgreSQL), so the comparison happens in SQL on each backend.
@@ -1517,7 +1517,7 @@ class AuthnzApiKeysRepo:
         return _affected_row_count(result)
 
     async def unsuspend_key_for_user(self, *, key_id: int, user_id: int, conn: Any | None = None) -> bool:
-        """Lift the suspension of one of the user's keys; True when it was suspended (TASK-15671).
+        """Lift the suspension of one of the user's keys; True when it was suspended (TASK-15679).
 
         With ``conn`` the update joins the caller's transaction; without it, it runs in its own.
         """

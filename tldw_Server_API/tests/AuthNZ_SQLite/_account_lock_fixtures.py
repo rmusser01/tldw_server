@@ -1,4 +1,4 @@
-"""Lock and unlock helpers for the account-lock tests (TASK-15671; not a test module)."""
+"""Lock and unlock helpers for the account-lock tests (TASK-15679; not a test module)."""
 
 from __future__ import annotations
 
@@ -19,6 +19,7 @@ async def repair_reset_tokens_table() -> None:
     Pre-existing bug, not the lock's: the packaged SQLite schema creates the table with ``token``, and
     migration 011's ``ADD COLUMN token_hash TEXT UNIQUE`` fails silently (SQLite cannot add a UNIQUE
     column), so forgot-password and reset-password cannot store or find a token on a fresh SQLite database.
+    Fixing it, and deleting this helper, is TASK-15678.
     """
     with sqlite3.connect((await get_db_pool()).db_path) as conn:
         conn.execute("DROP TABLE password_reset_tokens")

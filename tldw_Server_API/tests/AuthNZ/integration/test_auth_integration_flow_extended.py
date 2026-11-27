@@ -57,7 +57,7 @@ async def test_reset_password_integration_success(monkeypatch):
 
         async def fetchrow(self, query, *args, **kwargs):
             if "FROM users" in query:
-                # The token's user: reset-password compares the token's email with it (TASK-15671).
+                # The token's user: reset-password compares the token's email with it (TASK-15679).
                 return {"id": 777, "email": "user@example.com", "is_active": True}
             return {"id": 1, "used_at": None}
 

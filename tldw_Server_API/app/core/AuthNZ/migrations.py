@@ -6588,7 +6588,7 @@ def get_authnz_migrations() -> list[Migration]:
 
 
 def migration_109_add_account_lock_columns(conn: sqlite3.Connection) -> None:
-    """Add the account-lock columns: ``users.security_locked_at``, ``users.credentials_valid_after``, ``api_keys.suspended_at`` (TASK-15671)."""
+    """Add the account-lock columns: ``users.security_locked_at``, ``users.credentials_valid_after``, ``api_keys.suspended_at`` (TASK-15679)."""
     for table, columns in (
         ("users", ("security_locked_at", "credentials_valid_after")),
         ("api_keys", ("suspended_at",)),

@@ -1,4 +1,4 @@
-"""TASK-15671: no token or sign-in of a locked account works, and an unlock does not revive old tokens."""
+"""TASK-15679: no token or sign-in of a locked account works, and an unlock does not revive old tokens."""
 
 from __future__ import annotations
 

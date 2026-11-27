@@ -1,4 +1,4 @@
-"""TASK-15671: the account-lock columns and the lock rule on PostgreSQL.
+"""TASK-15679: the account-lock columns and the lock rule on PostgreSQL.
 
 The state tests are the SQLite module's, imported below and run here against PostgreSQL through
 this module's ``lock_db`` fixture (the versioned writer and the timestamp comparisons differ per backend).

@@ -41,7 +41,7 @@ async def authorize_own_email_change(
     """Return when the user may change their own email address; raise ``EmailChangeRefused`` otherwise.
 
     A locked account raises ``AccountSecurityLockedError`` (423); the user's row stays locked for the
-    rest of ``db_conn``'s transaction (TASK-15671).
+    rest of ``db_conn``'s transaction (TASK-15679).
 
     Reads only on ``db_conn``: a profile update must fit in its existing PostgreSQL transaction slot.
     ``new_emails`` holds every ``identity.email`` value in the request; one that differs from the
@@ -72,7 +72,7 @@ async def authorize_own_email_change(
             "current_password_invalid",
             "Current password is incorrect. If you sign in with SSO or an email link, use Forgot password to set one first.",
         )
-    # Another account's owner can take its previous address back for 7 days (TASK-15671, Decision 18).
+    # Another account's owner can take its previous address back for 7 days (TASK-15679, Decision 18).
     changed = [value for value in new_emails if str(value).strip().lower() != stored]
     if await email_recently_released_by_another_user(db_conn, changed, user_id=user_id, is_postgres=is_postgres):
         raise _refuse(

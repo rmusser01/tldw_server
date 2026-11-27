@@ -182,7 +182,7 @@ class AuthnzUsersRepo:
             logger.error(f"AuthnzUsersRepo.get_user_by_uuid failed: {exc}")
             raise
 
-    # --- account security lock (TASK-15671). The two lock columns are raw-write safe. ---------
+    # --- account security lock (TASK-15679). The two lock columns are raw-write safe. ---------
 
     def _bind_time(self, value: datetime) -> Any:
         """PostgreSQL binds the aware datetime; SQLite stores ISO-8601 text."""

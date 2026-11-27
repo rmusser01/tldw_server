@@ -555,7 +555,7 @@ def test_federation_callback_refuses_a_locked_account_before_linking_it(
     federation_client: TestClient,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    """TASK-15671: SSO into a security-locked account answers 423 and adds no identity link."""
+    """TASK-15679: SSO into a security-locked account answers 423 and adds no identity link."""
     from tldw_Server_API.app.core.AuthNZ.account_lock import set_lock
     from tldw_Server_API.app.core.AuthNZ.database import get_db_pool
     from tldw_Server_API.app.core.AuthNZ.federation.oidc_service import OIDCFederationService

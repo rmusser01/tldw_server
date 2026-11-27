@@ -4,7 +4,7 @@
 **Date:** 2026-11-26
 **Backfilled from:** not backfilled
 **Decision owner:** repository owner (design approval 2026-11-23; open questions decided 2026-11-26)
-**Related task:** TASK-15671, TASK-15672
+**Related task:** TASK-15679, TASK-15680
 **Related spec/plan:** `Docs/Design/2026-11-23-session-cap-alert-lock-design.md` (section 3), `Docs/superpowers/plans/2026-11-26-account-lock-backend.md`
 
 ## Decision
@@ -32,7 +32,7 @@ The lock columns are in the users write guard's raw-safe set. The email restore 
 The rule is `assert_account_not_locked` in `core/AuthNZ/account_lock.py`: a locked account raises `AccountSecurityLockedError` (423) and a token issued before `credentials_valid_after` raises `StaleCredentialError`. It is enforced by mechanism, not by one call everywhere:
 
 - **On the user row**, `assert_account_not_locked`: the JWT request path (`verify_jwt_and_fetch_user`, which the MCP WebSocket also uses), the SSO callback, password sign-in, refresh, MFA sign-in and admin impersonation.
-- **The identity-write guard**, `assert_identity_write_allowed`: reset-password (which maps a stale token to 400), change-password and the self-service email change (`authorize_own_email_change`, which `PUT /users/me` and `PATCH /users/me/profile` v1 and v2 run). These requests check a credential, spend 100 to 300 ms hashing, then write; a take-back that ran in between could be undone by the write. The guard reads the lock columns on the request's own transaction before the credential that allows the write is read, and on PostgreSQL holds the user's row (`FOR NO KEY UPDATE`) until the request commits; on SQLite the request transaction already holds the write lock. A lock or take-back that starts meanwhile waits for the request and then overrides what it wrote; one that committed first is seen, as the lock (423) or as the take-back's new password hash and `credentials_valid_after`, which the password or token check then refuses. Not `FOR UPDATE`: a password reset on PostgreSQL revokes sessions on another connection while it holds the row, and the blacklist rows' foreign key takes `KEY SHARE`, which `FOR UPDATE` would block.
+- **The identity-write guard**, `assert_identity_write_allowed`: reset-password (which maps a stale token to 400), change-password and the self-service email change (`authorize_own_email_change`, which `PUT /users/me` and `PATCH /users/me/profile` v1 and v2 run). These requests check a credential, spend 100 to 300 ms hashing, then write; a take-back that ran in between could be undone by the write. The guard reads the lock columns on the request's own transaction before the credential that allows the write is read, and on PostgreSQL holds the user's row (`FOR NO KEY UPDATE`) until the request commits; on SQLite the request transaction already holds the write lock. A lock or take-back that starts meanwhile waits for the request. A take-back then overrides what the request wrote; a plain lock does not undo it, it only stops the account. One that committed first is seen, as the lock (423) or as the take-back's new password hash and `credentials_valid_after`, which the password or token check then refuses. Not `FOR UPDATE`: a password reset on PostgreSQL revokes sessions on another connection while it holds the row, and the blacklist rows' foreign key takes `KEY SHARE`, which `FOR UPDATE` would block.
 - **API keys**: the check inside `validate_api_key` (its SQLite and PostgreSQL lookups carry the owner's lock and active state); MCP HTTP and the WebSockets get its refusal.
 - **The capped session insert** re-reads `security_locked_at` in its own transaction (`FOR SHARE` on PostgreSQL), so a sign-in racing the lock leaves no session.
 - **A fresh read of the row**, `is_user_security_locked`: the integrations (Telegram asks and approvals, the Slack and Discord job-owner check `locked_actor_error`, agent trigger webhooks), and the session manager, to tell a token the lock revoked (423) from a dead one (401).
@@ -64,7 +64,7 @@ Locking mails one link per recipient: the current address and, for 7 days after 
 
 ## No MFA step on unlock (owner decision, Q6)
 
-The design asked for an MFA step on unlock. It is not built. Enrolling MFA today needs no password and accepts any credential, even an API key, so an intruder could enrol their own authenticator before the lock. Every unlock link would then ask for the intruder's code and the owner could not undo the lock, which is the first anti-goal. The step would also protect little, because ordinary magic-link sign-in has no MFA step either. The follow-up, TASK-15672, makes MFA enrolment require the password and adds an MFA step to magic-link sign-in and unlock.
+The design asked for an MFA step on unlock. It is not built. Enrolling MFA today needs no password and accepts any credential, even an API key, so an intruder could enrol their own authenticator before the lock. Every unlock link would then ask for the intruder's code and the owner could not undo the lock, which is the first anti-goal. The step would also protect little, because ordinary magic-link sign-in has no MFA step either. The follow-up, TASK-15680, makes MFA enrolment require the password and adds an MFA step to magic-link sign-in and unlock.
 
 ## Other behaviour
 
@@ -82,7 +82,7 @@ The design asked for an MFA step on unlock. It is not built. Enrolling MFA today
 | Previous-address link restores the address but keeps the password (B) | The intruder signs straight back in with the password. |
 | Previous-address link only signs in (C) | The owner cannot change the email back without the intruder's new password. |
 | Forgot-password also mails the previous address for 7 days (D) | The old mailbox could reset the password at any time, with no lock involved. |
-| MFA step on unlock | See above: an intruder-enrolled authenticator would make the lock irreversible. Deferred to TASK-15672. |
+| MFA step on unlock | See above: an intruder-enrolled authenticator would make the lock irreversible. Deferred to TASK-15680. |
 | Offer lock without a usable link | A lock the owner cannot undo defeats its purpose. |
 | Require the password to lock | The password may be what leaked. |
 | Restore suspended keys on a new API-keys page | No self-service API-keys page exists; the restore route and the `suspended_at` list field are provided and PR 3b uses the Active sessions page. |
@@ -93,7 +93,7 @@ The design asked for an MFA step on unlock. It is not built. Enrolling MFA today
 - For 7 days after an email change, whoever holds the previous mailbox can take the account whenever it is locked. An owner who moved away from a compromised mailbox and then locks could lose the account to that mailbox. Locking needs a signed-in session, so the holder of the old mailbox cannot start this alone.
 - The take-back also removes SSO links the owner added in that window, and an administrator re-links them where the provider has no email linking.
 - Until PR 3b, the only way to redeem a link in the WebUI is the token paste field in Settings; the mail template keeps its manual token box for that reason.
-- The two Backlog follow-ups are TASK-15672 (MFA) and a task for the password-reset table defect below.
+- The Backlog follow-ups are TASK-15680 (MFA), TASK-15678 (the password-reset table defect below), TASK-15681 (the take-back races and the admin bulk route below), TASK-15682 (SQLite routes that write through a second connection inside a request transaction) and TASK-15683 (sweeping what an intruder set up to act later).
 
 ## Known limits
 
@@ -102,11 +102,14 @@ The design asked for an MFA step on unlock. It is not built. Enrolling MFA today
 - Clock skew between workers can refuse fresh tokens for a few seconds after an unlock, or let a token minted on a fast-clock worker just before the lock survive it by the amount of the skew.
 - Any signed-in browser session can lock, including an intruder's. The cost to the owner is one email round trip.
 - If the intruder unlocks first, the owner has only their link's lifetime (15 minutes by default) to take the account back. An administrator-route email change records no previous address, so it opens no take-back window and gives no such protection.
-- The administrator routes (`services/admin_users_service.py`) change an email or a password without the identity-write guard, so such a write already in flight when a take-back starts can land after it.
-- A take-back, like an unlock, leaves what the intruder set up to act later: Telegram actor links, agent (ACP) triggers and scheduled workflows keep acting for the account. Sweeping them belongs with the background pause (PR 4).
+- The administrator routes (`services/admin_users_service.py`, and the bulk profile route `POST /admin/users/profile/bulk` in `services/admin_profiles_service.py`) change an email or a password without the identity-write guard, so such a write already in flight when a take-back starts can land after it.
+- The bulk profile route also lets an administrator change their own email without the password or the step-up check that `PUT /admin/users/{id}` asks for. The gap is older than the lock (the previous address is still recorded, so the take-back window opens) and is TASK-15681.
+- Password sign-in checks the lock after it verified the password, then rewrites an out-of-date password hash with an unconditional update. If a take-back completes inside that one request, the rewrite puts the old password back. It needs a hash that is due for rehashing, so it can happen once per account. TASK-15681.
+- A password sign-in that verified just before a take-back can create its session just after the take-back's last sweep, on the account the take-back left unlocked. That session lives until the owner locks again. TASK-15681.
+- A take-back, like an unlock, leaves what the intruder set up to act later: Telegram actor links, agent (ACP) triggers and scheduled workflows keep acting for the account. Sweeping them belongs with the background pause (PR 4, TASK-15683).
 - A take-back is refused, and an administrator must act, when another account already holds the previous address. A locked account stays locked; an account the newer address already unlocked stays unlocked under the newer address.
-- An intruder can enrol MFA before the lock. The owner signs in by magic link (no MFA step there), but `/mfa/disable` needs the password, so the owner needs a password first (after a take-back only an administrator can set one, see above). The fixes are the follow-up TASK-15672.
-- Password reset on a fresh install: forgot-password cannot store a token, because the packaged SQLite schema creates `password_reset_tokens` without the `token_hash` column the code uses and no PostgreSQL DDL creates the table. This is an older defect with its own follow-up task. Until it is fixed only an administrator can give a taken-back account a password; the owner signs in by emailed link meanwhile.
+- An intruder can enrol MFA before the lock. The owner signs in by magic link (no MFA step there), but `/mfa/disable` needs the password, so the owner needs a password first (after a take-back only an administrator can set one, see above). The fixes are the follow-up TASK-15680.
+- Password reset on a fresh install: forgot-password cannot store a token, because the packaged SQLite schema creates `password_reset_tokens` without the `token_hash` column the code uses and no PostgreSQL DDL creates the table. This is an older defect, TASK-15678. Until it is fixed only an administrator can give a taken-back account a password; the owner signs in by emailed link meanwhile.
 - An API key or SSO link whose lock check passed while the intruder's newer address had unlocked, and that commits after the winning take-back's last sweep, survives it (keys carry no issue time to compare).
 - When the mail service raises (rather than reporting a failed send), `POST /auth/magic-link/request` answers 500 for an unlocked account and 200 for a locked one, which tells them apart in that failure.
 - An impersonation token minted by an administrator who is then locked works until it expires (15 minutes); its subject is the impersonated user.

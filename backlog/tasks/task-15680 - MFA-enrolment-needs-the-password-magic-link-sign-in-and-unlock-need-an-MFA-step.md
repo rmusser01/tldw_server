@@ -1,5 +1,5 @@
 ---
-id: TASK-15672
+id: TASK-15680
 title: MFA enrolment needs the password; magic-link sign-in and unlock need an MFA
   step
 status: To Do
@@ -7,7 +7,7 @@ labels:
 - authnz
 - security
 dependencies:
-- TASK-15671
+- TASK-15679
 ---
 
 ## Description
@@ -25,6 +25,7 @@ Follow-up of Q6 of the account lock plan: an intruder can enrol MFA before a loc
 ## Implementation Notes
 
 <!-- SECTION:IMPLEMENTATION_NOTES:BEGIN -->
+Renumbered from TASK-15672 on 2026-11-27: open PR #3655 took that id meanwhile.
 <!-- SECTION:IMPLEMENTATION_NOTES:END -->
 
 ## Final Summary

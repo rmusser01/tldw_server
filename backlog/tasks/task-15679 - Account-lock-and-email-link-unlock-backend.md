@@ -1,5 +1,5 @@
 ---
-id: TASK-15671
+id: TASK-15679
 title: 'Account lock and email-link unlock: backend'
 status: In Progress
 labels:
@@ -29,6 +29,7 @@ PR 3a of the session cap, alert and lock design (Docs/superpowers/plans/2026-11-
 ## Implementation Notes
 
 <!-- SECTION:IMPLEMENTATION_NOTES:BEGIN -->
+Renumbered from TASK-15671 on 2026-11-27: the id was allocated on an unpushed branch and open PR #3651 took it meanwhile.
 <!-- SECTION:IMPLEMENTATION_NOTES:END -->
 
 ## Final Summary

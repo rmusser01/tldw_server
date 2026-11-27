@@ -226,7 +226,7 @@ class FederatedIdentityRepo:
             raise
 
     async def delete_identity_links_created_since(self, *, user_id: int, since: datetime) -> int:
-        """Delete the user's SSO links created after ``since``; return how many (TASK-15671 take-back)."""
+        """Delete the user's SSO links created after ``since``; return how many (TASK-15679 take-back)."""
         if getattr(self.db_pool, "pool", None) is not None:
             result = await self.db_pool.execute(
                 "DELETE FROM federated_identities WHERE user_id = $1 AND created_at > $2::timestamptz",

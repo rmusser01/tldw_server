@@ -1,4 +1,4 @@
-"""Account-lock errors and constants (TASK-15671).
+"""Account-lock errors and constants (TASK-15679).
 
 A leaf module (fastapi and ``core.AuthNZ.exceptions`` only): ``sessions_repo`` and ``session_manager``
 raise these, and ``account_lock`` calls the session manager.

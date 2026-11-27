@@ -49,7 +49,7 @@ async def restore_previous_email(
     """Make the previous address the account's email again and replace the password (account take-back).
 
     Only when ``previous_email`` is still the stored previous address (any letter case); otherwise
-    nothing changes (empty ``affected_user_ids``). TASK-15671.
+    nothing changes (empty ``affected_user_ids``). TASK-15679.
     """
     statement = _RESTORE_PREVIOUS_EMAIL_POSTGRES if backend == "postgres" else _RESTORE_PREVIOUS_EMAIL_SQLITE
     return await (gateway or VersionedUserWriteGateway(backend)).execute_update(
@@ -95,7 +95,7 @@ async def read_lock_state_for_identity_write(connection: Any, *, backend: str, u
     first write updates this row) waits for it. ``FOR NO KEY UPDATE``, not ``FOR UPDATE``: the latter also
     blocks the ``KEY SHARE`` of a foreign-key insert on another connection, and the password reset revokes
     sessions (blacklist rows) on one while it holds this lock. On SQLite the request transaction already holds
-    the write lock. None when there is no row (TASK-15671).
+    the write lock. None when there is no row (TASK-15679).
     """
     if backend == "postgres":
         row = await connection.fetchrow(
@@ -119,7 +119,7 @@ async def email_recently_released_by_another_user(
 ) -> bool:
     """Whether another user's ``previous_email`` is one of ``emails`` (any case), changed in the last 7 days.
 
-    Reads on the caller's connection only. Its owner may still take such an address back (TASK-15671).
+    Reads on the caller's connection only. Its owner may still take such an address back (TASK-15679).
     """
     addresses = sorted({str(value).strip().lower() for value in emails if str(value).strip()})
     if not addresses:

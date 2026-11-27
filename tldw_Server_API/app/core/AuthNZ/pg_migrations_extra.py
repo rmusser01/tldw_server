@@ -3697,7 +3697,7 @@ _ACCOUNT_LOCK_COLUMNS = (
 
 
 async def _ensure_account_lock_columns(conn: Any) -> None:
-    """Add the users lock columns only when missing, so a normal start never locks ``users`` (TASK-15671)."""
+    """Add the users lock columns only when missing, so a normal start never locks ``users`` (TASK-15679)."""
     for table, column in _ACCOUNT_LOCK_COLUMNS:
         present = await conn.fetchval(
             "SELECT EXISTS (SELECT 1 FROM information_schema.columns "
