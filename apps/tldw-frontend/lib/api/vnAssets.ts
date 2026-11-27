@@ -1,4 +1,5 @@
 import { apiClient } from '@web/lib/api';
+import type { ApiRequestConfig } from '@web/types/common';
 import type {
   VNAssetBulkReviewRequest,
   VNAssetGenerationRequest,
@@ -106,6 +107,10 @@ export function listVNAssetItems(packId: number): Promise<VNAssetItem[]> {
   return apiClient.get(`${VN_ASSETS_BASE}/packs/${packId}/items`);
 }
 
+export function getVNAssetItemPreview(packId: number, itemId: number, config?: ApiRequestConfig): Promise<Blob> {
+  return apiClient.get(`${VN_ASSETS_BASE}/packs/${packId}/items/${itemId}/preview`, { ...config, responseType: 'blob' });
+}
+
 export function reviewVNAssetItem(
   packId: number,
   itemId: number,
@@ -116,13 +121,14 @@ export function reviewVNAssetItem(
 
 export function bulkReviewVNAssetItems(
   packId: number,
-  request: VNAssetBulkReviewRequest
+  request: VNAssetBulkReviewRequest,
+  config?: ApiRequestConfig,
 ): Promise<VNAssetItem[]> {
-  return apiClient.post(`${VN_ASSETS_BASE}/packs/${packId}/items/bulk-review`, request);
+  return apiClient.post(`${VN_ASSETS_BASE}/packs/${packId}/items/bulk-review`, request, config);
 }
 
-export function setPreferredVNAssetItem(packId: number, itemId: number): Promise<VNAssetItem> {
-  return apiClient.post(`${VN_ASSETS_BASE}/packs/${packId}/items/${itemId}/preferred`);
+export function setPreferredVNAssetItem(packId: number, itemId: number, config?: ApiRequestConfig): Promise<VNAssetItem> {
+  return apiClient.post(`${VN_ASSETS_BASE}/packs/${packId}/items/${itemId}/preferred`, undefined, config);
 }
 
 export function getVNAssetReadiness(packId: number): Promise<VNAssetReadiness> {

@@ -322,7 +322,7 @@ function resolveCredentials(config: ApiRequestConfig): RequestCredentials {
   return withCredentials ? 'include' : 'omit';
 }
 
-async function parseResponseBody<T>(response: Response, responseType?: ApiRequestConfig['responseType']): Promise<T> {
+async function parseResponseBody<T>(response: Response, { responseType, signal }: ApiRequestConfig): Promise<T> {
   if (response.status === 204 || response.status === 205) {
     return undefined as T;
   }
@@ -332,7 +332,12 @@ async function parseResponseBody<T>(response: Response, responseType?: ApiReques
   }
 
   if (responseType === 'blob') {
-    return response.blob() as Promise<T>;
+    // The raw transport releases its abort listener at the headers. Keep the
+    // preview's signal attached while the browser reads the image bytes.
+    const download = signal && response.body
+      ? new Response(response.body.pipeThrough(new TransformStream(), { signal }), { headers: response.headers })
+      : response;
+    return download.blob() as Promise<T>;
   }
 
   const text = await response.text();
@@ -432,7 +437,7 @@ function recordSuccess<T>(response: ApiResponse<T>): void {
       timestamp: new Date().toISOString(),
       requestHeaders: response.config.headers,
       requestBody: response.config.data,
-      responseBody: response.data,
+      responseBody: response.data instanceof Blob ? { size: response.data.size, type: response.data.type } : response.data,
     });
   } catch {
     // Silently ignore history logging errors to not disrupt API responses
@@ -711,8 +716,9 @@ async function request<T = unknown>(
 
   let responseBody: T;
   try {
-    responseBody = await parseResponseBody<T>(response, config.responseType);
+    responseBody = await parseResponseBody<T>(response, config);
   } catch (error) {
+    if (config.responseType === 'blob' && config.signal?.aborted) throw createRequestCancellationError();
     if (error instanceof ApiError) {
       recordFailure(requestConfig, {
         status: response.status,
@@ -796,11 +802,7 @@ export function buildAuthHeaders(method: string = 'GET', contentType?: string): 
     const methodUp = method.toUpperCase();
     const needsCsrf = ['POST', 'PUT', 'PATCH', 'DELETE'].includes(methodUp) && !xApiKey;
     if (needsCsrf) {
-      const cookie = (name: string): string | null => {
-        const match = document.cookie.match(new RegExp('(?:^|; )' + name.replace(/([.$?*|{}()[\]\\/+^])/g, '\\$1') + '=([^;]*)'));
-        return match ? decodeURIComponent(match[1]) : null;
-      };
-      const csrf = cookie('csrf_token');
+      const csrf = getCookie('csrf_token');
       if (csrf) headers['X-CSRF-Token'] = csrf;
     }
   }

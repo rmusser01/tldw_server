@@ -10,6 +10,8 @@ const mocks = vi.hoisted(() => ({
   profile: vi.fn(),
   apiBaseUrl: vi.fn(),
   bulkReviewVNAssetItems: vi.fn(),
+  getVNAssetItemPreview: vi.fn(),
+  setPreferredVNAssetItem: vi.fn(),
   getVNAssetGenerationPreflight: vi.fn(),
   retryVNAssetSlot: vi.fn(),
   startVNAssetGeneration: vi.fn(),
@@ -36,6 +38,8 @@ vi.mock('@web/lib/api', async (importOriginal) => ({
 
 vi.mock('@web/lib/api/vnAssets', () => ({
   bulkReviewVNAssetItems: (...args: unknown[]) => mocks.bulkReviewVNAssetItems(...args),
+  getVNAssetItemPreview: (...args: unknown[]) => mocks.getVNAssetItemPreview(...args),
+  setPreferredVNAssetItem: (...args: unknown[]) => mocks.setPreferredVNAssetItem(...args),
   getVNAssetGenerationPreflight: (...args: unknown[]) => mocks.getVNAssetGenerationPreflight(...args),
   retryVNAssetSlot: (...args: unknown[]) => mocks.retryVNAssetSlot(...args),
   startVNAssetGeneration: (...args: unknown[]) => mocks.startVNAssetGeneration(...args),
@@ -130,9 +134,9 @@ describe('VNAssetsWorkbench', () => {
     mocks.listVNAssetSlots.mockResolvedValue([]);
   });
 
-  function existingFailedPack(): void {
+  function existingFailedPack(ownerUserId?: number): void {
     mocks.listVNAssetPacks.mockResolvedValue([
-      { id: 7, title: 'Orbital Library', primary_character_id: 42, status: 'draft' },
+      { id: 7, owner_user_id: ownerUserId, title: 'Orbital Library', primary_character_id: 42, status: 'draft' },
     ]);
     mocks.listVNAssetSlots.mockResolvedValue([
       { id: 12, pack_id: 7, asset_type: 'sprite', slot_key: 'sprite_neutral',
@@ -2228,8 +2232,8 @@ describe('VNAssetsWorkbench', () => {
   it('does not let an old review refresh invalidate the selected pack load', async () => {
     existingFailedPack();
     mocks.listVNAssetPacks.mockResolvedValue([
-      { id: 7, title: 'Orbital Library', primary_character_id: 42, status: 'draft' },
-      { id: 8, title: 'Moon Archive', primary_character_id: 43, status: 'draft' },
+      { id: 7, owner_user_id: 1, title: 'Orbital Library', primary_character_id: 42, status: 'draft' },
+      { id: 8, owner_user_id: 1, title: 'Moon Archive', primary_character_id: 43, status: 'draft' },
     ]);
     mocks.listVNAssetItems.mockResolvedValueOnce([
       { id: 11, pack_id: 7, slot_id: 12, variant_index: 0, review_status: 'draft', source: 'generated' },
@@ -2250,7 +2254,7 @@ describe('VNAssetsWorkbench', () => {
   });
 
   it('keeps a successful review when an earlier refresh finishes afterward', async () => {
-    existingFailedPack();
+    existingFailedPack(1);
     const draft = { id: 11, pack_id: 7, slot_id: 12, variant_index: 0, review_status: 'draft', source: 'generated' };
     const approved = { ...draft, review_status: 'approved' };
     mocks.listVNAssetItems.mockResolvedValue([draft]);
@@ -2268,6 +2272,161 @@ describe('VNAssetsWorkbench', () => {
     await act(async () => { resolveReadiness({ ready: false, status: 'not_ready', warnings: [], errors: [] }); });
     await waitFor(() => expect(mocks.listVNAssetItems).toHaveBeenCalledTimes(3));
     expect(screen.getByText('approved')).toBeInTheDocument();
+  });
+
+  it('keeps a confirmed review when the follow-up details request fails', async () => {
+    existingFailedPack(1);
+    const draft = { id: 11, pack_id: 7, slot_id: 12, variant_index: 0, review_status: 'draft', source: 'generated' };
+    mocks.listVNAssetItems.mockResolvedValue([draft]);
+    mocks.bulkReviewVNAssetItems.mockResolvedValue([{ ...draft, review_status: 'approved' }]);
+    const user = userEvent.setup();
+    render(<VNAssetsWorkbench />);
+    const checkbox = await screen.findByRole('checkbox', { name: 'Select item 11' });
+    await user.click(checkbox);
+    mocks.getVNAssetReadiness.mockRejectedValueOnce(new Error('Readiness unavailable'));
+
+    await user.click(screen.getByRole('button', { name: 'Approve selected' }));
+
+    await screen.findByText('Review saved. Refresh pack details to update readiness.');
+    expect(screen.getByText('approved')).toBeInTheDocument();
+    await waitFor(() => expect(checkbox).not.toBeChecked());
+    expect(mocks.bulkReviewVNAssetItems).toHaveBeenCalledWith(
+      7, { item_ids: [11], review_status: 'approved' }, expect.objectContaining({ baseURL: scope.server }),
+    );
+  });
+
+  it('does not show a late review failure in a different pack', async () => {
+    existingFailedPack();
+    mocks.listVNAssetPacks.mockResolvedValue([
+      { id: 7, owner_user_id: 1, title: 'Orbital Library', primary_character_id: 42, status: 'draft' },
+      { id: 8, owner_user_id: 1, title: 'Moon Archive', primary_character_id: 43, status: 'draft' },
+    ]);
+    mocks.listVNAssetItems.mockResolvedValueOnce([
+      { id: 11, pack_id: 7, slot_id: 12, variant_index: 0, review_status: 'draft', source: 'generated' },
+    ]);
+    let fail!: (error: Error) => void;
+    mocks.bulkReviewVNAssetItems.mockImplementationOnce(() => new Promise((_resolve, reject) => { fail = reject; }));
+    const user = userEvent.setup();
+    render(<VNAssetsWorkbench />);
+    await user.click(await screen.findByRole('checkbox', { name: 'Select item 11' }));
+    await user.click(screen.getByRole('button', { name: 'Approve selected' }));
+    await user.click(screen.getByText('Moon Archive'));
+    await screen.findByText('Selected pack: Moon Archive');
+
+    await act(async () => fail(new Error('Previous pack could not be reviewed')));
+
+    expect(screen.queryByText('Previous pack could not be reviewed')).not.toBeInTheDocument();
+  });
+
+  it('keeps a review in view when the same account is reverified during the write', async () => {
+    existingFailedPack(1);
+    const draft = { id: 11, pack_id: 7, slot_id: 12, variant_index: 0, review_status: 'draft', source: 'generated' };
+    const approved = { ...draft, review_status: 'approved' };
+    mocks.listVNAssetItems.mockResolvedValue([draft]);
+    let completeReview!: (value: unknown[]) => void;
+    mocks.bulkReviewVNAssetItems.mockImplementationOnce(() => new Promise((resolve) => { completeReview = resolve; }));
+    const user = userEvent.setup();
+    render(<VNAssetsWorkbench />);
+    const checkbox = await screen.findByRole('checkbox', { name: 'Select item 11' });
+    await user.click(checkbox);
+    await user.click(screen.getByRole('button', { name: 'Approve selected' }));
+    await waitFor(() => expect(mocks.bulkReviewVNAssetItems).toHaveBeenCalledTimes(1));
+
+    await act(async () => { window.dispatchEvent(new Event('focus')); });
+    await waitFor(() => expect(mocks.listVNAssetItems).toHaveBeenCalledTimes(2));
+    expect(checkbox).toBeChecked();
+    mocks.listVNAssetItems.mockResolvedValue([approved]);
+    await act(async () => completeReview([approved]));
+
+    await screen.findByText('approved');
+    await waitFor(() => expect(checkbox).not.toBeChecked());
+  });
+
+  it('verifies the owner again before sending a review for the selected pack', async () => {
+    existingFailedPack(1);
+    mocks.listVNAssetItems.mockResolvedValue([
+      { id: 11, pack_id: 7, slot_id: 12, variant_index: 0, review_status: 'draft', source: 'generated' },
+    ]);
+    const user = userEvent.setup();
+    render(<VNAssetsWorkbench />);
+    await user.click(await screen.findByRole('checkbox', { name: 'Select item 11' }));
+    mocks.profile.mockResolvedValue({ user: { id: 2, is_active: true } });
+    mocks.listVNAssetPacks.mockResolvedValue([{ id: 7, owner_user_id: 2, title: 'Other library', status: 'draft' }]);
+
+    await user.click(screen.getByRole('button', { name: 'Approve selected' }));
+
+    await screen.findByText('Selected pack: Other library');
+    expect(mocks.bulkReviewVNAssetItems).not.toHaveBeenCalled();
+  });
+
+  it('hides the review during failed owner verification and restores selection for the same owner', async () => {
+    existingFailedPack(1);
+    mocks.listVNAssetItems.mockResolvedValue([
+      { id: 11, pack_id: 7, slot_id: 12, variant_index: 0, review_status: 'draft', source: 'generated' },
+    ]);
+    const user = userEvent.setup();
+    render(<VNAssetsWorkbench />);
+    await user.click(await screen.findByRole('checkbox', { name: 'Select item 11' }));
+    mocks.profile.mockRejectedValue(new Error('Cannot verify the current account'));
+    await act(async () => { window.dispatchEvent(new Event('tldw:config-updated')); });
+
+    const retry = await screen.findByRole('button', { name: 'Retry recovery check' });
+    expect(screen.queryByRole('checkbox', { name: 'Select item 11' })).not.toBeInTheDocument();
+
+    mocks.profile.mockResolvedValue({ user: { id: 1, is_active: true } });
+    await user.click(retry);
+    expect(await screen.findByRole('checkbox', { name: 'Select item 11' })).toBeChecked();
+  });
+
+  it('shares a pending owner verification between an open preview and a review write', async () => {
+    existingFailedPack(1);
+    const draft = { id: 11, pack_id: 7, slot_id: 12, variant_index: 0, review_status: 'draft',
+      generated_file_id: 31, source: 'generated' };
+    mocks.listVNAssetItems.mockResolvedValue([draft]);
+    mocks.getVNAssetItemPreview.mockResolvedValue(new Blob([], { type: 'image/png' }));
+    mocks.bulkReviewVNAssetItems.mockResolvedValue([{ ...draft, review_status: 'approved' }]);
+    const user = userEvent.setup();
+    render(<VNAssetsWorkbench />);
+    await user.click(await screen.findByRole('checkbox', { name: 'Select item 11' }));
+    const initialChecks = mocks.profile.mock.calls.length;
+    let verified!: (value: unknown) => void;
+    mocks.profile.mockImplementationOnce(() => new Promise((resolve) => { verified = resolve; }));
+    await user.click(screen.getByRole('button', { name: 'Approve selected' }));
+    await waitFor(() => expect(mocks.profile).toHaveBeenCalledTimes(initialChecks + 1));
+
+    await user.click(screen.getByRole('button', { name: 'Preview item 11' }));
+    expect(mocks.profile).toHaveBeenCalledTimes(initialChecks + 1);
+    await act(async () => verified({ user: { id: 1, is_active: true } }));
+
+    await waitFor(() => expect(mocks.bulkReviewVNAssetItems).toHaveBeenCalledTimes(1));
+    expect(mocks.getVNAssetItemPreview).toHaveBeenCalledWith(7, 11, expect.objectContaining({ baseURL: scope.server }));
+  });
+
+  it('starts a new owner’s review while an old preview verification is still pending', async () => {
+    existingFailedPack(1);
+    const draft = { id: 11, pack_id: 7, slot_id: 12, variant_index: 0, review_status: 'draft',
+      generated_file_id: 31, source: 'generated' };
+    mocks.listVNAssetItems.mockResolvedValue([draft]);
+    mocks.bulkReviewVNAssetItems.mockResolvedValue([{ ...draft, review_status: 'approved' }]);
+    const user = userEvent.setup();
+    render(<VNAssetsWorkbench />);
+    const preview = await screen.findByRole('button', { name: 'Preview item 11' });
+    const initialChecks = mocks.profile.mock.calls.length;
+    let verifyOldOwner!: (value: unknown) => void;
+    mocks.profile.mockImplementationOnce(() => new Promise((resolve) => { verifyOldOwner = resolve; }));
+    await user.click(preview);
+    await waitFor(() => expect(mocks.profile).toHaveBeenCalledTimes(initialChecks + 1));
+
+    mocks.profile.mockResolvedValue({ user: { id: 2, is_active: true } });
+    mocks.listVNAssetPacks.mockResolvedValue([{ id: 7, owner_user_id: 2, title: 'Other library', status: 'draft' }]);
+    await act(async () => { window.dispatchEvent(new CustomEvent('tldw:auth-principal-changed')); });
+    await screen.findByText('Selected pack: Other library');
+    await user.click(await screen.findByRole('checkbox', { name: 'Select item 11' }));
+    await user.click(screen.getByRole('button', { name: 'Approve selected' }));
+
+    await waitFor(() => expect(mocks.bulkReviewVNAssetItems).toHaveBeenCalledTimes(1));
+    await act(async () => verifyOldOwner({ user: { id: 1, is_active: true } }));
+    expect(mocks.getVNAssetItemPreview).not.toHaveBeenCalled();
   });
 
   it('clears old items and review selection when the next pack cannot load', async () => {

@@ -275,6 +275,8 @@ nondeterministic provider or a mutable local model file.
 
 ## Review And Manifest
 
+In the WebUI review board, open a variant's **Preview** to inspect its image. Use **Review status** to narrow the list, then select individual items or use **Select visible**. If a review request fails, the board shows the error beside the selected items so you can retry. Use the star on an approved item to make it the preferred variant for its slot.
+
 Generated and uploaded items start as `draft`. Valid review statuses are `draft`, `approved`, `rejected`, and `hidden`.
 
 Approve one item and make it preferred:

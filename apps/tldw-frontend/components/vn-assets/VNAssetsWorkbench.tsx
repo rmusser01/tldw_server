@@ -1,6 +1,6 @@
 import React, { FormEvent, useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { Archive, ClipboardList, Images, LayoutGrid, Settings, RefreshCw, RotateCcw, Trash2 } from 'lucide-react';
-import { ApiError } from '@web/lib/api';
+import { ApiError, buildAuthHeaders } from '@web/lib/api';
 import {
   clearPendingVNAssetGeneration,
   createVNAssetIdempotencyKey,
@@ -27,6 +27,7 @@ import {
   getStarterMatrices,
   getVNAssetGeneration,
   getVNAssetGenerationPreflight,
+  getVNAssetItemPreview,
   getVNAssetReadiness,
   listVNAssetItems,
   listVNAssetPacks,
@@ -35,6 +36,7 @@ import {
   startVNAssetGeneration,
   retryVNAssetSlot,
 } from '@web/lib/api/vnAssets';
+import type { ApiRequestConfig } from '@web/types/common';
 import type {
   VNAssetBulkReviewRequest,
   VNAssetGenerationStatus,
@@ -45,6 +47,8 @@ import type {
   VNAssetSlot,
   VNAssetStarterMatrix,
 } from '@web/types/vn-assets';
+
+const REVIEW_REFRESH_ERROR = 'Review saved. Refresh pack details to update readiness.';
 
 const workflowSteps = [
   { key: 'setup', label: 'Setup', icon: Settings },
@@ -90,12 +94,15 @@ export default function VNAssetsWorkbench() {
   const [selectedPack, setSelectedPack] = useState<VNAssetPack | null>(null);
   const [starterMatrices, setStarterMatrices] = useState<VNAssetStarterMatrix[]>([]);
   const [slots, setSlots] = useState<VNAssetSlot[]>([]);
-  const [items, setItems] = useState<VNAssetItem[]>([]);
+  const [reviewSnapshot, setReviewSnapshot] = useState<{ packKey: string; items: VNAssetItem[] } | null>(null);
   const [generation, setGeneration] = useState<VNAssetGenerationStatus | null>(null);
   const [preflight, setPreflight] = useState<VNAssetGenerationPreflight | null>(null);
   const [preflightError, setPreflightError] = useState<string | null>(null);
   const [preflightRevision, setPreflightRevision] = useState(0);
   const [loadedPackId, setLoadedPackId] = useState<number | null>(null);
+  const reviewsInFlight = useRef(new Set<string>());
+  const reviewVerification = useRef<Promise<boolean> | null>(null);
+  const [reviewingPacks, setReviewingPacks] = useState<ReadonlySet<string>>(() => new Set());
   const generationCommandPending = useRef(new Map<number, symbol>());
   const [pendingCommands, setPendingCommands] = useState<Record<number, { kind: 'start' | 'retry' | 'cancel'; slotId?: number }>>({});
   const legacyReceipts = useRef(new Map<string, PendingVNAssetGeneration>());
@@ -119,6 +126,7 @@ export default function VNAssetsWorkbench() {
   const [discardConfirmed, setDiscardConfirmed] = useState(false);
   const [accountRevision, setAccountRevision] = useState(0);
   const recovery = useVNGenerationRecovery(useCallback((resetAccount: boolean) => {
+    reviewVerification.current = null;
     if (resetAccount) {
       generationCommandPending.current.clear();
       setPendingCommands({});
@@ -131,10 +139,11 @@ export default function VNAssetsWorkbench() {
       selectedPackIdRef.current = null;
       setSelectedPack(null);
       setPacks([]);
+      setReviewSnapshot(null);
       setAccountRevision((value) => value + 1);
     }
   }, []));
-  const { authority, captureCurrent, isAuthority } = recovery;
+  const { authority, captureCurrent, isAuthority, verify } = recovery;
   const savedCommand = recovery.commands.find((command) => command.packId === selectedPack?.id);
 
   const starterMatrix = starterMatrices[0] ?? null;
@@ -184,12 +193,13 @@ export default function VNAssetsWorkbench() {
         if (nextItems.status === 'rejected') throw nextItems.reason;
         if (nextReadiness.status === 'rejected') throw nextReadiness.reason;
         setSlots(nextSlots.value);
-        setItems(nextItems.value);
+        setReviewSnapshot({ packKey: legacyOperation(authority, pack.id), items: nextItems.value });
         setGeneration(nextGeneration);
         setReadiness(nextReadiness.value);
         setLoadedPackId(pack.id);
         setError((previous) => previous === 'Could not refresh generation progress. Refresh to try again.' ||
-          previous === 'Could not load generation status. Refresh to try again.' ? null : previous);
+          previous === 'Could not load generation status. Refresh to try again.' ||
+          previous === REVIEW_REFRESH_ERROR ? null : previous);
       } catch (loadError) {
         if (isCurrent()) throw loadError;
       }
@@ -317,7 +327,6 @@ export default function VNAssetsWorkbench() {
     setLoadedPackId(null);
     setGeneration(null);
     setSlots([]);
-    setItems([]);
     setReadiness(null);
     const revision = ++refreshRevision.current;
     if (!selectedPack || !recovery.ready) {
@@ -581,40 +590,86 @@ export default function VNAssetsWorkbench() {
     }
   }, [selectedPack, finishGenerationCommand, recovery, savedCommand]);
 
-  const handleBulkReview = useCallback(async (request: VNAssetBulkReviewRequest) => {
-    if (!selectedPack) return;
-    setError(null);
-    try {
-      const reviewedItems = await bulkReviewVNAssetItems(selectedPack.id, request);
-      if (selectedPackIdRef.current !== selectedPack.id) return;
-      setItems((previous) => {
-        const reviewedById = new Map(reviewedItems.map((item) => [item.id, item]));
-        return previous.map((item) => reviewedById.get(item.id) ?? item);
-      });
-      await refreshPackDetails(selectedPack, true);
-    } catch (reviewError) {
-      setError(reviewError instanceof Error ? reviewError.message : 'Failed to update review status');
-    }
-  }, [refreshPackDetails, selectedPack]);
+  const reviewKey = authority && selectedPack ? legacyOperation(authority, selectedPack.id) : null;
+  const reviewAvailable = reviewKey !== null && reviewSnapshot?.packKey === reviewKey;
+  const reviewBusy = reviewKey !== null && reviewingPacks.has(reviewKey);
 
-  const handleSetPreferred = useCallback(async (itemId: number) => {
-    if (!selectedPack) return;
-    setError(null);
-    try {
-      const preferredItem = await setPreferredVNAssetItem(selectedPack.id, itemId);
-      if (selectedPackIdRef.current !== selectedPack.id) return;
-      setItems((previous) =>
-        previous.map((item) =>
-          item.slot_id === preferredItem.slot_id
-            ? { ...item, preferred: item.id === preferredItem.id }
-            : item
-        )
-      );
-      await refreshPackDetails(selectedPack, true);
-    } catch (preferredError) {
-      setError(preferredError instanceof Error ? preferredError.message : 'Failed to set preferred item');
+  const captureReviewPack = useCallback(() => {
+    if (!selectedPack || !authority || !reviewAvailable || authority.principal !== String(selectedPack.owner_user_id)) {
+      throw new Error('This pack must finish loading before you can review items.');
     }
-  }, [selectedPack, refreshPackDetails]);
+    return { pack: selectedPack, scope: authority };
+  }, [authority, reviewAvailable, selectedPack]);
+
+  const matchesReviewView = useCallback((scope: VNCommandScope, packId: number) => {
+    const verified = captureCurrent();
+    return selectedPackIdRef.current === packId && !!verified && sameVNCommandScope(verified.scope, scope);
+  }, [captureCurrent]);
+
+  const verifyReviewOwner = useCallback(() => {
+    if (reviewVerification.current) return reviewVerification.current;
+    const pending = verify().then(Boolean).finally(() => {
+      if (reviewVerification.current === pending) reviewVerification.current = null;
+    });
+    reviewVerification.current = pending;
+    return pending;
+  }, [verify]);
+
+  const saveReview = useCallback(async (
+    submit: (packId: number, config: ApiRequestConfig) => Promise<(items: VNAssetItem[]) => VNAssetItem[]>,
+  ): Promise<boolean> => {
+    const { pack, scope } = captureReviewPack();
+    const key = legacyOperation(scope, pack.id);
+    if (reviewsInFlight.current.has(key)) return false;
+    reviewsInFlight.current.add(key);
+    setReviewingPacks(new Set(reviewsInFlight.current));
+    const isSelected = () => matchesReviewView(scope, pack.id);
+    try {
+      if (!await verifyReviewOwner() || !isSelected()) return false;
+      const applyReview = await submit(pack.id, { baseURL: scope.server, headers: buildAuthHeaders('POST') });
+      if (selectedPackIdRef.current !== pack.id) return false;
+      if (!captureCurrent()) await verifyReviewOwner();
+      if (!isSelected()) return false;
+      setReviewSnapshot((snapshot) => snapshot?.packKey === key
+        ? { packKey: key, items: applyReview(snapshot.items) } : snapshot);
+      void refreshPackDetails(pack, true).catch(() => {
+        if (isSelected()) setError(REVIEW_REFRESH_ERROR);
+      });
+      return true;
+    } catch (reviewError) {
+      if (!isSelected()) return false;
+      throw reviewError;
+    } finally {
+      reviewsInFlight.current.delete(key);
+      setReviewingPacks(new Set(reviewsInFlight.current));
+    }
+  }, [captureCurrent, captureReviewPack, matchesReviewView, refreshPackDetails, verifyReviewOwner]);
+
+  const handleBulkReview = (request: VNAssetBulkReviewRequest) => saveReview(async (packId, config) => {
+    const reviewedItems = await bulkReviewVNAssetItems(packId, request, config);
+    const reviewedById = new Map(reviewedItems.map((item) => [item.id, item]));
+    return (items) => items.map((item) => reviewedById.get(item.id) ?? item);
+  });
+
+  const handleSetPreferred = (itemId: number) => saveReview(async (packId, config) => {
+    const preferredItem = await setPreferredVNAssetItem(packId, itemId, config);
+    return (items) => items.map((item) => item.slot_id === preferredItem.slot_id
+      ? { ...item, preferred: item.id === preferredItem.id } : item);
+  });
+
+  const handleLoadPreview = useCallback(async (itemId: number, signal: AbortSignal) => {
+    const { pack, scope } = captureReviewPack();
+    if (!await verifyReviewOwner() || signal.aborted || !matchesReviewView(scope, pack.id)) {
+      throw new DOMException('The preview is no longer current.', 'AbortError');
+    }
+    const blob = await getVNAssetItemPreview(pack.id, itemId, {
+      baseURL: scope.server, headers: buildAuthHeaders(), signal,
+    });
+    if (!matchesReviewView(scope, pack.id)) {
+      throw new DOMException('The preview is no longer current.', 'AbortError');
+    }
+    return blob;
+  }, [captureReviewPack, matchesReviewView, verifyReviewOwner]);
 
   return (
     <main className="min-h-screen bg-bg text-text">
@@ -759,10 +814,13 @@ export default function VNAssetsWorkbench() {
             </section>
 
             <ReviewBoard
-              key={selectedPack?.id ?? 'no-pack'}
-              items={items}
-              onBulkReview={handleBulkReview}
-              onSetPreferred={handleSetPreferred}
+              key={`${accountRevision}:${selectedPack?.id ?? 'no-pack'}`}
+              items={reviewAvailable && reviewSnapshot ? reviewSnapshot.items : []}
+              reviewBusy={reviewBusy}
+              suspended={reviewAvailable && !recovery.ready}
+              onBulkReview={reviewAvailable ? handleBulkReview : undefined}
+              onSetPreferred={reviewAvailable ? handleSetPreferred : undefined}
+              onLoadPreview={reviewAvailable && recovery.ready ? handleLoadPreview : undefined}
             />
 
             <PortabilityPanel selectedPack={selectedPack} />
