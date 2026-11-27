@@ -1,9 +1,10 @@
 import { useState, useCallback } from "react"
 import { useMutation } from "@tanstack/react-query"
-import { Upload, Button, message, Card, Alert, Descriptions } from "antd"
+import { Upload, Button, message, Card, Descriptions } from "antd"
 import type { UploadProps } from "antd"
 import { Upload as UploadIcon, FileJson, CheckCircle } from "lucide-react"
 
+import { Alert } from "@/components/ui/primitives"
 import { useKanbanScope } from "./KanbanScope"
 import type { BoardImportResponse } from "@/types/kanban"
 
@@ -162,21 +163,21 @@ export const ImportPanel = ({ onImported }: ImportPanelProps) => {
       <h3 className="text-lg font-medium mb-4">Import Board</h3>
 
       <Alert
-        type="info"
+        variant="info"
+        aria-live="off"
         className="mb-4"
-        title="Supported formats"
-        description={
-          <ul className="list-disc ml-4 mt-2">
-            <li>
-              <strong>Trello JSON export</strong> - Export your board from Trello
-              (Menu → More → Print, export, and share → Export as JSON)
-            </li>
-            <li>
-              <strong>tldw Kanban export</strong> - Our native format
-            </li>
-          </ul>
-        }
-      />
+        title={<span className="text-text">Supported formats</span>}
+      >
+        <ul className="list-disc ml-4 mt-2 text-text">
+          <li>
+            <strong>Trello JSON export</strong> - Export your board from Trello
+            (Menu → More → Print, export, and share → Export as JSON)
+          </li>
+          <li>
+            <strong>tldw Kanban export</strong> - Our native format
+          </li>
+        </ul>
+      </Alert>
 
       {/* Import result */}
       {importResult && (

@@ -1,22 +1,19 @@
 ---
 id: TASK-45.44.13
-title: >-
-  Migrate design-system product state: Other shared surfaces and long-tail
-  triage
-status: To Do
+title: 'Migrate design-system product state: Other shared surfaces and long-tail triage'
+status: In Progress
 assignee: []
-created_date: '2026-05-14 03:20'
+created_date: 2026-05-14 03:20
 labels:
-  - design-system
-  - webui
-  - extension
-  - product-state
+- design-system
+- webui
+- extension
+- product-state
 dependencies: []
 references:
-  - 'https://github.com/rmusser01/tldw_server/issues/1670'
-  - >-
-    Docs/superpowers/specs/2026-05-14-design-system-remaining-work-tracker-design.md
-  - apps/packages/ui/scripts/design-system-product-state-baseline.json
+- https://github.com/rmusser01/tldw_server/issues/1670
+- Docs/superpowers/specs/2026-05-14-design-system-remaining-work-tracker-design.md
+- apps/packages/ui/scripts/design-system-product-state-baseline.json
 parent_task_id: TASK-45.44
 priority: medium
 ---
@@ -48,4 +45,5 @@ Mirror the linked GitHub product-area migration issue. Closure requires zero cur
 
 <!-- SECTION:IMPLEMENTATION_NOTES:BEGIN -->
 - TASK-45.44.13.6 migrates TTS playground and voice-cloning Alert product states to the design-system Alert primitive, removes five TTS baseline exceptions, and is tracked in PR https://github.com/rmusser01/tldw_server/pull/2552.
+TASK-45.44.13.7 covers the Kanban and Scheduled Tasks slice and the stale Models entry for #1670. On dev 2053ec5ad4, its before/after owned counts are 26 to 22 blocked, 14 to 13 allowed, and 1 to 0 stale. The remaining findings stay with this parent issue. Verification and browser evidence are recorded in the child task.
 <!-- SECTION:IMPLEMENTATION_NOTES:END -->

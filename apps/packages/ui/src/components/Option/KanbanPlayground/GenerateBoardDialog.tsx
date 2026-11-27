@@ -1,6 +1,7 @@
 import React from "react";
-import { Alert, Button, Input, Modal, Typography } from "antd";
+import { Button, Input, Modal, Typography } from "antd";
 import { ModelSelect } from "@/components/Common/ModelSelect";
+import { Alert } from "@/components/ui/primitives";
 import { useSelectedModel } from "@/hooks/chat/useSelectedModel";
 import { useChatModelCatalog } from "@/hooks/useChatModelCatalog";
 import {
@@ -142,6 +143,10 @@ export default function GenerateBoardDialog({
       if (isActive()) setSaving(false);
     }
   };
+  const statusMessage = generating
+    ? "Generating draft… Stop preserves your saved boards and any previous draft."
+    : notice;
+
   return (
     <Modal
       title="Generate board"
@@ -201,14 +206,14 @@ export default function GenerateBoardDialog({
             onChange={(event) => setInstructions(event.target.value)}
           />
         </div>
-        {error && <Alert type="error" showIcon message={error} />}
-        {notice && <Alert type="info" showIcon message={notice} />}
-        {generating && (
-          <p role="status">
-            Generating draft… Stop preserves your saved boards and any previous
-            draft.
-          </p>
+        {error && (
+          <Alert variant="error">
+            <span className="text-text">{error}</span>
+          </Alert>
         )}
+        <Alert variant="info" className={statusMessage ? undefined : "sr-only"}>
+          <span className="text-text">{statusMessage}</span>
+        </Alert>
         {draft && (
           <section aria-label="Generated board preview">
             <Typography.Title level={3}>
