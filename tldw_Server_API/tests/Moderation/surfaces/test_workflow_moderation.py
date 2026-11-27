@@ -102,3 +102,40 @@ async def test_translate_runs_the_gateway_model_validation(stub_llm_registry, mo
     assert asked == ["openai"]
     assert stub_llm_registry.requests[0]["model"] == "listed-model"
     assert "fallback" not in out
+
+
+async def test_workflow_llm_step_output_block_fails_step(moderation_hooks, stub_llm_registry):
+    """An output block (finish_reason content_filter) fails the step; its text is not handed on as content."""
+    stub_llm_registry.reply = {**reply("x"), "choices": [{"index": 0, "finish_reason": "content_filter",
+                                                          "message": {"role": "assistant", "content": "Output violates moderation policy"}}]}
+    with pytest.raises(LLMPolicyRefusal) as exc:
+        await _llm()
+    assert exc.value.detail == "Output violates moderation policy"
+
+
+async def test_the_engine_runs_a_refused_step_once(tmp_path, monkeypatch):
+    """A step that hits an input refusal fails after exactly one attempt, though its retry setting allows more."""
+    import uuid
+
+    from tldw_Server_API.app.core.DB_Management.Workflows_DB import WorkflowsDatabase
+    from tldw_Server_API.app.core.Workflows import engine as engine_mod
+
+    db = WorkflowsDatabase(str(tmp_path / "wf.db"))
+    run_id = f"run-{uuid.uuid4().hex}"
+    db.create_run(
+        run_id=run_id, tenant_id="default", user_id="7", inputs={}, workflow_id=None, definition_version=1,
+        definition_snapshot={"name": "p", "version": 1, "steps": [{"id": "s1", "type": "provider_step", "config": {}, "retry": 3}]},
+    )
+    attempts: list[int] = []
+
+    async def adapter(_config, _context):
+        attempts.append(1)
+        raise LLMPolicyRefusal("Input violates moderation policy")
+
+    monkeypatch.setattr(engine_mod, "get_adapter", lambda _step_type: adapter)
+    monkeypatch.setenv("WORKFLOWS_BACKOFF_CAP_SECONDS", "0")
+    await engine_mod.WorkflowEngine(db).start_run(run_id)
+
+    run = db.get_run(run_id)
+    assert run.status == "failed" and "Input violates moderation policy" in (run.error or "")
+    assert len(attempts) == 1

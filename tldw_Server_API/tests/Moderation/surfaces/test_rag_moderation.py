@@ -48,24 +48,18 @@ def spy(stub_llm_registry):
 
 
 @pytest.fixture
-def rag_module():
-    import tldw_Server_API.app.api.v1.endpoints.rag_unified as rag_ep
-
-    return rag_ep
-
-
-@pytest.fixture
-def client(monkeypatch, stub_llm_registry, rag_module, auth_headers):
+def client(monkeypatch, stub_llm_registry, auth_headers):
     """The real RAG routes and generator, one retrieved document, the key runtime stubbed."""
     from tldw_Server_API.app.core.RAG.rag_service.types import DataSource, Document
 
-    class OneDocumentRetriever:
-        def __init__(self, *args: Any, **kwargs: Any) -> None:
-            self.retrievers: dict[str, Any] = {}
+    from tldw_Server_API.app.core.RAG.rag_service.database_retrievers import MultiDatabaseRetriever
 
-        async def retrieve(self, query: str, **kwargs: Any) -> list[Document]:
-            return [Document(id="d", content="Rowan directs the observatory.", metadata={"title": "Obs"},
-                             source=DataSource.MEDIA_DB, score=0.9)]
+    def init(self: Any, *args: Any, **kwargs: Any) -> None:
+        self.retrievers: dict[str, Any] = {}
+
+    async def retrieve(self: Any, query: str, **kwargs: Any) -> list[Document]:
+        return [Document(id="d", content="Rowan directs the observatory.", metadata={"title": "Obs"},
+                         source=DataSource.MEDIA_DB, score=0.9)]
 
     async def override_user():
         return User(id=1, username="tester", email=None, is_active=True)
@@ -75,7 +69,9 @@ def client(monkeypatch, stub_llm_registry, rag_module, auth_headers):
 
     fastapi_app.dependency_overrides[get_request_user] = override_user
     fastapi_app.dependency_overrides[check_rate_limit] = _noop
-    monkeypatch.setattr(rag_module, "MultiDatabaseRetriever", OneDocumentRetriever)
+    # The class object, patched at its home: the endpoint's retriever sync then has nothing to override.
+    monkeypatch.setattr(MultiDatabaseRetriever, "__init__", init)
+    monkeypatch.setattr(MultiDatabaseRetriever, "retrieve", retrieve)
     monkeypatch.setattr(
         "tldw_Server_API.app.core.Provider_Credentials.provider_credential_runtime.ProviderCredentialRuntime", _Runtime
     )
@@ -285,3 +281,15 @@ async def test_research_output_refusal_is_a_refusal(stub_llm_registry, site):
                                                           "message": {"role": "assistant", "content": "Output violates moderation policy"}}]}
     with pytest.raises(LLMPolicyRefusal):
         await SURFACES[site][1]()
+
+
+def test_rag_request_option_cannot_set_llm_surface(spy, moderation_hooks, client, stub_llm_registry):
+    """R10: a client-controlled request option named llm_surface is not a surface."""
+    response = client.post(
+        "/api/v1/rag/search",
+        json=_payload(query="forbidden question", llm_surface="internal.byok_probe", generation_config={"llm_surface": "internal.byok_probe"}),
+    )
+
+    assert response.status_code in (400, 422), response.text  # refused by moderation, or the unknown option rejected
+    assert set(spy) <= {"rag.generation"}
+    assert stub_llm_registry.requests == []
