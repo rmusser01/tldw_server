@@ -156,19 +156,33 @@ def measure(root: Path = APP_ROOT) -> dict[str, dict[str, int]]:
 # --- R10: exempt ids stay in their modules --------------------------------------------------------
 
 
+def _is_surface_key(node: ast.AST | None) -> bool:
+    return isinstance(node, ast.Constant) and node.value == _SURFACE
+
+
+def _surface_values(node: ast.AST) -> list[ast.AST]:
+    """Value nodes that set ``llm_surface``: keyword, dict key, ``x["llm_surface"] = v``, ``.setdefault``."""
+    if isinstance(node, ast.Call):
+        values = [kw.value for kw in node.keywords if kw.arg == _SURFACE]
+        if isinstance(node.func, ast.Attribute) and node.func.attr == "setdefault" and len(node.args) == 2:
+            values += [node.args[1]] if _is_surface_key(node.args[0]) else []
+        return values
+    if isinstance(node, ast.Dict):
+        return [v for k, v in zip(node.keys, node.values) if _is_surface_key(k)]
+    if isinstance(node, (ast.Assign, ast.AnnAssign)) and node.value is not None:
+        targets = node.targets if isinstance(node, ast.Assign) else [node.target]
+        return [node.value for t in targets if isinstance(t, ast.Subscript) and _is_surface_key(t.slice)]
+    return []
+
+
 def exempt_id_uses(tree: ast.Module) -> list[tuple[int, str]]:
     """``(line, id)`` for every ``llm_surface`` literal naming an exempt or caller-moderated id."""
-    found = []
-    for node in ast.walk(tree):
-        pairs = []
-        if isinstance(node, ast.Call):
-            pairs = [(kw.value, kw.value) for kw in node.keywords if kw.arg == _SURFACE]
-        elif isinstance(node, ast.Dict):
-            pairs = [(v, v) for k, v in zip(node.keys, node.values) if isinstance(k, ast.Constant) and k.value == _SURFACE]
-        for value, _ in pairs:
-            if isinstance(value, ast.Constant) and value.value in EXEMPT_ID_MODULES:
-                found.append((value.lineno, value.value))
-    return found
+    return [
+        (value.lineno, value.value)
+        for node in ast.walk(tree)
+        for value in _surface_values(node)
+        if isinstance(value, ast.Constant) and value.value in EXEMPT_ID_MODULES
+    ]
 
 
 def _allowed(relative: str, surface_id: str) -> bool:
@@ -194,8 +208,10 @@ def test_exempt_surface_ids_appear_only_in_their_modules() -> None:
 
 
 def test_seeded_exempt_id_in_a_new_module_is_flagged() -> None:
-    bad = ast.parse('perform_chat_api_call(llm_surface="internal.byok_probe")\nx = {"llm_surface": "chat.completions"}')
-    assert [u[1] for u in exempt_id_uses(bad)] == ["internal.byok_probe", "chat.completions"]
+    bad = ast.parse('perform_chat_api_call(llm_surface="internal.byok_probe")\nx = {"llm_surface": "chat.completions"}\nk["llm_surface"] = "internal.eval_judge"\nk.setdefault("llm_surface", "moderation.classifier")')
+    assert [u[1] for u in sorted(exempt_id_uses(bad))] == [
+        "internal.byok_probe", "chat.completions", "internal.eval_judge", "moderation.classifier"
+    ]
     assert not _allowed("core/Workflows/engine.py", "internal.byok_probe")
     assert not _allowed("core/Chatbooks/x.py", "chat.completions")
     assert _allowed("core/Chat/streaming_pipeline.py", "chat.completions")

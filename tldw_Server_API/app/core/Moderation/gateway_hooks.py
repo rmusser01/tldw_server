@@ -148,8 +148,8 @@ def resolve_policy(call_or_surface: GatewayCall | str | None, user_id: int | Non
     """The policy to apply, or ``None`` for a skip.
 
     Skips: a caller-moderated or exempt surface, re-entry from a hook, and a disabled policy. A
-    ``None`` surface is moderated as ``unclassified`` (the backstop), with one warning per provider. The policy user is ``str(user_id)``; ``None`` means the
-    default policy.
+    ``None`` surface is moderated as ``unclassified`` (the backstop), with one warning per provider.
+    The policy user is ``str(user_id)``; ``None`` means the default policy.
     """
     surface = call_or_surface.surface if isinstance(call_or_surface, GatewayCall) else call_or_surface
     if isinstance(call_or_surface, GatewayCall) and user_id is None:
