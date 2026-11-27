@@ -1777,6 +1777,7 @@ async def _select_auto_chat_llm_router_choice(
                         max_tokens=64,
                         streaming=False,
                         user_identifier=str(getattr(current_user, "id", "auto-router")),
+                        llm_surface="chat.completions.router",
                         app_config=handle.app_config,
                         credentials_resolved=handle.credentials_resolved,
                         _endpoint_provenance=_derive_endpoint_provenance(
@@ -1795,6 +1796,9 @@ async def _select_auto_chat_llm_router_choice(
             terminal_credential_error = exc
             raise
         except asyncio.CancelledError:
+            raise
+        except LLMPolicyRefusal:
+            # A moderation block of the router prompt: the caller's 400, not a router provider failure.
             raise
         except LLMQuotaExceededError:
             # The user's limit, not the router provider's health: no failure recorded. The routing
@@ -1903,7 +1907,7 @@ async def _select_auto_chat_llm_router_choice(
         if terminal_credential_error is not None:
             raise terminal_credential_error
         return result
-    except (ByokResolutionError, ChatAuthenticationError, ChatConfigurationError):
+    except (ByokResolutionError, ChatAuthenticationError, ChatConfigurationError, LLMPolicyRefusal):
         raise
     except asyncio.CancelledError:
         raise

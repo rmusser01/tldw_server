@@ -275,6 +275,10 @@ async def run_research_jobs_worker(
 
 async def main(stop_event: asyncio.Event | None = None) -> None:
     """Own standalone provider policy initialization and its event-loop resources."""
+    from tldw_Server_API.app.core.Moderation.gateway_hooks import register_moderation_gateway_hooks
+
+    register_moderation_gateway_hooks()
+
     pool = await get_db_pool()
     try:
         await refresh_llm_provider_overrides(pool, force=True)

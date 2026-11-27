@@ -56,6 +56,8 @@ async def initialize_startup_core_components(
         import_exceptions=import_exceptions,
     )
 
+    _register_moderation_hooks(app)
+
     logger.info("App Startup: Initializing Chat module components...")
     heavy_startup_handles = await _start_heavy_initializations(
         app,
@@ -109,6 +111,13 @@ def _load_startup_catalogs(**kwargs) -> None:
     from tldw_Server_API.app.services.startup_catalog_loading import load_startup_catalogs
 
     load_startup_catalogs(**kwargs)
+
+
+def _register_moderation_hooks(app: Any) -> None:
+    """Register the Moderation gateway hooks; the remover on app.state is called at shutdown."""
+    from tldw_Server_API.app.core.Moderation.gateway_hooks import register_moderation_gateway_hooks
+
+    app.state.moderation_gateway_hooks_remover = register_moderation_gateway_hooks()
 
 
 async def _start_heavy_initializations(app_arg, **kwargs):

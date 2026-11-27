@@ -28,6 +28,7 @@ CASES = [
     ("tldw_Server_API.app.core.Chat.chat_request_schemas", "tldw_Server_API.app.api"),
     ("tldw_Server_API.app.core.LLM_Calls.providers.openai_adapter", "tldw_Server_API.app.core.Chat"),
     ("tldw_Server_API.app.core.LLM_Calls.gateway", "tldw_Server_API.app.core.Chat"),
+    ("tldw_Server_API.app.core.LLM_Calls.gateway", "tldw_Server_API.app.core.Moderation"),  # TASK-13950.27
 ]
 
 

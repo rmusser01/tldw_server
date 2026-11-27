@@ -1333,6 +1333,19 @@ async def _async_hook_value(value: Any) -> Any:
     return await value if inspect.isawaitable(value) else value
 
 
+def run_policy_pre_hooks(call: GatewayCall) -> None:
+    """Run the registered pre-call hooks on ``call`` (sync), for a caller outside the gateway entries."""
+    for pre_call in _pre_call_hooks(tuple(_POLICY_HOOKS)):
+        _sync_hook_value(pre_call, pre_call(call))
+
+
+def run_policy_post_hooks(call: GatewayCall, result: Any) -> Any:
+    """Run the registered post-call hooks on ``result`` (sync) and return the last value."""
+    for post_call in _post_call_hooks(tuple(_POLICY_HOOKS)):
+        result = _sync_hook_value(post_call, post_call(call, result))
+    return result
+
+
 def perform_chat_api_call(**kwargs: Any) -> Any:
     """Adapter-backed replacement for chat_orchestrator.chat_api_call, run through the policy hooks."""
     hooks = tuple(_POLICY_HOOKS)  # one snapshot: a hook registered mid-call gets neither stage

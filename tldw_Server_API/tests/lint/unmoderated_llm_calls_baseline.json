@@ -1,7 +1,6 @@
 {
   "api/v1/endpoints/audio/audio_streaming.py": {"references": 2, "reason": null},
   "api/v1/endpoints/character_chat_sessions.py": {"references": 3, "reason": null},
-  "api/v1/endpoints/chat.py": {"references": 1, "reason": null},
   "api/v1/endpoints/media/document_insights.py": {"references": 1, "reason": null},
   "api/v1/endpoints/messages.py": {"references": 2, "reason": null},
   "core/Audio/Realtime/default_pipeline.py": {"references": 1, "reason": null},
