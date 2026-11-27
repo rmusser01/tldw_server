@@ -292,12 +292,12 @@ Authorization: Bearer your-jwt-token
 
 #### Interactive session required
 
-Revoke one session, revoke all sessions, and `POST /auth/logout` with `all_devices: true` (or with a token that carries no `session_id`) need an interactive browser session. A browser session is an access token that carries `session_id`, or a single-user cookie session. API keys, virtual keys, service tokens and impersonation tokens are refused with:
+Revoke one session, revoke all sessions, and `POST /auth/logout` with `all_devices: true` (or with a token that carries no `session_id`) need an interactive browser session. A browser session is an access token that carries `session_id`, or a single-user cookie session. API keys, service tokens and impersonation tokens are refused with:
 
 ```json
 {"detail": {"code": "interactive_session_required", "message": "..."}}
 ```
-(HTTP 403.) Before this change an API key sent as a Bearer token to `logout` could sign every session out; it can no longer. Listing sessions is not restricted. If the session store cannot be read, the endpoints answer 503 rather than treating the caller as a non-browser credential.
+(HTTP 403.) A virtual key is a scoped token and these routes declare no scope, so it is refused before the route runs, with 403 `{"detail": "Scoped token requires endpoint scope enforcement"}`. Before this change an API key sent as a Bearer token to `logout` could sign every session out; it can no longer. Listing sessions is not restricted. If the session store cannot be read, the endpoints answer 503 rather than treating the caller as a non-browser credential.
 
 #### New sign-in alert
 
@@ -659,7 +659,7 @@ A signed-in browser session can lock its own account when it suspects someone el
 | `POST /api/v1/users/api-keys/{key_id}/unsuspend` | interactive browser session | Restore one API key the lock suspended |
 | `POST /api/v1/admin/users/{user_id}/security-unlock` | administrator, with the step-up check | Unlock an account its owner locked |
 
-Unlock itself is the existing `POST /api/v1/auth/magic-link/verify` with the token from the emailed link. API keys, virtual keys, service tokens and impersonation tokens cannot lock, check availability or unsuspend (403 `interactive_session_required`).
+Unlock itself is the existing `POST /api/v1/auth/magic-link/verify` with the token from the emailed link. API keys, service tokens and impersonation tokens cannot lock, check availability or unsuspend (403 `interactive_session_required`). A virtual key is a scoped token and these routes declare no scope, so it is refused before the route runs, with 403 `{"detail": "Scoped token requires endpoint scope enforcement"}`.
 
 **Availability.** `GET /auth/account/lock-availability` answers:
 
@@ -675,17 +675,19 @@ Unlock itself is the existing `POST /api/v1/auth/magic-link/verify` with the tok
 {"locked": true, "email_sent": true, "sent_to": ["o***@example.org"]}
 ```
 
-It answers 409 `{"code": "lock_unavailable", "reason": "..."}` when availability is false and 423 `account_locked` when the account is already locked. The lock is set before any mail goes out, so `email_sent: false` means the account is locked and no link was delivered; the owner asks for a new link from the sign-in page (`magic-link/request` or `forgot-password` mail it again).
+It answers 409 `{"code": "lock_unavailable", "reason": "..."}` when availability is false. On an account that is already locked the caller's session is refused with 423 `account_locked` before the route runs. The lock is set before any mail goes out, so `email_sent: false` means the account is locked and no link was delivered; the owner asks for a new link from the sign-in page (`magic-link/request` or `forgot-password` mail it again).
 
-**What stops.** Every session and token of the account is refused with 423 and `{"detail": {"code": "account_locked", "message": "..."}}`: access, refresh and MFA sign-in tokens, sign-in by password, magic link (other than an unlock link) and password reset. API keys of the account, including org and team keys it owns, are refused as an invalid key. The lock ends every session. Streams and WebSockets that are already open run until they next authenticate; public share links already created keep working.
+**What stops.** Every session and token of the account is refused with 423 and `{"detail": {"code": "account_locked", "message": "..."}}`: access, refresh and MFA sign-in tokens, sign-in by password, SSO sign-in, magic link (other than an unlock link) and password reset. A password change, password reset or email change that passed its sign-in check before the lock or a take-back is refused at its write or, if it got there first, overwritten by the take-back. API keys of the account, including org and team keys it owns, are refused as an invalid key. The lock ends every session. Streams and WebSockets that are already open run until they next authenticate; public share links already created keep working.
 
 **What comes back.** The unlock link (valid for `MAGIC_LINK_EXPIRE_MINUTES`, 15 by default) unlocks the account and signs the redeemer in. Sessions and tokens issued before the unlock stay dead (a token issued before the unlock gets the ordinary 401, not the 423). API keys created in the 7 days before the lock stay suspended: `GET /users/api-keys` shows `suspended_at` on them, and `POST /users/api-keys/{key_id}/unsuspend` restores one (it answers the key's metadata, or 404 `api_key_not_suspended`). A suspended key cannot be rotated (409 `api_key_suspended`).
 
-**Previous address.** For 7 days after the account's email was changed, the lock mail also goes to the previous address, and that link takes the account back: it restores the previous address, replaces the password (the owner signs in by the emailed link and sets a new one), ends every session and token, suspends recent API keys, removes SSO links added since the change, and makes the link sent to the newer address useless. It is refused, and the account stays locked, when another account holds the previous address. Changing your email to an address another account released in the last 7 days is refused with `email_recently_released`.
+**Previous address.** For 7 days after the account's email was changed, the lock mail also goes to the previous address, and that link takes the account back: it restores the previous address, voids the password, ends every session and every token issued before it, suspends the API keys and removes the SSO links created since a week before the email change or the lock (whichever is earlier), and makes the link sent to the newer address useless. It does not remove Telegram links, agent triggers or scheduled workflows the intruder created. It is refused, and the account stays locked, when another account holds the previous address. Changing your email to an address another account released in the last 7 days is refused with `email_recently_released`.
 
-**Administrator unlock.** `POST /admin/users/{user_id}/security-unlock` takes the same body as the other privileged admin actions (`reason`, and `admin_password` or `admin_reauth_token`) and answers `{"unlocked": true}`, or `{"unlocked": false}` when the account was not locked. The unlock keeps recent API keys suspended and leaves old tokens dead. Admin user listings carry `security_locked_at`. Impersonating a locked user is refused. Changing an administrator's own email through `PUT /admin/users/{id}` needs the same step-up check. `is_locked` is no longer accepted by `PUT /admin/users/{id}`.
+After a take-back the owner signs in by emailed link. On a fresh install only an administrator can give the account a password for now: forgot-password cannot store a reset token there (the `password_reset_tokens` table defect in the ADR's known limits), change-password needs the voided password, and `/mfa/disable` needs a password.
 
-Other routes: a locked account's `magic-link/request` and `forgot-password` keep their generic answer and mail the "account locked" message. Slack and Discord job owners that are numeric user ids, ACP trigger webhooks and Telegram approvals of a locked owner are refused.
+**Administrator unlock.** `POST /admin/users/{user_id}/security-unlock` takes the same body as the other privileged admin actions (`reason`, and `admin_password` or `admin_reauth_token`) and answers `{"unlocked": true}`, or `{"unlocked": false}` when the account was not locked. The unlock keeps recent API keys suspended and leaves old tokens dead. Admin user listings carry `security_locked_at`. Impersonating a locked user is refused. Changing an administrator's own email through `PUT /admin/users/{id}` needs the same step-up check. `is_locked` is no longer accepted by `PUT /admin/users/{id}`. The console tool (`python -m tldw_Server_API.app.core.AuthNZ.reset_admin_password`) also clears a lock when it sets a password and, when it cleared one, writes the unlock audit event with `via: "cli"`.
+
+Other routes: a locked account's `magic-link/request` and `forgot-password` keep their generic answer and mail the "account locked" message. Slack and Discord job owners that are numeric user ids, ACP trigger webhooks, and Telegram asks and approvals of a locked owner are refused.
 
 Known limits are in the ADR. Until the WebUI redeems links by a click, paste the token into the token field in Settings.
 
