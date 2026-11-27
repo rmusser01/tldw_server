@@ -270,6 +270,7 @@ def chat_api_call(
     # Testing hooks
     http_client_factory: Optional[Callable[[int], Any]] = None,
     http_fetcher: Optional[Callable[..., Any]] = None,
+    llm_surface: Optional[str] = None,
     ):
     """
     Acts as a unified dispatcher to call various LLM API providers.
@@ -365,6 +366,8 @@ def chat_api_call(
         "http_client_factory": http_client_factory,
         "http_fetcher": http_fetcher,
     }
+    if llm_surface is not None:
+        call_kwargs["llm_surface"] = llm_surface
 
     # Never log secrets by default; allow opt-in masked key logging via env
     try:
@@ -515,6 +518,7 @@ async def chat_api_call_async(
     app_config: Optional[dict[str, Any]] = None,
     http_client_factory: Optional[Callable[[int], Any]] = None,
     http_fetcher: Optional[Callable[..., Any]] = None,
+    llm_surface: Optional[str] = None,
 ):
     """Async dispatcher that forwards to the adapter registry.
 
@@ -559,6 +563,8 @@ async def chat_api_call_async(
         "http_client_factory": http_client_factory,
         "http_fetcher": http_fetcher,
     }
+    if llm_surface is not None:
+        call_kwargs["llm_surface"] = llm_surface
 
     try:
         response = await perform_chat_api_call_async(**call_kwargs)

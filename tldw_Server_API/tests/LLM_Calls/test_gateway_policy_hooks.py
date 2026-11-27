@@ -62,6 +62,9 @@ def recorded():
 
 
 def test_no_hook_is_registered_by_default_and_calls_are_unchanged(fake_provider):
+    from tldw_Server_API.app.core.Moderation.gateway_hooks import _unregister
+
+    _unregister()  # an app lifespan earlier in the process may have registered the moderation pair
     assert gateway._POLICY_HOOKS == []
     assert gateway.perform_chat_api_call(**_CALL)["choices"][0]["message"]["content"] == '{"intent": "factual"}'
 

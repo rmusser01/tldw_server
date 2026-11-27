@@ -631,6 +631,9 @@ async def main() -> None:
     """Load the provider-override store, then take jobs: every LLM call refuses until it is loaded (TASK-15581)."""
     from tldw_Server_API.app.core.Provider_Credentials.llm_provider_overrides import standalone_llm_provider_overrides
 
+    from tldw_Server_API.app.core.Moderation.gateway_hooks import register_moderation_gateway_hooks
+
+    register_moderation_gateway_hooks()
     async with standalone_llm_provider_overrides():
         await run_audio_jobs_worker()
 

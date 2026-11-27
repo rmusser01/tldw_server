@@ -566,3 +566,32 @@ def test_closing_the_sync_wrapper_before_first_next_closes_the_source(moderation
     call = GatewayCall(surface=SURFACE, provider=PROVIDER, request={}, stream=True, user_id=None)
     hooks_mod.post_call(call, Source()).close()
     assert closed == [1]
+
+
+def test_off_path_returns_the_same_object(make_service):
+    make_service(enabled=False)
+    call = GatewayCall(surface=SURFACE, provider=PROVIDER, request={}, stream=False, user_id=None)
+    result = reply("a secret", provider_response={"raw": 1})
+    assert hooks_mod.post_call(call, result) is result
+    items = [anthropic_frame("a secret"), finish_frame(), DONE]
+    source = iter(items)
+    stream_call = GatewayCall(surface=SURFACE, provider=PROVIDER, request={}, stream=True, user_id=None)
+    out = hooks_mod.post_call(stream_call, source)
+    assert out is source
+    assert all(a is b for a, b in zip(list(out), items, strict=True))
+
+
+@pytest.mark.asyncio
+async def test_async_policy_resolution_failure_refuses(moderation_hooks, monkeypatch):
+    def boom(*a, **k):
+        raise RuntimeError("boom")
+
+    monkeypatch.setattr(moderation_hooks, "get_effective_policy", boom)
+
+    async def source():
+        yield openai_frame("a secret")
+        yield DONE
+
+    call = GatewayCall(surface=SURFACE, provider=PROVIDER, request={}, stream=True, user_id=None)
+    out = [item async for item in hooks_mod.post_call(call, source())]
+    assert _text(out) == OUTPUT_REFUSAL and out[-1] == DONE and "secret" not in "".join(out)

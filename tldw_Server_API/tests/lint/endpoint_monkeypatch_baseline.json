@@ -47,7 +47,7 @@
   "api/v1/endpoints/character_memory.py": {"monkeypatch": 2, "other": 0, "reason": null},
   "api/v1/endpoints/character_messages.py": {"monkeypatch": 21, "other": 0, "reason": null},
   "api/v1/endpoints/characters_endpoint.py": {"monkeypatch": 0, "other": 20, "reason": null},
-  "api/v1/endpoints/chat.py": {"monkeypatch": 84, "other": 206, "reason": null},
+  "api/v1/endpoints/chat.py": {"monkeypatch": 84, "other": 207, "reason": "TASK-13950.27 PR C: the auto-router moderation test patches get_configured_providers, which chat.py binds by import"},
   "api/v1/endpoints/chat_dictionaries.py": {"monkeypatch": 1, "other": 0, "reason": null},
   "api/v1/endpoints/chat_documents.py": {"monkeypatch": 8, "other": 0, "reason": null},
   "api/v1/endpoints/chat_grammars.py": {"monkeypatch": 1, "other": 0, "reason": null},

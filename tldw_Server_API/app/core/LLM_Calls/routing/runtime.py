@@ -9,7 +9,7 @@ from dataclasses import dataclass
 from typing import Any, Awaitable, Callable, Mapping, Sequence
 
 from tldw_Server_API.app.core.config import load_and_log_configs
-
+from tldw_Server_API.app.core.exceptions import LLMPolicyRefusal
 from .llm_router import build_router_prompt
 from .models import RouterRequest, RoutingPolicy
 
@@ -226,6 +226,8 @@ async def select_llm_router_choice(
                 )
             ),
         )
+    except LLMPolicyRefusal:
+        raise
     except Exception as exc:
         return None, {
             "router_model": {
