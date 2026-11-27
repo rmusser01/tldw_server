@@ -33,6 +33,7 @@ Work stages: reproduce loss and incorrect review scope, implement reversible cle
 The editor stays mounted while reviewing. Undo holds the latest cleared queue in this draft, restores the original file objects and preserves newer sources, including same-length pastes. The review shows potential replacements, confirmed playlist matches and the total run count. The projected scope and submitted overwrite flags agree for the mixed playlist walkthrough.
 496 focused WebUI tests passed. English JSON messages match their browser mirror, source and published guides match, and scoped ESLint passes. Bandit found no Python files in the touched frontend scope.
 PR #3638 targets dev and embeds four verified screenshots. The two viewports cover going Back by keyboard, unsent text and links, preserved scroll, restoring sources, and submitting only after confirmation. All 13 browser scenarios passed, including the equal-length paste regression. WebUI TypeScript passed.
+Pre-merge review found the global overwrite count included HTML extracts and preserved playlist duplicates. The review and executor now honor the same URL transport and per-item duplicate decision, including when a collection write fails. The mixed-source count and failed-collection regressions failed before the fix; 234 modal, media routing and batch tests passed afterward.
 <!-- SECTION:IMPLEMENTATION_NOTES:END -->
 
 ## Final Summary

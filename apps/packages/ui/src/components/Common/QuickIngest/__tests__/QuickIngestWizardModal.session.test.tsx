@@ -579,7 +579,7 @@ describe("QuickIngestWizardModal session runtime", () => {
     useQuickIngestSessionStore.getState().createDraftSession({
       selectedPreset: "custom",
       presetConfig: { ...quick, common: { ...quick.common, overwrite_existing: true } },
-      queueItems: [{ id: "existing", kind: "url", url: "https://source.test/existing", detectedType: "web", icon: "Globe", fileSize: 0, validation: { valid: true } }],
+      queueItems: [{ id: "existing", kind: "url", url: "https://source.test/existing.pdf", detectedType: "pdf", icon: "FileText", fileSize: 0, validation: { valid: true } }],
     })
     render(<RuntimeIngestModal open onClose={vi.fn()} />)
     fireEvent.click(await screen.findByRole("button", { name: "Text" }))
@@ -849,9 +849,11 @@ describe("QuickIngestWizardModal session runtime", () => {
     const quick = resolvePresetMap().quick
     useQuickIngestSessionStore.getState().createDraftSession({
       selectedPreset: "custom", presetConfig: { ...quick, common: { ...quick.common, overwrite_existing: mode === "global" } },
-      queueItems: [{ id: "replace", kind: "url", url: "https://source.test/replace", detectedType: "web", icon: "Globe", fileSize: 0, validation: { valid: true },
+      queueItems: [{ id: "replace", kind: "url", url: "https://source.test/replace.pdf", detectedType: "pdf", icon: "FileText", fileSize: 0, validation: { valid: true },
         ...(mode === "playlist" ? { playlist: { duplicateStatus: "duplicate_existing" }, conferenceOverride: { selected: true, duplicatePolicy: "overwrite" as const } } : {}),
-      }, { id: "fresh", kind: "url", url: "https://source.test/fresh", detectedType: "web", icon: "Globe", fileSize: 0, validation: { valid: true } }],
+      }, { id: "fresh", kind: "url", url: "https://source.test/fresh", detectedType: "web", icon: "Globe", fileSize: 0, validation: { valid: true } },
+      { id: "existing", kind: "url", url: "https://source.test/keep.mp4", detectedType: "video", icon: "Film", fileSize: 0, validation: { valid: true },
+        playlist: { duplicateStatus: "duplicate_existing" }, conferenceOverride: { selected: true, duplicatePolicy: "include_existing" } }],
     })
     mocks.startQuickIngestSession.mockResolvedValue({ ok: true, sessionId: "qi-test" })
     render(<RuntimeIngestModal open autoProcessQueued onClose={vi.fn()} />)
@@ -859,11 +861,11 @@ describe("QuickIngestWizardModal session runtime", () => {
     expect(mocks.startQuickIngestSession).not.toHaveBeenCalled()
     fireEvent.click(review)
     const listedSources = screen.getAllByRole("listitem").map(row => row.textContent)
-    expect(listedSources).toHaveLength(mode === "global" ? 2 : 1)
+    expect(listedSources).toHaveLength(1)
     expect(listedSources[0]).toContain("https://source.test/replace")
-    expect(screen.getByText("2 sources will run")).toBeVisible()
-    expect(screen.getByText(mode === "global" ? "Up to 2 existing Media items may be replaced." : "1 existing Media item may be replaced.")).toBeVisible()
-    fireEvent.click(await screen.findByRole("button", { name: "Confirm and save 2 sources" }))
+    expect(screen.getByText("3 sources will run")).toBeVisible()
+    expect(screen.getByText("1 existing Media item may be replaced.")).toBeVisible()
+    fireEvent.click(await screen.findByRole("button", { name: "Confirm and save 3 sources" }))
     await waitFor(() => expect(mocks.startQuickIngestSession).toHaveBeenCalledTimes(1))
   })
 
@@ -872,7 +874,7 @@ describe("QuickIngestWizardModal session runtime", () => {
     const quick = resolvePresetMap().quick
     useQuickIngestSessionStore.getState().createDraftSession({
       selectedPreset: "custom", presetConfig: { ...quick, common: { ...quick.common, overwrite_existing: true } },
-      queueItems: [{ id: "notes", url: "https://source.test/notes", detectedType: "web", icon: "Globe", fileSize: 0,
+      queueItems: [{ id: "notes", url: "https://source.test/notes.pdf", detectedType: "pdf", icon: "FileText", fileSize: 0,
         validation: { valid: true }, conferenceOverride: { selected: true, title: "Survey notes", speaker: "Anne" } }],
     })
     render(<RuntimeIngestModal open onClose={vi.fn()} />)

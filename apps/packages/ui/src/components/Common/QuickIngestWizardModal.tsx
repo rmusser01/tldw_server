@@ -10,6 +10,7 @@ import { type ConferenceRetryRequestItem,
   buildConferenceRetryRequestItems,
   resolveConferenceDuplicatePolicy,
 } from "@/services/tldw/conference-collections"
+import { resolveIngestUrlType } from "@/services/tldw/media-routing"
 import {
   completedIngestJobIndicatesFailure,
   completedIngestJobIndicatesSkipped,
@@ -1027,9 +1028,11 @@ const WizardModalContent: React.FC<WizardModalContentProps> = ({
   )
   const replacementItems = useMemo(() => {
     if (!presetConfig.storeRemote || presetConfig.reviewBeforeStorage) return []
-    if (presetConfig.common.overwrite_existing) return validQueueItems
-    return validQueueItems.filter(item =>
-      resolveConferenceDuplicatePolicy(item.playlist?.duplicateStatus, item.conferenceOverride?.duplicatePolicy, item.processAgain).forceOverwrite)
+    return validQueueItems.filter(item => {
+      if (item.url && resolveIngestUrlType(item.url, mapDetectedTypeToEntryType(item.detectedType)) === "html") return false
+      const policy = resolveConferenceDuplicatePolicy(item.playlist?.duplicateStatus, item.conferenceOverride?.duplicatePolicy, item.processAgain)
+      return policy.shouldSubmitJob && (presetConfig.common.overwrite_existing || policy.forceOverwrite)
+    })
   }, [presetConfig, validQueueItems])
   const requiresReplacementReview = replacementItems.length > 0
   const trackedJobIdsByItem = useMemo(() => {

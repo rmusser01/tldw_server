@@ -3,7 +3,7 @@ import type { BgUploadInit } from "@/services/background-proxy";
 import { assertQuickIngestRequestCurrent, scopedQuickIngestRequest, scopedQuickIngestUpload, type QuickIngestRequestContext } from "./quick-ingest-request-scope";
 import {
   getProcessPathForType,
-  inferIngestTypeFromUrl,
+  resolveIngestUrlType,
   inferUploadMediaTypeFromFile,
   normalizeMediaType,
   shouldKeepOriginalFile,
@@ -901,10 +901,7 @@ const runDirectQuickIngestBatch = async (
       const url = String(entry?.url || "").trim();
       if (!url) continue;
 
-      const explicitType =
-        entry?.type && typeof entry.type === "string" ? entry.type : "auto";
-      const resolvedType =
-        explicitType === "auto" ? inferIngestTypeFromUrl(url) : explicitType;
+      const resolvedType = resolveIngestUrlType(url, entry.type);
 
       const plannedConferenceItem =
         conferencePlan?.itemsByEntryId.get(entry.id);
@@ -968,11 +965,10 @@ const runDirectQuickIngestBatch = async (
         });
       };
       try {
-        if (
-          shouldStoreRemote &&
-          plannedConferenceItem &&
-          !duplicatePolicyResolution.shouldSubmitJob
-        ) {
+        if (shouldStoreRemote && !duplicatePolicyResolution.shouldSubmitJob) {
+          if (!plannedConferenceItem && hasUsableConferenceMetadata(input.conferenceBatchMetadata)) {
+            throw new Error("Could not add this source to the collection. Its existing Media record was preserved.");
+          }
           await patchConferenceCollectionItem(input, plannedConferenceItem, {
             status: duplicatePolicyResolution.plannedStatus,
             retry_count: 0,
@@ -983,9 +979,9 @@ const runDirectQuickIngestBatch = async (
             outcome: "skipped",
             url,
             type: resolvedType,
-            collectionItemId: plannedConferenceItem.itemId,
-            retryAttempt: plannedConferenceItem.retryAttempt ?? 0,
-            idempotencyKey: plannedConferenceItem.idempotencyKey ?? null,
+            collectionItemId: plannedConferenceItem?.itemId,
+            retryAttempt: plannedConferenceItem?.retryAttempt ?? 0,
+            idempotencyKey: plannedConferenceItem?.idempotencyKey ?? null,
             message: DUPLICATE_SKIP_MESSAGE,
             persisted: false,
           });

@@ -300,6 +300,17 @@ describe("submitQuickIngestBatch", () => {
     }))
   })
 
+  it("preserves an included existing item when collection planning fails under global overwrite", async () => {
+    mocks.bgRequest.mockRejectedValue(new Error("Collection unavailable"))
+    const run = await submitQuickIngestBatch({
+      entries: [{ id: "linked", url: "https://example.org/saved.mp4", type: "video",
+        playlist: { duplicateStatus: "duplicate_existing" }, conferenceOverride: { selected: true, duplicatePolicy: "include_existing" } }],
+      files: [], storeRemote: true, processOnly: false,
+      common: { overwrite_existing: true }, conferenceBatchMetadata: { collectionName: "Talks", sharedTags: [] },
+    })
+    expect(run.results).toMatchObject([{ id: "linked", status: "error", error: expect.stringMatching(/existing Media record was preserved/) }])
+    expect(mocks.bgUpload).not.toHaveBeenCalled()
+  })
   it.each([false, true])(
     "reuses durable collection identity and retry metadata (extension=%s)",
     async (extension) => {
