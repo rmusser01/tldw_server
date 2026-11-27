@@ -4,6 +4,7 @@
 from __future__ import annotations
 
 import asyncio
+import functools
 import time
 from typing import Any
 
@@ -25,13 +26,18 @@ from tldw_Server_API.app.core.Chat.Chat_Deps import ChatConfigurationError
 from tldw_Server_API.app.core.DB_Management.media_db.api import (
     get_latest_transcription,
 )
-from tldw_Server_API.app.core.LLM_Calls.adapter_registry import get_registry
-from tldw_Server_API.app.core.LLM_Calls.provider_results import ADMIN_REFUSAL_STATUS, PROVIDER_STREAM_ERROR_MESSAGES
+from tldw_Server_API.app.core.LLM_Calls.gateway import perform_chat_api_call
+from tldw_Server_API.app.core.LLM_Calls.provider_results import (
+    ADMIN_REFUSAL_STATUS,
+    PROVIDER_STREAM_ERROR_MESSAGES,
+    raise_if_content_filtered,
+)
 from tldw_Server_API.app.core.LLM_Calls.structured_output import (
     StructuredOutputOptions,
     parse_structured_output,
 )
 from tldw_Server_API.app.core.Prompt_Management.document_insights import prepare_document_insights_prompt
+from tldw_Server_API.app.core.Usage.llm_call_context import capture_llm_call_state, run_with_llm_call_state
 import tldw_Server_API.app.api.v1.API_Deps.Prompts_DB_Deps as _Prompts_DB_Deps
 import tldw_Server_API.app.api.v1.utils.cache as _cache
 import tldw_Server_API.app.core.Chat.chat_helpers as _chat_helpers
@@ -68,15 +74,6 @@ def _build_insights_cache_key(
         f"cache:/api/v1/media/{media_id}/insights:{scope_str}:"
         f"{categories_str}:{model_str}:maxlen:{max_content_length}:prompt:{prompt_fingerprint}"
     )
-
-
-def _get_adapter(provider: str):
-    """Get the LLM adapter for the specified provider."""
-    registry = get_registry()
-    adapter = registry.get_adapter(provider)
-    if adapter is None:
-        raise ChatConfigurationError(provider=provider, message="LLM adapter unavailable.")
-    return adapter
 
 
 def _resolve_model(provider: str, model: str | None, app_config: dict[str, Any]) -> str | None:
@@ -293,30 +290,32 @@ async def generate_document_insights(
     response_format = {"type": "json_object"}
 
     def _call_llm():
-        adapter = _get_adapter(provider)
         app_config = _config.load_and_log_configs() or {}
         model_to_use = _resolve_model(provider, request.model, app_config)
         if model_to_use is None:
             raise ChatConfigurationError(provider=provider, message="Model is required for provider.")
-        return (
-            adapter.chat(
-                {
-                    "messages": messages_payload,
-                    "api_key": api_key,
-                    "model": model_to_use,
-                    "temperature": 0.3,
-                    "max_tokens": 2000,
-                    "response_format": response_format,
-                    "app_config": app_config,
-                }
-            ),
-            model_to_use,
+        # The gateway runs the moderation hooks, quota and model validation (surface media.document_insights).
+        response = perform_chat_api_call(
+            api_provider=provider,
+            messages=messages_payload,
+            api_key=api_key,
+            model=model_to_use,
+            temperature=0.3,
+            max_tokens=2000,
+            response_format=response_format,
+            app_config=app_config,
+            llm_surface="media.document_insights",
         )
+        raise_if_content_filtered(response)  # a refused answer is a 400, never parsed or cached as insights
+        return response, model_to_use
 
     try:
         start = time.time()
         loop = asyncio.get_running_loop()
-        raw_response, model_used = await loop.run_in_executor(None, _call_llm)
+        # The worker thread does not inherit the request's context: carry its LLM user so policy and quota see them.
+        raw_response, model_used = await loop.run_in_executor(
+            None, functools.partial(run_with_llm_call_state, capture_llm_call_state(), _call_llm)
+        )
         elapsed_ms = (time.time() - start) * 1000.0
         logger.info(
             "Document insights LLM call completed in {:.1f}ms (media_id={})",

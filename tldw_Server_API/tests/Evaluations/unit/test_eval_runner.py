@@ -5,6 +5,7 @@ import pytest
 from loguru import logger
 
 from tldw_Server_API.app.core.Evaluations.eval_runner import EvaluationRunner
+from tldw_Server_API.tests.helpers.gateway_routing import route_gateway_adapters
 
 
 @pytest.mark.asyncio
@@ -599,7 +600,7 @@ async def test_a_runs_direct_judge_calls_carry_the_users_key(monkeypatch, tmp_pa
         requests.append(request)
         return {"choices": [{"message": {"content": "A"}}]}
 
-    monkeypatch.setattr(eval_runner, "get_adapter_or_raise", lambda _provider: SimpleNamespace(chat=_chat))
+    route_gateway_adapters(monkeypatch, lambda _provider: SimpleNamespace(chat=_chat))
     fn = {"label_choice": runner._eval_label_choice, "nli_factcheck": runner._eval_nli_factcheck}[eval_type]
 
     result = await fn(_SAMPLE, _SPEC, config, "sample_000001")
@@ -625,7 +626,7 @@ async def test_a_direct_judge_call_refuses_a_handle_for_another_provider(monkeyp
         adapters.append(provider)
         return SimpleNamespace(chat=lambda _request, timeout=None: {"choices": [{"message": {"content": "A"}}]})
 
-    monkeypatch.setattr(eval_runner, "get_adapter_or_raise", _adapter)
+    route_gateway_adapters(monkeypatch, _adapter)
 
     with pytest.raises(ChatConfigurationError) as refused:
         eval_runner._call_adapter_text(
@@ -648,7 +649,7 @@ async def test_a_failed_judge_call_is_a_sample_error_not_accuracy_zero(monkeypat
     def _chat(_request, timeout=None):
         raise failure
 
-    monkeypatch.setattr(eval_runner, "get_adapter_or_raise", lambda _provider: SimpleNamespace(chat=_chat))
+    route_gateway_adapters(monkeypatch, lambda _provider: SimpleNamespace(chat=_chat))
     runner = EvaluationRunner(db_path=str(tmp_path / "evals.db"))
     fn = {"label_choice": runner._eval_label_choice, "nli_factcheck": runner._eval_nli_factcheck}[eval_type]
 
@@ -760,9 +761,7 @@ async def test_an_empty_reply_from_a_successful_call_is_a_wrong_answer_not_a_lab
     from tldw_Server_API.app.core.Evaluations import eval_runner
 
     empty = {"choices": [{"message": {"role": "assistant", "content": ""}, "finish_reason": "length"}]}
-    monkeypatch.setattr(
-        eval_runner, "get_adapter_or_raise", lambda _provider: SimpleNamespace(chat=lambda _r, timeout=None: empty)
-    )
+    route_gateway_adapters(monkeypatch, lambda _provider: SimpleNamespace(chat=lambda _r, timeout=None: empty))
     runner = EvaluationRunner(db_path=str(tmp_path / "evals.db"))
     fn = {"label_choice": runner._eval_label_choice, "nli_factcheck": runner._eval_nli_factcheck}[eval_type]
 

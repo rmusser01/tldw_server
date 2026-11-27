@@ -4,6 +4,8 @@ from types import MappingProxyType, SimpleNamespace
 
 import pytest
 
+from tldw_Server_API.tests.helpers.gateway_routing import route_gateway_adapters
+
 from tldw_Server_API.app.core.Prompt_Management.service_prompts import (
     ResolvedServicePrompt,
     get_service_prompt_definition,
@@ -46,11 +48,7 @@ def _enable_llm(monkeypatch: pytest.MonkeyPatch, adapter: _RecordingAdapter) -> 
         "core_settings",
         {"NOTES_TITLE_LLM_ENABLED": True},
     )
-    monkeypatch.setattr(
-        note_title_module,
-        "get_registry",
-        lambda: SimpleNamespace(get_adapter=lambda provider: adapter if provider == "openai" else None),
-    )
+    route_gateway_adapters(monkeypatch, lambda provider: adapter if provider == "openai" else None)
 
 
 def test_llm_title_uses_editable_semantics_with_locked_provider_contract(
@@ -70,7 +68,8 @@ def test_llm_title_uses_editable_semantics_with_locked_provider_contract(
     )
 
     assert title == "Evocative title"
-    assert adapter.payloads == [
+    assert adapter.payloads[0]["model"]  # the gateway resolves the configured model (R6: it used to send None)
+    assert [{k: v for k, v in p.items() if k not in {"api_key", "app_config", "model"}} for p in adapter.payloads] == [
         {
             "messages": [
                 {
@@ -82,7 +81,6 @@ def test_llm_title_uses_editable_semantics_with_locked_provider_contract(
                 }
             ],
             "system_message": "System {braces} remain literal.",
-            "model": None,
             "temperature": 0.2,
             "max_tokens": 128,
         }
@@ -135,11 +133,7 @@ def test_unavailable_provider_still_uses_the_existing_heuristic_fallback(
         "core_settings",
         {"NOTES_TITLE_LLM_ENABLED": True},
     )
-    monkeypatch.setattr(
-        note_title_module,
-        "get_registry",
-        lambda: SimpleNamespace(get_adapter=lambda _provider: None),
-    )
+    route_gateway_adapters(monkeypatch, lambda _provider: None)
 
     title = generate_note_title(
         "Existing unavailable-provider fallback",

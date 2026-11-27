@@ -19,7 +19,7 @@ from tldw_Server_API.app.core.DB_Management.db_path_utils import (
     DatabasePaths,
     normalize_output_storage_filename,
 )
-from tldw_Server_API.app.core.exceptions import InvalidStoragePathError, LLMQuotaExceededError
+from tldw_Server_API.app.core.exceptions import InvalidStoragePathError, LLMPolicyRefusal, LLMQuotaExceededError
 from tldw_Server_API.app.core.Utils.keyword_identity import normalize_keyword_identity
 from tldw_Server_API.app.core.Utils.path_utils import safe_join
 from tldw_Server_API.app.core.TTS.tts_service_v2 import get_tts_service_v2
@@ -674,7 +674,7 @@ def _llm_reply(
             raise_on_error=True,
             provider_credentials=provider_credentials,
         )
-    except LLMQuotaExceededError:
+    except (LLMQuotaExceededError, LLMPolicyRefusal):
         raise
     except Exception as exc:
         logger.warning(f"outputs_service: LLM summary failed: {exc}")
@@ -902,7 +902,7 @@ async def generate_group_summaries(
                 ),
             )
             group["summary"] = result
-        except LLMQuotaExceededError:
+        except (LLMQuotaExceededError, LLMPolicyRefusal):
             raise
         except Exception as exc:
             logger.warning(f"outputs_service: group summary failed for '{group.get('name')}': {exc}")
@@ -1052,7 +1052,7 @@ async def classify_items_by_topic(
                 "summary": None,
             })
         return groups if groups else None
-    except LLMQuotaExceededError:
+    except (LLMQuotaExceededError, LLMPolicyRefusal):
         raise
     except Exception as exc:
         logger.warning(f"outputs_service: topic classification failed: {exc}")

@@ -44,16 +44,15 @@ from tldw_Server_API.app.core.DB_Management.DB_Manager import (
 from tldw_Server_API.app.core.Evaluations.ms_g_eval import run_geval
 from tldw_Server_API.app.core.Evaluations.rag_evaluator import _CANONICAL_METRIC_FOR_ALIAS, RAGEvaluator
 from tldw_Server_API.app.core.Evaluations.response_quality_evaluator import ResponseQualityEvaluator
+from tldw_Server_API.app.core.exceptions import LLMPolicyRefusal
 from tldw_Server_API.app.core.http_client import RetryPolicy, afetch
 from tldw_Server_API.app.core.LLM_Calls.adapter_registry import ChatProviderRegistry
 from tldw_Server_API.app.core.LLM_Calls.adapter_utils import (
-    ensure_app_config,
-    get_adapter_or_raise,
     normalize_provider,
-    resolve_provider_api_key_from_config,
-    resolve_provider_model,
     split_system_message,
 )
+from tldw_Server_API.app.core.LLM_Calls.gateway import perform_chat_api_call
+from tldw_Server_API.app.core.LLM_Calls.provider_results import raise_if_content_filtered
 from tldw_Server_API.app.core.Evaluations.recipes.dataset_snapshot import build_dataset_content_hash
 from tldw_Server_API.app.core.Evaluations.run_state import (
     can_transition_run_status,
@@ -132,27 +131,28 @@ def _call_adapter_text(
             raise ChatConfigurationError(provider=provider, message="Provider credential context is invalid.")
         api_key, app_config = provider_credentials.api_key, provider_credentials.app_config
         extra_kwargs.update({PROVIDER_CALL_CREDENTIALS_CONTEXT_KEY: provider_credentials, "credentials_resolved": True})
-    cfg = ensure_app_config(app_config)
-    resolved_model = model or resolve_provider_model(provider, cfg)
-    if not resolved_model:
-        raise ChatConfigurationError(provider=provider, message="Model is required for provider.")
     system_msg = system_message
     cleaned_messages = messages_payload or []
     if not system_msg:
         system_msg, cleaned_messages = split_system_message(cleaned_messages)
-    request: dict[str, Any] = {
-        "messages": cleaned_messages,
-        "system_message": system_msg,
-        "model": resolved_model,
-        "api_key": api_key or resolve_provider_api_key_from_config(provider, cfg),
-        "temperature": temperature,
-        "response_format": response_format,
-        "max_tokens": max_tokens,
-        "user": user,
-        "app_config": cfg,
-    }
-    request.update(extra_kwargs)
-    response = get_adapter_or_raise(provider).chat(request, timeout=timeout)
+    # Evaluated-model generation is moderated as ``evaluations``; R10: no caller-supplied mapping names its surface.
+    extra_kwargs.pop("llm_surface", None)
+    response = perform_chat_api_call(
+        api_provider=provider,
+        messages=cleaned_messages,
+        system_message=system_msg,
+        model=model,
+        api_key=api_key,
+        temperature=temperature,
+        response_format=response_format,
+        max_tokens=max_tokens,
+        user=user,
+        app_config=app_config,
+        timeout=timeout,
+        **extra_kwargs,
+        llm_surface="evaluations",
+    )
+    raise_if_content_filtered(response)  # a refused answer is a sample error, never a prediction to score
     content = extract_response_content(response)
     # Empty content from a call that succeeded is a non-answer (""), not a label hiding in the response's repr (TASK-15491)
     return content if content is not None else str(response)
@@ -1961,7 +1961,8 @@ class EvaluationRunner:
                 messages = [{"role": "user", "content": user_prompt}]
                 response_format = {"type": "json_object"} if structured else None
 
-                # A failed judge call raises to the sample-error handler below: unscored, not accuracy 0.0 (TASK-15491)
+                # The evaluated model's prediction (surface "evaluations"). A failed or refused call raises to the sample-error handler
+                # below: unscored, not accuracy 0.0 (TASK-15491)
                 resp = await asyncio.to_thread(
                     _call_adapter_text,
                     api_endpoint=api_name,
@@ -2052,7 +2053,7 @@ class EvaluationRunner:
                 }
             }
 
-        except _EVAL_RUNNER_NONCRITICAL_EXCEPTIONS as e:
+        except (*_EVAL_RUNNER_NONCRITICAL_EXCEPTIONS, LLMPolicyRefusal) as e:  # a refusal is a sample error, never a score
             logger.error(f"label_choice eval failed for {sample_id}: {e}")
             return {"sample_id": sample_id, "error": str(e)}
 
@@ -2153,7 +2154,8 @@ class EvaluationRunner:
                 messages = [{"role": "user", "content": user_prompt}]
                 response_format = {"type": "json_object"} if structured else None
 
-                # A failed judge call raises to the sample-error handler below: unscored, not accuracy 0.0 (TASK-15491)
+                # The evaluated model's prediction (surface "evaluations"). A failed or refused call raises to the sample-error handler
+                # below: unscored, not accuracy 0.0 (TASK-15491)
                 resp = await asyncio.to_thread(
                     _call_adapter_text,
                     api_endpoint=api_name,
@@ -2242,7 +2244,7 @@ class EvaluationRunner:
                 }
             }
 
-        except _EVAL_RUNNER_NONCRITICAL_EXCEPTIONS as e:
+        except (*_EVAL_RUNNER_NONCRITICAL_EXCEPTIONS, LLMPolicyRefusal) as e:  # a refusal is a sample error, never a score
             logger.error(f"nli_factcheck eval failed for {sample_id}: {e}")
             return {"sample_id": sample_id, "error": str(e)}
 

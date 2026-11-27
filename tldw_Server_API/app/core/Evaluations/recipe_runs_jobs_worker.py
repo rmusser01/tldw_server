@@ -563,6 +563,7 @@ def _generate_summary_for_candidate(
         system_message=prompts.get("system"),
         temp=execution_policy.get("temperature"),
         model_override=model,
+        llm_surface="evaluations",  # the evaluated candidate's output, not a judge
     )
     if not isinstance(summary, str) or not summary.strip() or summary.startswith("Error:"):
         raise ValueError(

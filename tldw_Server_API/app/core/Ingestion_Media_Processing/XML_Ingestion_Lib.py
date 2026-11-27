@@ -14,6 +14,7 @@ except Exception:  # pragma: no cover - defusedxml is an optional dependency
 # External Imports
 #
 # Local Imports
+from tldw_Server_API.app.core.exceptions import LLMPolicyRefusal
 from tldw_Server_API.app.core.Chunking import improved_chunking_process
 from tldw_Server_API.app.core.DB_Management.media_db.api import (
     get_media_repository,
@@ -152,7 +153,12 @@ def import_xml_handler(import_file, title, author, keywords, system_prompt,
         if auto_summarize and api_name and api_key:
             # Combine all chunks for summarization
             full_text = '\n'.join(chunk['text'] for chunk in chunks)
-            summary = analyze(api_name, full_text, custom_prompt, api_key)
+            try:
+                summary = analyze(api_name, full_text, custom_prompt, api_key)
+            except LLMPolicyRefusal as refusal:
+                # Recorded on the item, which is still imported; never retried.
+                logging.warning("XML import: summary refused by moderation policy")
+                summary = f"Summary skipped: {refusal.detail}"
         else:
             summary = "No summary provided"
 

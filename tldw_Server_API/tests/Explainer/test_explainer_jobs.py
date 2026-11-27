@@ -4,6 +4,8 @@ from typing import Any
 
 import pytest
 
+from tldw_Server_API.tests.helpers.gateway_routing import route_gateway_adapters
+
 from tldw_Server_API.app.core.DB_Management.Explainer_DB import ExplainerDatabase
 from tldw_Server_API.app.core.exceptions import LLMQuotaExceededError
 from tldw_Server_API.app.core.Explainer.jobs import (
@@ -911,11 +913,7 @@ async def test_configured_generator_parses_json_response(monkeypatch: pytest.Mon
     monkeypatch.setenv("EXPLAINER_GENERATOR_ENABLED", "1")
     monkeypatch.setenv("EXPLAINER_GENERATOR_PROVIDER", "fake-provider")
     monkeypatch.setenv("EXPLAINER_GENERATOR_MODEL", "fake-model")
-    from tldw_Server_API.app.core.LLM_Calls import adapter_utils
-
-    monkeypatch.setattr(adapter_utils, "get_adapter_or_raise", lambda _provider: FakeAdapter())
-    monkeypatch.setattr(adapter_utils, "resolve_provider_api_key_from_config", lambda *_args, **_kwargs: None)
-    monkeypatch.setattr(adapter_utils, "ensure_app_config", lambda *_args, **_kwargs: {})
+    route_gateway_adapters(monkeypatch, lambda _provider: FakeAdapter())
 
     generator = make_configured_explainer_generator()
     result = await generator(
@@ -961,11 +959,7 @@ async def test_configured_generator_calls_the_provider_off_the_event_loop_thread
     monkeypatch.setenv("EXPLAINER_GENERATOR_ENABLED", "1")
     monkeypatch.setenv("EXPLAINER_GENERATOR_PROVIDER", "fake-provider")
     monkeypatch.setenv("EXPLAINER_GENERATOR_MODEL", "fake-model")
-    from tldw_Server_API.app.core.LLM_Calls import adapter_utils
-
-    monkeypatch.setattr(adapter_utils, "get_adapter_or_raise", lambda _provider: FakeAdapter())
-    monkeypatch.setattr(adapter_utils, "resolve_provider_api_key_from_config", lambda *_args, **_kwargs: None)
-    monkeypatch.setattr(adapter_utils, "ensure_app_config", lambda *_args, **_kwargs: {})
+    route_gateway_adapters(monkeypatch, lambda _provider: FakeAdapter())
 
     generator = make_configured_explainer_generator()
     result = await generator(type("Prompt", (), {"as_messages": lambda self: [{"role": "user", "content": "Expand"}]})())

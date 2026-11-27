@@ -611,6 +611,7 @@ class EvaluationManager:
                 system_message="You are an expert evaluator. Provide scores and detailed explanations.",
                 input_is_literal_text=True,
                 provider_credentials=provider_credentials,
+                llm_surface="internal.eval_judge",  # exempt: moderating the judge would change the scores
             )
 
             # A failed judge call (provider error, timeout, rate limit, truncated or empty reply)
@@ -792,6 +793,7 @@ class EvaluationManager:
                 "You are a helpful assistant. Respond directly to the task."
             ),
             provider_credentials=provider_credentials,
+            llm_surface="evaluations",  # the evaluated model's answer; a refusal is an unscored item, never a score
         )
         if isinstance(response, str):
             return response.strip()

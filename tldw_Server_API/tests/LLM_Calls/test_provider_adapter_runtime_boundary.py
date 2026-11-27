@@ -8,6 +8,8 @@ from typing import Any
 
 import httpx
 import pytest
+
+from tldw_Server_API.tests.helpers.gateway_routing import route_gateway_adapters
 from loguru import logger
 
 from tldw_Server_API.app.core.AuthNZ.byok_config import merge_app_config_overrides
@@ -832,11 +834,7 @@ async def test_shared_cloud_callers_reach_real_adapter_with_isolated_runtime_sna
         "is_test_mode",
         lambda: False,
     )
-    monkeypatch.setattr(
-        ms_g_eval,
-        "get_adapter_or_raise",
-        lambda provider: adapter if provider == "openai" else None,
-    )
+    route_gateway_adapters(monkeypatch, lambda provider: adapter if provider == "openai" else None)  # G-Eval calls the gateway
 
     def invoke(handle: ProviderCallCredentials, timeout: float) -> Any:
         assert start.wait(timeout=5)

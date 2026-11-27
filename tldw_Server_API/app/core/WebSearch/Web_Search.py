@@ -24,13 +24,11 @@ from tldw_Server_API.app.core.Chat.chat_helpers import extract_response_content
 from tldw_Server_API.app.core.config import loaded_config_data
 from tldw_Server_API.app.core.http_client import RetryPolicy, fetch
 from tldw_Server_API.app.core.LLM_Calls.adapter_utils import (
-    ensure_app_config,
-    get_adapter_or_raise,
     normalize_provider,
-    resolve_provider_api_key_from_config,
-    resolve_provider_model,
     split_system_message,
 )
+from tldw_Server_API.app.core.LLM_Calls.gateway import perform_chat_api_call
+from tldw_Server_API.app.core.LLM_Calls.provider_results import raise_if_content_filtered
 from tldw_Server_API.app.core.LLM_Calls.Summarization_General_Lib import analyze
 from tldw_Server_API.app.core.Utils.Utils import logging
 from tldw_Server_API.app.core.Web_Scraping.orchestration import scrape_article
@@ -160,6 +158,7 @@ def summarize(
     tests (and any downstream code) to replace the summarizer without reaching into internal
     modules. All parameters map directly onto :func:`analyze`.
     """
+    extra_kwargs.pop("llm_surface", None)  # R10: no caller-supplied mapping names its surface
     return analyze(
         input_data=input_data,
         custom_prompt_arg=custom_prompt_arg,
@@ -169,6 +168,7 @@ def summarize(
         system_message=system_message,
         streaming=streaming,
         **extra_kwargs,
+        llm_surface="web.search",
     )
 
 
@@ -186,34 +186,35 @@ def _build_messages(
 
 
 def _call_adapter_text(
-        *,
-        api_endpoint: str,
-        messages_payload: list[dict[str, Any]],
-        temperature: Optional[float] = None,
-        api_key: Optional[str] = None,
-        model: Optional[str] = None,
-        app_config: Optional[dict[str, Any]] = None,
-        timeout: Optional[float] = None,
-        **extra_kwargs: Any,
+    *,
+    api_endpoint: str,
+    messages_payload: list[dict[str, Any]],
+    llm_surface: str,
+    temperature: Optional[float] = None,
+    api_key: Optional[str] = None,
+    model: Optional[str] = None,
+    app_config: Optional[dict[str, Any]] = None,
+    timeout: Optional[float] = None,
+    **extra_kwargs: Any,
 ) -> str:
+    """Call the provider through the gateway; ``llm_surface`` is a literal at every caller (R10: never a mapping)."""
     provider = normalize_provider(api_endpoint)
     if not provider:
         raise ChatConfigurationError(provider=api_endpoint, message="LLM provider is required.")
-    cfg = ensure_app_config(app_config or loaded_config_data)
-    resolved_model = model or resolve_provider_model(provider, cfg)
-    if not resolved_model:
-        raise ChatConfigurationError(provider=provider, message="Model is required for provider.")
     system_message, cleaned_messages = split_system_message(messages_payload or [])
-    request: dict[str, Any] = {
-        "messages": cleaned_messages,
-        "system_message": system_message,
-        "model": resolved_model,
-        "api_key": api_key or resolve_provider_api_key_from_config(provider, cfg),
-        "temperature": temperature,
-        "app_config": cfg,
-    }
-    request.update(extra_kwargs)
-    response = get_adapter_or_raise(provider).chat(request, timeout=timeout)
+    response = perform_chat_api_call(
+        api_provider=provider,
+        messages=cleaned_messages,
+        system_message=system_message,
+        model=model,
+        api_key=api_key,
+        temperature=temperature,
+        app_config=app_config or loaded_config_data,
+        timeout=timeout,
+        **extra_kwargs,
+        llm_surface=llm_surface,
+    )
+    raise_if_content_filtered(response)  # a refused answer is no search aggregation, relevance verdict or sub-question
     return extract_response_content(response) or str(response)
 
 
@@ -488,6 +489,7 @@ def analyze_question(question: str, api_endpoint) -> dict:
             )
             response = _call_adapter_text(
                 api_endpoint=api_endpoint,
+                llm_surface="web.search",
                 messages_payload=messages_payload,
                 temperature=0.7,
                 app_config=loaded_config_data,
@@ -609,6 +611,7 @@ async def search_result_relevance(
             # Evaluate relevance
             relevancy_result = _call_adapter_text(
                 api_endpoint=api_endpoint,
+                llm_surface="web.search",
                 messages_payload=messages_payload,
                 temperature=0.7,
                 app_config=loaded_config_data,
@@ -984,6 +987,7 @@ def aggregate_results(
         logging.info("Generating the report")
         returned_response = _call_adapter_text(
             api_endpoint=api_endpoint,
+            llm_surface="web.search",
             messages_payload=messages_payload,
             temperature=0.7,
             app_config=loaded_config_data,

@@ -11,6 +11,8 @@ from urllib.parse import quote
 from uuid import uuid4
 
 import pytest
+
+from tldw_Server_API.tests.helpers.gateway_routing import route_gateway_adapters
 from loguru import logger
 
 from tldw_Server_API.app.core.Data_Tables import jobs_worker, publication
@@ -191,7 +193,7 @@ def _complete_generation(
             }
 
     monkeypatch.setattr(jobs_worker, "_get_media_db", lambda owner: db if owner == "401" else None)
-    monkeypatch.setattr(jobs_worker, "_get_adapter", lambda _provider: Adapter())
+    route_gateway_adapters(monkeypatch, lambda _provider: Adapter())
     monkeypatch.setattr(jobs_worker, "_resolve_model", lambda *_args: "test-model")
     monkeypatch.setattr(jobs_worker, "provider_requires_api_key", lambda _provider: False)
     monkeypatch.setattr(jobs_worker, "resolve_provider_api_key", lambda *_args, **_kwargs: ("", {}))

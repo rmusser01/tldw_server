@@ -25,6 +25,7 @@ from typing import Any, Optional
 import numpy as np
 from loguru import logger
 
+from tldw_Server_API.app.core.exceptions import LLMPolicyRefusal
 from tldw_Server_API.app.core.Chat.bounded_daemon import (
     SYNC_ADAPTER_CALL_POOL,
     await_bounded_daemon_with_timeout,
@@ -1759,6 +1760,8 @@ class LLMReranker(BaseReranker):
                         }
                         return [doc.score for doc in documents]
                     score_val = 0.5
+                except LLMPolicyRefusal:
+                    raise  # a refusal is not "provider unavailable": it propagates as itself
                 except Exception:  # noqa: BLE001 - optional stage degrades safely
                     _inc_counter("reranker.llm.exceptions")
                     self.last_metadata = {
@@ -1786,6 +1789,8 @@ class LLMReranker(BaseReranker):
                 except asyncio.TimeoutError:
                     _inc_counter("reranker.llm.timeouts")
                     score_val = 0.5
+                except LLMPolicyRefusal:
+                    raise
                 except Exception:  # noqa: BLE001 - LLM scoring best-effort
                     _inc_counter("reranker.llm.exceptions")
                     score_val = 0.5

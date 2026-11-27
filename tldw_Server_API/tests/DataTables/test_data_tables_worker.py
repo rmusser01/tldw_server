@@ -3,6 +3,8 @@ import json
 
 import pytest
 
+from tldw_Server_API.tests.helpers.gateway_routing import route_gateway_adapters
+
 from tldw_Server_API.app.api.v1.schemas.data_tables_schemas import DATA_TABLES_MAX_ROWS_LIMIT
 from tldw_Server_API.app.core.Data_Tables import jobs_worker
 from tldw_Server_API.app.core.DB_Management.media_db.native_class import MediaDatabase
@@ -141,7 +143,7 @@ async def test_data_tables_worker_generates_rows(monkeypatch, tmp_path):
         ],
     }
 
-    monkeypatch.setattr(jobs_worker, "_get_adapter", lambda _provider: _StubAdapter(llm_payload))
+    route_gateway_adapters(monkeypatch, lambda _provider: _StubAdapter(llm_payload))
     monkeypatch.setattr(jobs_worker, "_resolve_model", lambda *_args, **_kwargs: "test-model")
     monkeypatch.setattr(jobs_worker, "provider_requires_api_key", lambda _p: False)
     monkeypatch.setattr(jobs_worker, "resolve_provider_api_key", lambda *_a, **_k: ("", {}))
@@ -450,7 +452,7 @@ async def test_retryable_llm_timeout_keeps_table_retriable(monkeypatch, tmp_path
     )
     table_id = int(table.get("id"))
 
-    monkeypatch.setattr(jobs_worker, "_get_adapter", lambda _provider: _TimeoutAdapter())
+    route_gateway_adapters(monkeypatch, lambda _provider: _TimeoutAdapter())
     monkeypatch.setattr(jobs_worker, "_resolve_model", lambda *_args, **_kwargs: "test-model")
     monkeypatch.setattr(jobs_worker, "provider_requires_api_key", lambda _p: False)
     monkeypatch.setattr(jobs_worker, "resolve_provider_api_key", lambda *_a, **_k: ("", {}))
@@ -527,7 +529,7 @@ async def test_llm_request_includes_adapter_timeout(monkeypatch, tmp_path):
         row_count=0,
     )
 
-    monkeypatch.setattr(jobs_worker, "_get_adapter", lambda _provider: CapturingAdapter())
+    route_gateway_adapters(monkeypatch, lambda _provider: CapturingAdapter())
     monkeypatch.setattr(jobs_worker, "_resolve_model", lambda *_args, **_kwargs: "test-model")
     monkeypatch.setattr(jobs_worker, "provider_requires_api_key", lambda _p: False)
     monkeypatch.setattr(jobs_worker, "resolve_provider_api_key", lambda *_a, **_k: ("", {}))
@@ -644,7 +646,7 @@ async def test_provider_thread_exits_before_job_can_finish_or_retry(monkeypatch,
             finally:
                 exited.set()
 
-    monkeypatch.setattr(jobs_worker, "_get_adapter", lambda _provider: HeldAdapter())
+    route_gateway_adapters(monkeypatch, lambda _provider: HeldAdapter())
     db = MediaDatabase(db_path=str(media_path), client_id="1")
     jm = JobManager(tmp_path / "owned-jobs.db")
     table = db.create_data_table(name="Owned inference", prompt="Source facts", status="queued")

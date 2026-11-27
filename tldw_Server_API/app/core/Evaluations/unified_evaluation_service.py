@@ -1186,7 +1186,7 @@ class UnifiedEvaluationService:
         def call_llm(prompt: str) -> str:
             try:
                 # use analyze(api_name, input_data, custom_prompt_arg, api_key, system_message, temp, streaming=False, recursive_summarization=False, chunked_summarization=False)
-                result = sgl.analyze(api_name, prompt, None, api_key, "You output one token only.", temperature, False, False, False, None)
+                result = sgl.analyze(api_name, prompt, None, api_key, "You output one token only.", temperature, False, False, False, None, llm_surface="evaluations")
                 if isinstance(result, tuple) and result:
                     return str(result[0])
                 return str(result)

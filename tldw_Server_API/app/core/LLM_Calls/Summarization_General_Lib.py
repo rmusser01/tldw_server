@@ -37,6 +37,7 @@ from tldw_Server_API.app.core.exceptions import (
     ChatConfigurationError,
     ChatRateLimitError,
     EgressPolicyError,
+    LLMPolicyRefusal,
     NetworkError,
 )
 from tldw_Server_API.app.core.LLM_Calls.adapter_registry import get_registry
@@ -52,6 +53,8 @@ from tldw_Server_API.app.core.LLM_Calls.provider_metadata import provider_requir
 from tldw_Server_API.app.core.LLM_Calls.provider_results import (
     _extract_text_from_upstream_sse,
     extract_response_content,
+    raise_if_content_filtered,
+    sse_line_is_content_filtered,
 )
 from tldw_Server_API.app.core.Provider_Credentials.provider_credential_runtime import (
     PROVIDER_CALL_CREDENTIALS_CONTEXT_KEY,
@@ -60,6 +63,7 @@ from tldw_Server_API.app.core.Provider_Credentials.provider_credential_runtime i
 from tldw_Server_API.app.core.Usage.llm_call_context import (
     USER_KEY_SOURCE,
     call_credential_source,
+    current_llm_user_id,
     scoped_provider_credentials,
 )
 from tldw_Server_API.app.core.Utils.Utils import logging
@@ -119,9 +123,11 @@ _SUMMARIZATION_NONCRITICAL_EXCEPTIONS: tuple[type[BaseException], ...] = (
 # blocks, and a transport failure such as a local server that is down (it falls through to
 # provider_failure). They are caught only to type them for raise_on_error callers; the other
 # callers still get the exception itself.
-_SUMMARY_PASSTHROUGH_EXCEPTIONS = (EgressPolicyError, NetworkError)
+_SUMMARY_PASSTHROUGH_EXCEPTIONS = (EgressPolicyError, NetworkError, LLMPolicyRefusal)
 _TRANSIENT_EGRESS_REASONS = frozenset({"dns_unresolved", "dns_changed", "tls_pin_error"})
 _SUMMARY_ADAPTER_EXCEPTIONS = (ChatAPIError, *_SUMMARY_PASSTHROUGH_EXCEPTIONS) + _SUMMARIZATION_NONCRITICAL_EXCEPTIONS
+
+DEFAULT_SUMMARY_SURFACE = "media.summarization"
 
 _SUMMARY_ERROR_CODES = frozenset(
     {
@@ -252,6 +258,7 @@ def _summarize_via_adapter(
     credentials_resolved: bool,
     raise_on_error: bool,
     provider_credentials: Optional[ProviderCallCredentials] = None,
+    llm_surface: str = DEFAULT_SUMMARY_SURFACE,
 ) -> Union[str, Generator[str, None, None], None]:
     provider = _adapter_provider_name(api_name)
     if not provider:
@@ -380,14 +387,25 @@ def _summarize_via_adapter(
     if provider_credentials is not None:
         request[PROVIDER_CALL_CREDENTIALS_CONTEXT_KEY] = provider_credentials
     timeout = _resolve_adapter_timeout(provider, effective_app_config)
+    # Direct by design (R6: the error taxonomy below depends on the raw adapter errors), so it is moderated
+    # explicitly through the gateway's public hook runners; this module never imports Moderation (layering).
+    from tldw_Server_API.app.core.LLM_Calls import gateway
+
+    call = gateway.GatewayCall(
+        surface=llm_surface, provider=provider, request=request, stream=streaming, user_id=current_llm_user_id()
+    )
+    gateway.run_policy_pre_hooks(call)  # a refusal propagates as itself: no provider call, no wrapped failure
+    request = call.request
     if streaming:
 
         def stream_generator() -> Generator[str, None, None]:
             gen = None
             try:
                 gen = adapter.stream(request, timeout=timeout)
-                for raw in gen:
+                for raw in gateway.run_policy_post_hooks(call, gen):
                     line = raw.decode("utf-8") if isinstance(raw, (bytes, bytearray)) else str(raw)
+                    if sse_line_is_content_filtered(line):
+                        raise LLMPolicyRefusal("Output violates moderation policy")
                     text_chunk, error_payload, _done = _extract_text_from_upstream_sse(line)
                     if error_payload is not None:
                         if raise_on_error:
@@ -396,6 +414,8 @@ def _summarize_via_adapter(
                         return
                     if text_chunk:
                         yield text_chunk
+            except LLMPolicyRefusal:
+                raise  # a moderation refusal is not a provider failure, typed or not
             except _SUMMARY_ADAPTER_EXCEPTIONS as exc:
                 if raise_on_error:
                     logging.error(f"Adapter streaming failed for {provider}")
@@ -413,7 +433,8 @@ def _summarize_via_adapter(
 
         return stream_generator()
     try:
-        response = adapter.chat(request, timeout=timeout)
+        response = gateway.run_policy_post_hooks(call, adapter.chat(request, timeout=timeout))
+        raise_if_content_filtered(response)  # a blocked answer is a refusal, never the summary text
         if isinstance(response, dict):
             choices = response.get("choices")
             first_choice = choices[0] if isinstance(choices, list) and choices else None
@@ -449,6 +470,8 @@ def _summarize_via_adapter(
                 legacy_message="Error: Provider returned no usable analysis. Try again or choose another model.",
             )
         return answer
+    except LLMPolicyRefusal:
+        raise  # a moderation refusal is not a provider failure, typed or not
     except _SUMMARY_ADAPTER_EXCEPTIONS as exc:
         if raise_on_error:
             logging.error(f"Adapter summarization failed for {provider}")
@@ -575,6 +598,7 @@ def _dispatch_to_api(
     credentials_resolved: bool = False,
     provider_credentials: Optional[ProviderCallCredentials] = None,
     raise_on_error: bool = False,
+    llm_surface: str = DEFAULT_SUMMARY_SURFACE,
 ) -> Union[str, Generator[str, None, None], None]:
     """
     Internal function to call the appropriate API-specific summarization function.
@@ -600,6 +624,7 @@ def _dispatch_to_api(
             credentials_resolved=credentials_resolved,
             provider_credentials=provider_credentials,
             raise_on_error=raise_on_error,
+            llm_surface=llm_surface,
         )
         if adapter_result is None:
             error_msg = f"Error: LLM adapter unavailable for provider '{api_name}'"
@@ -638,6 +663,7 @@ def analyze(
     credentials_resolved: bool = False,
     provider_credentials: Optional[ProviderCallCredentials] = None,
     raise_on_error: bool = False,
+    llm_surface: str = DEFAULT_SUMMARY_SURFACE,
 ) -> Union[str, Generator[str, None, None]]:
     """
     Performs analysis(summarization by default) using a specified API, with optional chunking strategies. Provide a system prompt to avoid summarization.
@@ -659,6 +685,8 @@ def analyze(
         chunk_options: Dictionary of options for the chunking process (passed to improved_chunking_process).
                        Defaults: {'method': 'words', 'max_size': 1000, 'overlap': 100}.
         input_is_literal_text: Treat string input as literal text instead of interpreting JSON-like content.
+        llm_surface: The moderation surface of the caller (a literal at the call site, never from user input);
+                     defaults to ``media.summarization``. A moderation refusal raises ``LLMPolicyRefusal``.
 
     Returns:
         - A string containing the final summary.
@@ -765,6 +793,7 @@ def analyze(
                     credentials_resolved=credentials_resolved,
                     provider_credentials=provider_credentials,
                     raise_on_error=raise_on_error,
+                    llm_surface=llm_surface,
                 )
                 # consume_generator handles both strings and generators, returning a string
                 processed_result = consume_generator(api_result)
@@ -807,6 +836,7 @@ def analyze(
                     credentials_resolved=credentials_resolved,
                     provider_credentials=provider_credentials,
                     raise_on_error=raise_on_error,
+                    llm_surface=llm_surface,
                 )
                 # Consume generator immediately
                 processed_chunk_summary = consume_generator(chunk_summary_result)
@@ -834,6 +864,7 @@ def analyze(
                  credentials_resolved=credentials_resolved,
                  provider_credentials=provider_credentials,
                  raise_on_error=raise_on_error,
+                 llm_surface=llm_surface,
             )
 
         # --- Post-processing and Return ---
