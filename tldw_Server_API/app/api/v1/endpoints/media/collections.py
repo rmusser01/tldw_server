@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from collections.abc import Callable
 from dataclasses import replace
 from urllib.parse import unquote
 
@@ -37,6 +38,7 @@ from tldw_Server_API.app.core.DB_Management.Collections_DB import (
     MediaCollectionRow,
     QuickIngestPlanConflict,
 )
+from tldw_Server_API.app.core.Jobs.manager import JobManager
 
 router = APIRouter()
 
@@ -98,11 +100,17 @@ def _raise_collection_error(exc: Exception) -> None:
     raise exc
 
 
+def get_plan_job_manager_factory() -> Callable[[], JobManager]:
+    """Defer opening Jobs storage until a collection source has a Jobs receipt to reconcile."""
+    return ingest_jobs.get_job_manager
+
+
 def _recover_plan_job(
     db: CollectionsDatabase,
     plan_key: str,
     source_key: str,
     row: MediaCollectionItemRow,
+    job_manager_factory: Callable[[], JobManager],
     *,
     persist: bool = True,
 ) -> MediaCollectionItemRow:
@@ -113,10 +121,10 @@ def _recover_plan_job(
     is_file = row.source_url.startswith("local://")
     job_key = f"media-upload:{db.user_id}:{key}" if is_file else ingest_jobs._collection_url_job_key(db.user_id, key)
     # Direct saves can plan and resume independently of Jobs availability.
-    with ingest_jobs.JobManager.scoped_rls_context(
+    with JobManager.scoped_rls_context(
         is_admin=False, domain_allowlist="media_ingest", owner_user_id=db.user_id
     ):
-        job = ingest_jobs._find_collection_retry_job(ingest_jobs.get_job_manager(), db.user_id, job_key)
+        job = ingest_jobs._find_collection_retry_job(job_manager_factory(), db.user_id, job_key)
     if job is None:
         return row
     payload = ingest_jobs._normalize_payload(job.get("payload"))
@@ -196,6 +204,7 @@ async def put_quick_ingest_plan(
     plan_key: PlanKey,
     payload: QuickIngestPlanRequest,
     db: CollectionsDatabase = Depends(get_collections_db_for_user),
+    job_manager_factory: Callable[[], JobManager] = Depends(get_plan_job_manager_factory),
 ) -> QuickIngestPlanResponse:
     """Bind selected source identities atomically and return their current user-owned rows."""
     try:
@@ -204,7 +213,7 @@ async def put_quick_ingest_plan(
             payload.collection.model_dump(),
             [(s.source_key, s.item.model_dump()) for s in payload.items],
         )
-        items = {key: _recover_plan_job(db, plan_key, key, row) for key, row in items.items()}
+        items = {key: _recover_plan_job(db, plan_key, key, row, job_manager_factory) for key, row in items.items()}
         return QuickIngestPlanResponse(
             collection_id=collection_id,
             items=[
@@ -227,11 +236,12 @@ async def get_quick_ingest_source_status(
     plan_key: PlanKey,
     source_key: PlanKey,
     db: CollectionsDatabase = Depends(get_collections_db_for_user),
+    job_manager_factory: Callable[[], JobManager] = Depends(get_plan_job_manager_factory),
 ) -> QuickIngestSourceStatusResponse:
     """Inspect the original receipt without creating a plan or reserving a source."""
     try:
         row = _recover_plan_job(
-            db, plan_key, source_key, db.get_quick_ingest_source(plan_key, source_key), persist=False
+            db, plan_key, source_key, db.get_quick_ingest_source(plan_key, source_key), job_manager_factory, persist=False
         )
         return QuickIngestSourceStatusResponse(
             collection_id=row.collection_id,
@@ -255,10 +265,11 @@ async def claim_quick_ingest_source(
     source_key: PlanKey,
     retry: QuickIngestRetryClaim | None = None,
     db: CollectionsDatabase = Depends(get_collections_db_for_user),
+    job_manager_factory: Callable[[], JobManager] = Depends(get_plan_job_manager_factory),
 ) -> QuickIngestClaimResponse:
     """Claim one source attempt, preserving the previously admitted job or direct result on replay."""
     try:
-        _recover_plan_job(db, plan_key, source_key, db.get_quick_ingest_source(plan_key, source_key))
+        _recover_plan_job(db, plan_key, source_key, db.get_quick_ingest_source(plan_key, source_key), job_manager_factory)
         claimed, row = db.claim_quick_ingest_source(plan_key, source_key, **(retry.model_dump() if retry else {}))
         return QuickIngestClaimResponse(claimed=claimed, item=_item_response(row), dispatch_state=row.dispatch_state)
     except (KeyError, ValueError) as exc:

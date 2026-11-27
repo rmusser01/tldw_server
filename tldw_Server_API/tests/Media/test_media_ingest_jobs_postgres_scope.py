@@ -239,9 +239,9 @@ def test_bound_plan_recovers_only_the_owners_published_job_without_writing(owned
                     idempotency_key=f"media-collection-url:2:11:{key}",
                 )
         with JobManager.scoped_rls_context(is_admin=False, domain_allowlist="other", owner_user_id="22"):
-            observed = _recover_plan_job(db, "draft", "talk", row, persist=False)
+            observed = _recover_plan_job(db, "draft", "talk", row, ingest_jobs.get_job_manager, persist=False)
         assert observed.latest_job_id == str(job["id"])
         assert db.get_quick_ingest_source("draft", "talk").latest_job_id is None
-        assert _recover_plan_job(db, "draft", "talk", row).latest_job_id == str(job["id"])
+        assert _recover_plan_job(db, "draft", "talk", row, ingest_jobs.get_job_manager).latest_job_id == str(job["id"])
     finally:
         CollectionsDatabase._bootstrapped_backend_targets.discard(CollectionsDatabase._backend_target_key(backend))

@@ -129,7 +129,6 @@ def test_plan_api_validates_authority_and_recovers_current_receipt(tmp_path, mon
 
     from tldw_Server_API.app.api.v1.API_Deps.Collections_DB_Deps import get_collections_db_for_user
     from tldw_Server_API.app.api.v1.endpoints.media import collections
-    from tldw_Server_API.app.core.Jobs.manager import JobManager
 
     monkeypatch.setenv("TEST_MODE", "true")
     monkeypatch.setenv("AUTH_MODE", "single_user")
@@ -158,13 +157,10 @@ def test_plan_api_validates_authority_and_recovers_current_receipt(tmp_path, mon
         assert put([source, source]).status_code == 422
         assert put([{**source, "item": {**source["item"], "media_id": 88}}]).status_code == 422
         # A direct source can be planned and reserved even when Jobs storage is offline.
-        with monkeypatch.context() as patch:
-            patch.setenv("JOBS_DB_PATH", str(tmp_path / "offline.sqlite"))
-            connect_jobs = Mock(side_effect=RuntimeError("Jobs storage unavailable"))
-            patch.setattr(JobManager, "__init__", connect_jobs)
-            response = put([source])
-            assert response.status_code == 200, response.text
-            connect_jobs.assert_not_called()
+        connect_jobs = Mock(side_effect=RuntimeError("Jobs storage unavailable"))
+        app.dependency_overrides[collections.get_plan_job_manager_factory] = lambda: connect_jobs
+        response = put([source])
+        assert response.status_code == 200, response.text
         before = response.json()
         assert client.get(source_status).json() == {"collection_id": before["collection_id"], **before["items"][0]}
         assert client.get(url + "/sources/absent").status_code == 404
@@ -174,6 +170,8 @@ def test_plan_api_validates_authority_and_recovers_current_receipt(tmp_path, mon
         claim_url = url + "/sources/talk/claim"
         assert client.post(claim_url).json()["claimed"]
         assert not client.post(claim_url).json()["claimed"]
+        connect_jobs.assert_not_called()
+        del app.dependency_overrides[collections.get_plan_job_manager_factory]
         row = before["items"][0]["item"]
         token = {"retry_count": 0, "idempotency_key": row["idempotency_key"], "transport": "web"}
         db.begin_quick_ingest_dispatch("draft", "talk", **token)
@@ -211,7 +209,11 @@ def test_plan_api_validates_authority_and_recovers_current_receipt(tmp_path, mon
             idempotency_key="media-collection-url:1:1:next",
             payload=payload,
         )
+        lookup_jobs = Mock(return_value=manager)
+        app.dependency_overrides[collections.get_plan_job_manager_factory] = lambda: lookup_jobs
         observed = client.get(source_status).json()
+        lookup_jobs.assert_called_once_with()
+        del app.dependency_overrides[collections.get_plan_job_manager_factory]
         assert observed["item"]["latest_job_id"] == str(job["id"])
         assert db.get_media_collection_item(row["id"]).latest_job_id is None
         recovered = put([source]).json()["items"][0]
