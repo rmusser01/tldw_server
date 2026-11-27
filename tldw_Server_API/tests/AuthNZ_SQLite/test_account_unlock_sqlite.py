@@ -24,6 +24,7 @@ from tldw_Server_API.tests.AuthNZ_SQLite._account_lock_fixtures import (  # noqa
     unlock_token_from,
 )
 from tldw_Server_API.tests.AuthNZ_SQLite._sessions_http_fixtures import api_key_for, bearer, login
+from tldw_Server_API.tests.AuthNZ_SQLite._user_fixtures import create_authnz_test_user
 
 pytestmark = pytest.mark.asyncio
 
@@ -53,12 +54,12 @@ async def _write_user(user_id: int, statement: str, *values) -> None:
         )
 
 
-async def _set_email(user_id: int, email: str, *, previous: str | None = None) -> None:
-    """Set the email; with ``previous``, record it as the address changed away from one day ago."""
+async def _set_email(user_id: int, email: str, *, previous: str | None = None, days_ago: int = 1) -> None:
+    """Set the email; with ``previous``, record it as the address changed away from ``days_ago`` days ago."""
     if previous is None:
         await _write_user(user_id, "UPDATE users SET email = ? WHERE id = ?", email)
         return
-    changed = (datetime.now(timezone.utc) - timedelta(days=1)).isoformat()
+    changed = (datetime.now(timezone.utc) - timedelta(days=days_ago)).isoformat()
     await _write_user(
         user_id,
         "UPDATE users SET email = ?, previous_email = ?, email_changed_at = ? WHERE id = ?",
@@ -246,6 +247,33 @@ async def test_take_back_refused_when_the_address_is_taken_after_the_link_was_ch
     assert row["security_locked_at"] is not None and row["email"] == INTRUDER
     assert await _blacklisted(_claims(token)["jti"]) is True  # checked, then spent: the owner asks for a new link
     assert len(await _live_sessions(ctx.alice_id)) == 0
+
+
+async def test_take_back_link_past_its_window_does_not_unlock(two_user_client):
+    """The window can close between rule 1 and the redeem: the link then unlocks nothing."""
+    ctx = two_user_client
+    await _set_email(ctx.alice_id, INTRUDER, previous=OWNER, days_ago=8)
+    await lock_user(ctx.alice_id)
+    take_back = {"email": OWNER, "restore_email": True, "purpose": "account_unlock"}
+    redeemed = await account_lock.redeem_unlock(
+        await _row(ctx.alice_id), take_back, via="magic_link", ip_address=None, user_agent=None
+    )
+    row = await _row(ctx.alice_id)
+    assert redeemed is False
+    assert row["security_locked_at"] is not None and row["email"] == INTRUDER
+
+
+async def test_send_me_a_new_link_for_a_username_mails_nothing(two_user_client, lockable):
+    """A username is not an address of the account: no link goes to any of its addresses."""
+    ctx = two_user_client
+    carol = await create_authnz_test_user(
+        await get_db_pool(), username="carol@example.com", email="carol-mail@example.com", is_verified=True
+    )
+    await _set_email(carol, "carol-mail@example.com", previous="carol-old@example.com")
+    await lock_user(carol)
+    response = ctx.client.post(REQUEST_LINK, json={"email": "carol@example.com"})
+    assert response.json() == {"message": "If the account exists, a sign-in link has been sent", "details": None}
+    assert lockable == []
 
 
 async def test_send_me_a_new_link_mails_the_lock_template_to_the_typed_address_only(two_user_client, lockable):

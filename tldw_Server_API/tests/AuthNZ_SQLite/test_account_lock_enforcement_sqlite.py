@@ -14,6 +14,7 @@ from tldw_Server_API.app.core.AuthNZ.database import get_db_pool
 from tldw_Server_API.app.core.AuthNZ.jwt_service import get_jwt_service
 from tldw_Server_API.app.core.AuthNZ.repos.sessions_repo import AuthnzSessionsRepo
 from tldw_Server_API.app.core.AuthNZ.session_manager import get_session_manager
+from tldw_Server_API.app.core.AuthNZ.token_blacklist import get_token_blacklist, reset_token_blacklist
 from tldw_Server_API.app.core.DB_Management.user_profile_writes import update_user_email
 from tldw_Server_API.app.services.auth_service import store_password_reset_token
 from tldw_Server_API.tests.AuthNZ_SQLite._account_lock_fixtures import (
@@ -179,14 +180,34 @@ async def test_reset_token_for_an_address_the_account_no_longer_has_is_refused(t
     assert await _password_hash(ctx.alice_id) == before
 
 
-async def test_reset_token_still_works_for_an_unlocked_account(two_user_client) -> None:
-    """The new checks refuse only what they must: a current token for the current address passes."""
-    ctx = two_user_client
+async def _reset_signs_alice_out(ctx, *, cold_blacklist: bool) -> None:
+    """A reset token for the current address resets the password and signs every session out."""
+    signed_in = login(ctx.client, "alice", ctx.password)
     token = await _reset_token(ctx.alice_id, "Alice@Example.com")
     before = await _password_hash(ctx.alice_id)
+    if cold_blacklist:
+        await reset_token_blacklist()  # the reset is the process's first use of the blacklist
+    else:
+        ctx.client.portal.call(get_token_blacklist().initialize)
     response = _reset(ctx.client, token)
     assert response.status_code == 200, response.text
+    assert response.json() == {"message": "Password has been reset successfully"}
     assert await _password_hash(ctx.alice_id) != before
+    old = ctx.client.get("/api/v1/auth/sessions", headers=bearer(signed_in))
+    assert old.status_code == 401 and old.json() == DEAD_TOKEN
+    rows = await (await get_db_pool()).fetchall(
+        "SELECT is_revoked, revoke_reason FROM sessions WHERE user_id = ?", ctx.alice_id
+    )
+    assert [(bool(r["is_revoked"]), r["revoke_reason"]) for r in rows] == [(True, "Password reset")]
+
+
+async def test_reset_token_still_works_for_an_unlocked_account(two_user_client) -> None:
+    """The new checks refuse only what they must: a current token for the current address passes."""
+    await _reset_signs_alice_out(two_user_client, cold_blacklist=False)
+
+
+async def test_reset_password_works_as_the_first_blacklist_use_of_the_process(two_user_client) -> None:
+    await _reset_signs_alice_out(two_user_client, cold_blacklist=True)
 
 
 async def test_admin_cannot_impersonate_a_locked_user(two_user_client) -> None:

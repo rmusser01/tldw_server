@@ -329,6 +329,10 @@ async def redeem_unlock(
     """
     user_id = int(user["id"])
     take_back = take_back_address(user, token_payload)
+    if take_back is None and token_payload.get("restore_email") is True:
+        # A take-back link whose window closed since rule 1 never does a plain unlock: the lock stays.
+        logger.info("Take-back link of user {} is past its window; nothing unlocked", user_id)
+        return False
     if await clear_lock(user_id, take_back=take_back) is None:
         return False
     await write_account_audit(
@@ -353,7 +357,10 @@ async def resend_unlock_link(
     """Mail the unlock link again, only to the address the requester typed; failures are logged, never raised.
 
     The anonymous routes answer the same whether this mail went out or not, as they do for a reset link.
+    A typed value that is not one of the account's addresses (a username) gets nothing mailed.
     """
+    if not any(_same_address(address, typed_address) for address, _ in security_mail_recipients(user)):
+        return
     try:
         await send_lock_mail(
             user, locked_at=None, device=device_label(user_agent), ip_address=ip_address, only_address=typed_address

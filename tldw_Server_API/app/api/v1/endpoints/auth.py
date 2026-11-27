@@ -148,6 +148,7 @@ from tldw_Server_API.app.core.AuthNZ.single_user_session import (
     mint_single_user_session,
     set_single_user_session_cookie,
 )
+from tldw_Server_API.app.core.AuthNZ.transaction_hooks import defer_until_after_commit
 from tldw_Server_API.app.core.AuthNZ.transaction_policy import get_authnz_transaction_policy
 from tldw_Server_API.app.core.Metrics.metrics_logger import log_counter, log_histogram
 from tldw_Server_API.app.core.Resource_Governance.governor import MemoryResourceGovernor, RGRequest
@@ -2822,9 +2823,12 @@ async def reset_password(
             now_utc=now_utc,
         )
 
-        # Revoke all existing sessions for security
-        blacklist = _token_blacklist.get_token_blacklist()
-        await blacklist.revoke_all_user_tokens(user_id, "Password reset")
+        # Revoke sessions once the reset commits: on SQLite this request holds the write lock until then.
+        async def _revoke_sessions() -> None:
+            await _token_blacklist.get_token_blacklist().revoke_all_user_tokens(user_id, "Password reset")
+
+        if not defer_until_after_commit(_revoke_sessions):
+            await _revoke_sessions()
 
         if __settings.get_settings().PII_REDACT_LOGS:
             logger.info("Password reset completed for authenticated user (details redacted)")
