@@ -69,7 +69,7 @@ const mountOneScreen = (processingItems?: WizardQueueItem[]) => render(
 describe("one-screen source queue", () => {
   it("keeps different pasted texts of the same size eligible", () => {
     mountOneScreen();
-    fireEvent.click(screen.getByRole("button", { name: "Text", exact: true }));
+    fireEvent.click(screen.getByRole("button", { name: "Text" }));
     for (const value of ["alpha", "bravo"]) {
       fireEvent.change(screen.getByRole("textbox", { name: "Pasted text input" }), { target: { value } });
       fireEvent.click(screen.getByRole("button", { name: /add pasted text/i }));

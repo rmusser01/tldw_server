@@ -645,7 +645,7 @@ describe("QuickIngestWizardModal session runtime", () => {
     useQuickIngestSessionStore.getState().createDraftSession({
       selectedPreset: "custom", presetConfig: { ...quick, common: { ...quick.common, overwrite_existing: mode === "global" } },
       queueItems: [{ id: "replace", kind: "url", url: "https://source.test/replace", detectedType: "web", icon: "Globe", fileSize: 0, validation: { valid: true },
-        ...(mode === "playlist" ? { playlist: { duplicateStatus: "duplicate_existing" }, conferenceOverride: { duplicatePolicy: "overwrite" as const } } : {}),
+        ...(mode === "playlist" ? { playlist: { duplicateStatus: "duplicate_existing" }, conferenceOverride: { selected: true, duplicatePolicy: "overwrite" as const } } : {}),
       }, { id: "fresh", kind: "url", url: "https://source.test/fresh", detectedType: "web", icon: "Globe", fileSize: 0, validation: { valid: true } }],
     })
     mocks.startQuickIngestSession.mockResolvedValue({ ok: true, sessionId: "qi-test" })
