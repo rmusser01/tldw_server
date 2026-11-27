@@ -91,6 +91,11 @@ from tldw_Server_API.app.api.v1.API_Deps.Audit_DB_Deps import get_audit_service_
 from tldw_Server_API.app.api.v1.API_Deps.ChaCha_Notes_DB_Deps import (
     get_chacha_db_for_user,
 )
+from tldw_Server_API.app.api.v1.API_Deps.document_chat_scope import (
+    DocumentChatQuery,
+    document_chat_unavailable,
+    require_linked_document_chat,
+)
 from tldw_Server_API.app.api.v1.API_Deps.jobs_deps import try_get_job_manager
 from tldw_Server_API.app.api.v1.utils.notes_sync_errors import (
     NOTES_SYNC_EXCEPTIONS,
@@ -8597,13 +8602,18 @@ async def capture_conversation_history(
     include_reasoning_history_support: bool = Query(False),
     db: CharactersRAGDB = Depends(get_chacha_db_for_user),
     current_user: User = Depends(get_request_user),
+    document: DocumentChatQuery = None,
 ):
     """Capture owner-bound history after one-time valid legacy dictionary binding."""
     from tldw_Server_API.app.core.Chat.history_selection import resolve_history_selection, snapshot_to_wire
     from tldw_Server_API.app.core.Chat.persistence_service import native_history_owner_key
 
     scope = _resolve_conversation_scope(scope_type, workspace_id)
-    conversation = _verify_conversation_ownership(db, conversation_id, current_user, scope)
+    if document:
+        if scope.scope_type != "global":
+            raise document_chat_unavailable()
+        require_linked_document_chat(db, target=document, chat_id=conversation_id, owner_id=str(current_user.id))
+    conversation = _verify_conversation_ownership(db, conversation_id, current_user, scope, conceal_foreign=bool(document))
     # Capture normally reads; valid legacy dictionary IDs may first acquire frozen
     # settings authority under owner lock/CAS. It never appends a message. A Sync v2
     # owner passes it for client-managed turns, whose admission and settlement publish
@@ -8625,6 +8635,10 @@ async def capture_conversation_history(
                   if body.required_capability else {})
     try:
         with db.transaction() as conn:
+            if document:
+                require_linked_document_chat(
+                    db, target=document, chat_id=conversation_id, owner_id=str(current_user.id), conn=conn,
+                )
             if body.purpose == "send" and (conversation.get("assistant_kind") == "character" or conversation.get("character_id") is not None):
                 from tldw_Server_API.app.core.Character_Chat.character_conversation_factory import (
                     bind_legacy_assigned_dictionaries,
@@ -8646,7 +8660,7 @@ async def capture_conversation_history(
 
                 capability.update({"native_completion_v1": {
                     "policy": "selected_history_v1",
-                    "supported": _active_message_sync_service(current_user, scope) is None,
+                    "supported": document is None and _active_message_sync_service(current_user, scope) is None,
                     "storage_context_digest": snap.storage_context_digest,
                     **({"reasoning_history_supported": True} if include_reasoning_history_support else {}),
                 }})

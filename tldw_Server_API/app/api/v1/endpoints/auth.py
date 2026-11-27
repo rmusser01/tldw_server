@@ -26,6 +26,17 @@ from pydantic import BaseModel, EmailStr, Field
 from tldw_Server_API.app.api.v1.API_Deps.Audit_DB_Deps import (
     get_or_create_audit_service_for_user_id,
 )
+from tldw_Server_API.app.api.v1.API_Deps.interactive_session_deps import (
+    get_current_session_id,
+    require_interactive_session,
+)
+from tldw_Server_API.app.core.AuthNZ.device_label import device_label
+from tldw_Server_API.app.core.AuthNZ.interactive_session import (
+    InteractiveSession,
+    install_id_or_none,
+    interactive_required_http_exception,
+    resolve_current_session_id,
+)
 from tldw_Server_API.app.api.v1.API_Deps.auth_deps import (
     RateLimiter,
     _authnz_busy_http_exception,
@@ -86,6 +97,7 @@ from tldw_Server_API.app.core.AuthNZ.exceptions import (
     InvalidTokenError,
     RegistrationError,
     SessionError,
+    SessionReplacedError,
     SessionRevokedException,
     TokenExpiredError,
     WeakPasswordError,
@@ -107,7 +119,12 @@ from tldw_Server_API.app.core.AuthNZ.password_service import PasswordService
 from tldw_Server_API.app.core.AuthNZ.platform_admin import PLATFORM_ADMIN_PERMISSIONS
 from tldw_Server_API.app.core.AuthNZ.principal_model import AuthPrincipal
 from tldw_Server_API.app.core.AuthNZ.repos.identity_provider_repo import IdentityProviderRepo
-from tldw_Server_API.app.core.AuthNZ.session_manager import SessionManager
+from tldw_Server_API.app.core.AuthNZ.repos.sessions_repo import SESSION_CAP_REVOKE_REASON
+from tldw_Server_API.app.core.AuthNZ.session_manager import (
+    SessionManager,
+    request_device_id,
+    session_replaced_http_exception,
+)
 from tldw_Server_API.app.core.AuthNZ.settings import Settings, get_settings
 from tldw_Server_API.app.core.AuthNZ.single_user_session import (
     clear_single_user_session_cookie,
@@ -413,32 +430,35 @@ async def _issue_multi_user_tokens(
         refresh_token=temp_refresh,
         ip_address=client_ip,
         user_agent=user_agent,
+        device_id=request_device_id(request),
+        alert_new_sign_in=True,
     )
     session_id = int(temp_session_info["session_id"])
 
-    if settings.AUTH_MODE == "multi_user":
-        await _ensure_user_org_membership(user_id, user.get("username"))
+    async with session_manager.revoke_on_failure(session_id, user_id):
+        if settings.AUTH_MODE == "multi_user":
+            await _ensure_user_org_membership(user_id, user.get("username"))
 
-    scope_claims = await _build_scope_claims(user_id)
-    add_claims = dict(scope_claims)
-    add_claims["session_id"] = session_id
-    access_token = jwt_service.create_access_token(
-        user_id=user_id,
-        username=username,
-        role=str(user.get("role") or settings.DEFAULT_USER_ROLE),
-        additional_claims=add_claims,
-    )
-    refresh_token = jwt_service.create_refresh_token(
-        user_id=user_id,
-        username=username,
-        additional_claims=add_claims,
-    )
-    await session_manager.update_session_tokens(
-        session_id=session_id,
-        access_token=access_token,
-        refresh_token=refresh_token,
-    )
-    await _auth_service.update_user_last_login(db, user_id, datetime.utcnow())
+        scope_claims = await _build_scope_claims(user_id)
+        add_claims = dict(scope_claims)
+        add_claims["session_id"] = session_id
+        access_token = jwt_service.create_access_token(
+            user_id=user_id,
+            username=username,
+            role=str(user.get("role") or settings.DEFAULT_USER_ROLE),
+            additional_claims=add_claims,
+        )
+        refresh_token = jwt_service.create_refresh_token(
+            user_id=user_id,
+            username=username,
+            additional_claims=add_claims,
+        )
+        await session_manager.update_session_tokens(
+            session_id=session_id,
+            access_token=access_token,
+            refresh_token=refresh_token,
+        )
+        await _auth_service.update_user_last_login(db, user_id, datetime.utcnow())
     await _safe_audit_log_login_event(
         user_id=user_id,
         username=username,
@@ -1832,7 +1852,6 @@ async def login(
                     exc,
                 )
 
-        # Create session first to get session_id
         user_agent = request.headers.get("User-Agent", "Unknown")
 
         # Generate tokens based on auth mode
@@ -1855,97 +1874,79 @@ async def login(
                 )
             access_token = single_user_key
             refresh_token = single_user_key
-
-            # Create session with tokens
-            await session_manager.create_session(
-                user_id=user['id'],
-                access_token=access_token,
-                refresh_token=refresh_token,
-                ip_address=client_ip,
-                user_agent=user_agent
+        elif mfa_required:
+            # No session row (and no cap eviction) until mfa_login verifies the second factor.
+            await _ensure_mfa_cache_available(session_manager, settings)
+            session_token = secrets.token_urlsafe(32)
+            ttl_seconds = _get_mfa_login_ttl_seconds()
+            payload = {"user_id": int(user["id"]), "login_lockout_key": client_login_lockout_key}
+            try:
+                await session_manager.store_ephemeral_value(
+                    _mfa_login_cache_key(session_token),
+                    json.dumps(payload),
+                    ttl_seconds,
+                )
+            except _AUTH_NONCRITICAL_EXCEPTIONS as exc:
+                logger.error("Failed to cache MFA login session: {}", exc)
+                raise HTTPException(
+                    status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+                    detail="Failed to initiate MFA login",
+                ) from exc
+            response.status_code = status.HTTP_202_ACCEPTED
+            log_counter("auth_login_mfa_required")
+            with contextlib.suppress(*_AUTH_NONCRITICAL_EXCEPTIONS):
+                _finalize_login_diag(request, response)
+            return MFAChallengeResponse(
+                session_token=session_token,
+                mfa_required=True,
+                expires_in=ttl_seconds,
+                message="MFA required. Submit your TOTP or backup code.",
             )
         else:
             # For multi-user mode, create a temporary session first
             # Use unique placeholders to avoid duplicate token hash constraints
             temp_access = f"temp_access_{secrets.token_urlsafe(16)}"
             temp_refresh = f"temp_refresh_{secrets.token_urlsafe(16)}"
-            mfa_expires_at = None
-            mfa_ttl_seconds = None
-            if mfa_required:
-                mfa_ttl_seconds = _get_mfa_login_ttl_seconds()
-                mfa_expires_at = datetime.now(timezone.utc) + timedelta(seconds=mfa_ttl_seconds)
-
             temp_session_info = await session_manager.create_session(
                 user_id=user['id'],
                 access_token=temp_access,  # Will update with actual token
                 refresh_token=temp_refresh,  # Will update with actual token
                 ip_address=client_ip,
                 user_agent=user_agent,
-                expires_at_override=mfa_expires_at,
-                refresh_expires_at_override=mfa_expires_at,
+                device_id=request_device_id(request),
+                alert_new_sign_in=True,
             )
 
             session_id = temp_session_info['session_id']
 
-            if mfa_required:
-                await _ensure_mfa_cache_available(session_manager, settings)
-                session_token = secrets.token_urlsafe(32)
-                ttl_seconds = mfa_ttl_seconds or _get_mfa_login_ttl_seconds()
-                payload = {
-                    "user_id": int(user["id"]),
-                    "session_id": int(session_id),
-                    "login_lockout_key": client_login_lockout_key,
-                }
-                try:
-                    await session_manager.store_ephemeral_value(
-                        _mfa_login_cache_key(session_token),
-                        json.dumps(payload),
-                        ttl_seconds,
-                    )
-                except _AUTH_NONCRITICAL_EXCEPTIONS as exc:
-                    logger.error("Failed to cache MFA login session: {}", exc)
-                    raise HTTPException(
-                        status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-                        detail="Failed to initiate MFA login",
-                    ) from exc
-                response.status_code = status.HTTP_202_ACCEPTED
-                log_counter("auth_login_mfa_required")
-                with contextlib.suppress(*_AUTH_NONCRITICAL_EXCEPTIONS):
-                    _finalize_login_diag(request, response)
-                return MFAChallengeResponse(
-                    session_token=session_token,
-                    mfa_required=True,
-                    expires_in=ttl_seconds,
-                    message="MFA required. Submit your TOTP or backup code.",
+            # Ensure org membership before issuing tokens (so claims include org_id)
+            async with session_manager.revoke_on_failure(session_id, int(user["id"])):
+                if settings.AUTH_MODE == "multi_user":
+                    await _ensure_user_org_membership(int(user["id"]), user.get("username"))
+
+                # Create JWT tokens with session_id
+                scope_claims = await _build_scope_claims(int(user["id"]))
+                add_claims = dict(scope_claims)
+                add_claims["session_id"] = session_id
+                access_token = jwt_service.create_access_token(
+                    user_id=user['id'],
+                    username=user['username'],
+                    role=user['role'],
+                    additional_claims=add_claims
                 )
 
-            # Ensure org membership before issuing tokens (so claims include org_id)
-            if settings.AUTH_MODE == "multi_user":
-                await _ensure_user_org_membership(int(user["id"]), user.get("username"))
+                refresh_token = jwt_service.create_refresh_token(
+                    user_id=user['id'],
+                    username=user['username'],
+                    additional_claims=add_claims
+                )
 
-            # Create JWT tokens with session_id
-            scope_claims = await _build_scope_claims(int(user["id"]))
-            add_claims = dict(scope_claims)
-            add_claims["session_id"] = session_id
-            access_token = jwt_service.create_access_token(
-                user_id=user['id'],
-                username=user['username'],
-                role=user['role'],
-                additional_claims=add_claims
-            )
-
-            refresh_token = jwt_service.create_refresh_token(
-                user_id=user['id'],
-                username=user['username'],
-                additional_claims=add_claims
-            )
-
-            # Update session with actual tokens
-            await session_manager.update_session_tokens(
-                session_id=session_id,
-                access_token=access_token,
-                refresh_token=refresh_token
-            )
+                # Update session with actual tokens
+                await session_manager.update_session_tokens(
+                    session_id=session_id,
+                    access_token=access_token,
+                    refresh_token=refresh_token
+                )
 
 
         # Update last login time
@@ -2045,6 +2046,8 @@ async def logout(
             raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Invalid user context")
 
         if all_devices:
+            if await resolve_current_session_id(request, current_user, session_manager) is None:
+                raise interactive_required_http_exception()
             try:
                 count = int(
                     await session_manager.revoke_all_user_sessions(
@@ -2067,7 +2070,6 @@ async def logout(
                     status_code=status.HTTP_400_BAD_REQUEST,
                     detail="Current-session logout requires a bearer token. Use all_devices=true to revoke all sessions.",
                 )
-            blacklist = _token_blacklist.get_token_blacklist()
             payload = {}
             try:
                 # NOTE: Using sync verify_token() here is acceptable - we're extracting
@@ -2076,6 +2078,12 @@ async def logout(
                 payload = jwt_service.verify_token(token)
             except _AUTH_NONCRITICAL_EXCEPTIONS:
                 payload = {}
+
+            session_id = payload.get("session_id")
+            if session_id is None:
+                # An API key or service token carries no session; it must not end any.
+                raise interactive_required_http_exception()
+            blacklist = _token_blacklist.get_token_blacklist()
 
             try:
                 jti = jwt_service.extract_jti(token)
@@ -2098,30 +2106,18 @@ async def logout(
                         status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
                         detail="Failed to revoke access token during logout",
                     ) from revoke_exc
-            session_id = payload.get("session_id")
-            if session_id is not None:
-                try:
-                    await session_manager.revoke_session(
-                        session_id=session_id,
-                        revoked_by=user_id,
-                        reason="User logout",
-                    )
-                except _AUTH_NONCRITICAL_EXCEPTIONS as cleanup_exc:
-                    logger.error(f"Failed to revoke session {session_id} during logout: {cleanup_exc}")
-                    raise HTTPException(
-                        status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-                        detail="Failed to revoke session during logout",
-                    ) from cleanup_exc
-            else:
-                # Fallback to full session revoke if the token lacks a session id.
-                try:
-                    await session_manager.revoke_all_user_sessions(user_id=user_id)
-                except _AUTH_NONCRITICAL_EXCEPTIONS as cleanup_exc:
-                    logger.error(f"Failed to revoke user sessions during logout: {cleanup_exc}")
-                    raise HTTPException(
-                        status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-                        detail="Failed to revoke sessions during logout",
-                    ) from cleanup_exc
+            try:
+                await session_manager.revoke_session(
+                    session_id=session_id,
+                    revoked_by=user_id,
+                    reason="User logout",
+                )
+            except _AUTH_NONCRITICAL_EXCEPTIONS as cleanup_exc:
+                logger.error(f"Failed to revoke session {session_id} during logout: {cleanup_exc}")
+                raise HTTPException(
+                    status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+                    detail="Failed to revoke session during logout",
+                ) from cleanup_exc
 
             message = "Successfully logged out"
 
@@ -2160,7 +2156,8 @@ async def logout(
 @router.get("/sessions", response_model=list[SessionResponse])
 async def list_user_sessions(
     current_user: AuthPrincipal = Depends(get_auth_principal),
-    session_manager: SessionManager = Depends(get_session_manager_dep)
+    session_manager: SessionManager = Depends(get_session_manager_dep),
+    current_session_id: Optional[int] = Depends(get_current_session_id),
 ) -> list[SessionResponse]:
     """
     List all active sessions for the current user.
@@ -2173,6 +2170,10 @@ async def list_user_sessions(
                 detail="Invalid credentials",
             )
         sessions = await session_manager.get_user_sessions(user_id)
+        current_install = next(
+            (install_id_or_none(s.get('device_id')) for s in sessions if s['id'] == current_session_id),
+            None,
+        )
 
         return [
             SessionResponse(
@@ -2181,7 +2182,11 @@ async def list_user_sessions(
                 user_agent=session.get('user_agent'),
                 created_at=session['created_at'],
                 last_activity=session['last_activity'],
-                expires_at=session['expires_at']
+                expires_at=session['expires_at'],
+                is_current=session['id'] == current_session_id,
+                device_label=device_label(session.get('user_agent')),
+                same_install=current_install is not None
+                and install_id_or_none(session.get('device_id')) == current_install,
             )
             for session in sessions
         ]
@@ -2198,7 +2203,8 @@ async def list_user_sessions(
 async def revoke_session(
     session_id: int,
     current_user: AuthPrincipal = Depends(get_auth_principal),
-    session_manager: SessionManager = Depends(get_session_manager_dep)
+    session_manager: SessionManager = Depends(get_session_manager_dep),
+    interactive: InteractiveSession = Depends(require_interactive_session),
 ) -> MessageResponse:
     """
     Revoke a specific session for the current user.
@@ -2230,7 +2236,8 @@ async def revoke_session(
         await session_manager.revoke_session(
             session_id,
             revoked_by=user_id,
-            reason="User requested revocation"
+            reason="User requested revocation",
+            expected_user_id=user_id,
         )
 
         logger.info(f"User {username} revoked session {session_id}")
@@ -2259,7 +2266,9 @@ async def revoke_session(
 @router.post("/sessions/revoke-all", response_model=MessageResponse)
 async def revoke_all_sessions(
     current_user: AuthPrincipal = Depends(get_auth_principal),
-    session_manager: SessionManager = Depends(get_session_manager_dep)
+    session_manager: SessionManager = Depends(get_session_manager_dep),
+    keep_current: bool = Query(False, description="Keep the caller's own session."),
+    interactive: InteractiveSession = Depends(require_interactive_session),
 ) -> MessageResponse:
     """
     Revoke all sessions for the current user.
@@ -2275,7 +2284,8 @@ async def revoke_all_sessions(
 
         count = await session_manager.revoke_all_user_sessions(
             user_id=user_id,
-            reason="User requested logout from all devices"
+            reason="User requested logout from all devices",
+            except_session_id=interactive.session_id if keep_current else None,
         )
         revoked_count = int(count)
 
@@ -2379,6 +2389,8 @@ async def refresh_token(
                         response.headers["X-TLDW-Refresh-Reason"] = "revoked"
                     except _AUTH_NONCRITICAL_EXCEPTIONS:
                         pass
+                if await session_manager.get_revoke_reason(payload.refresh_token) == SESSION_CAP_REVOKE_REASON:
+                    raise SessionReplacedError()
                 raise InvalidTokenError("Refresh token has been revoked")
 
             # JWT standard uses 'sub' for subject (user ID)
@@ -2542,6 +2554,8 @@ async def refresh_token(
                 response.headers.setdefault("X-TLDW-Refresh-Reason", type(e).__name__)
             except _AUTH_NONCRITICAL_EXCEPTIONS:
                 pass
+        if isinstance(e, SessionReplacedError):
+            raise session_replaced_http_exception() from e
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
             detail="Invalid or expired refresh token",
@@ -3203,30 +3217,32 @@ async def verify_magic_link(
         refresh_token=temp_refresh,
         ip_address=_auth_request_client_ip(request),
         user_agent=user_agent,
+        device_id=request_device_id(request),
+        alert_new_sign_in=True,
     )
     session_id = temp_session_info["session_id"]
 
-    scope_claims = await _build_scope_claims(int(user["id"]))
-    add_claims = dict(scope_claims)
-    add_claims["session_id"] = session_id
-    access_token = jwt_service.create_access_token(
-        user_id=user["id"],
-        username=user["username"],
-        role=user["role"],
-        additional_claims=add_claims,
-    )
-    refresh_token = jwt_service.create_refresh_token(
-        user_id=user["id"],
-        username=user["username"],
-        additional_claims=add_claims,
-    )
-    await session_manager.update_session_tokens(
-        session_id=session_id,
-        access_token=access_token,
-        refresh_token=refresh_token,
-    )
-
-    await _auth_service.update_user_last_login(db, int(user["id"]), datetime.utcnow())
+    async with session_manager.revoke_on_failure(session_id, int(user["id"])):
+        scope_claims = await _build_scope_claims(int(user["id"]))
+        add_claims = dict(scope_claims)
+        add_claims["session_id"] = session_id
+        access_token = jwt_service.create_access_token(
+            user_id=user["id"],
+            username=user["username"],
+            role=user["role"],
+            additional_claims=add_claims,
+        )
+        refresh_token = jwt_service.create_refresh_token(
+            user_id=user["id"],
+            username=user["username"],
+            additional_claims=add_claims,
+        )
+        await session_manager.update_session_tokens(
+            session_id=session_id,
+            access_token=access_token,
+            refresh_token=refresh_token,
+        )
+        await _auth_service.update_user_last_login(db, int(user["id"]), datetime.utcnow())
 
     return TokenResponse(
         access_token=access_token,
@@ -3522,7 +3538,7 @@ async def mfa_login(
         except json.JSONDecodeError:
             payload = {}
 
-        session_id = payload.get("session_id")
+        # A legacy payload's session_id named the removed pre-MFA row; it is ignored.
         user_id = payload.get("user_id")
         login_lockout_key = None
         if "login_lockout_key" in payload:
@@ -3532,14 +3548,13 @@ async def mfa_login(
                     status_code=status.HTTP_400_BAD_REQUEST,
                     detail="MFA session expired or invalid",
                 )
-        if not session_id or not user_id:
+        if not user_id:
             raise HTTPException(
                 status_code=status.HTTP_400_BAD_REQUEST,
                 detail="MFA session expired or invalid",
             )
 
         user_id = int(user_id)
-        session_id = int(session_id)
 
         allowed, retry_after = await _reserve_auth_rg_requests(
             request,
@@ -3589,63 +3604,21 @@ async def mfa_login(
                 headers={"WWW-Authenticate": "Bearer"},
             )
 
-        if settings.AUTH_MODE == "multi_user":
-            await _ensure_user_org_membership(user_id, user.get("username"))
+        # Single use: the atomic consume lets one completion through. A wrong code
+        # (rejected above) leaves the challenge usable until it expires.
+        if not await session_manager.consume_ephemeral_value(cache_key):
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="MFA session expired or invalid",
+            )
 
-        scope_claims = await _build_scope_claims(user_id)
-        add_claims = dict(scope_claims)
-        add_claims["session_id"] = session_id
-        access_token = jwt_service.create_access_token(
-            user_id=user_id,
-            username=user.get("username", ""),
-            role=user.get("role", "user"),
-            additional_claims=add_claims,
-        )
-        refresh_token = jwt_service.create_refresh_token(
-            user_id=user_id,
-            username=user.get("username", ""),
-            additional_claims=add_claims,
-        )
-
-        await session_manager.update_session_tokens(
-            session_id=session_id,
-            access_token=access_token,
-            refresh_token=refresh_token,
-        )
-
-        await _auth_service.update_user_last_login(db, user_id, datetime.utcnow())
-
-        # Audit log successful login
-        client_ip = _auth_request_client_ip(request)
-        user_agent = request.headers.get("User-Agent", "Unknown")
-        async def _safe_audit_log_login(user_id: int, username: str, ip: str, ua: str, success: bool):
-            try:
-                svc = await get_or_create_audit_service_for_user_id(user_id)
-                await svc.log_login(
-                    user_id=user_id,
-                    username=username,
-                    ip_address=ip,
-                    user_agent=ua,
-                    success=success,
-                )
-                flush_on_login = _env_flag_enabled("AUDIT_FLUSH_ON_LOGIN")
-                test_mode = _testing.is_test_mode()
-                if flush_on_login or test_mode:
-                    await svc.flush()
-            except _AUTH_NONCRITICAL_EXCEPTIONS as exc:
-                logger.debug(
-                    "MFA login audit failed for user_id={}: {}",
-                    user_id,
-                    exc,
-                    exc_info=True,
-                )
-
-        await _safe_audit_log_login(
-            user_id=user_id,
-            username=str(user.get("username", "")),
-            ip=client_ip,
-            ua=user_agent,
-            success=True,
+        tokens = await _issue_multi_user_tokens(
+            request=request,
+            db=db,
+            user=user,
+            jwt_service=jwt_service,
+            session_manager=session_manager,
+            settings=settings,
         )
 
         # Reset failed login attempts on successful MFA login
@@ -3657,19 +3630,10 @@ async def mfa_login(
             except _AUTH_NONCRITICAL_EXCEPTIONS as rl_exc:
                 logger.debug(f"rate_limiter.reset_failed_attempts failed: {rl_exc}")
 
-        with contextlib.suppress(*_AUTH_NONCRITICAL_EXCEPTIONS):
-            await session_manager.delete_ephemeral_value(cache_key)
-
         log_counter("auth_login_success")
         log_counter("auth_mfa_login_success")
         log_histogram("auth_login_duration", time.perf_counter() - start_time)
-
-        return TokenResponse(
-            access_token=access_token,
-            refresh_token=refresh_token,
-            token_type="bearer",
-            expires_in=settings.ACCESS_TOKEN_EXPIRE_MINUTES * 60
-        )
+        return tokens
 
     except HTTPException:
         log_counter("auth_mfa_login_http_error")

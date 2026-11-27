@@ -19,6 +19,7 @@ from typing import Annotated, Any, Literal
 
 from pydantic import AwareDatetime, BaseModel, BeforeValidator, ConfigDict, Field, field_validator, model_validator
 
+from tldw_Server_API.app.api.v1.schemas.document_chat_schemas import DocumentChatCitations
 from tldw_Server_API.app.core.Chat.conversation_import import normalize_client_conversation_id
 from tldw_Server_API.app.core.Workspaces.chat_startup_schemas import (
     STARTUP_TEXT_BYTE_LIMITS,
@@ -111,6 +112,7 @@ class ChatImportMessage(BaseModel):
         max_length=CHAT_IMPORT_MAX_IMAGES_PER_MESSAGE,
         description="Ordered images as base64 data URLs (PNG, JPEG, GIF, WebP, BMP or ICO)",
     )
+    document_chat_sources_v1: DocumentChatCitations | None = None
     metadata: dict[str, Any] | None = Field(
         None,
         description=(

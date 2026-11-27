@@ -1,4 +1,5 @@
 import { WORKSPACE_RAG_SOURCES_KEY, projectWorkspaceRagSources } from "@/utils/workspace-rag-sources"
+import { DOCUMENT_CHAT_SOURCES, projectDocumentChatCitations } from "@/utils/document-chat-citations"
 import { NativeHistoryBranchChoice, NativeHistoryBranchRefusal, NativeHistoryEditRefusal } from "@/hooks/chat/native-character-preflight"
 import type { BaseMessage } from "@/types/messages"
 import {
@@ -741,6 +742,8 @@ export const runChatPipeline = async <TParams extends ChatModeParamsBase>(
     // Image preflight has dispatched its provider request; retrieval-only diagnostics have not.
     if (!isImageGenerationTurn && !preparationIsCurrent()) return chatSubmitSkipped("Conversation changed")
     if (preflight?.handled) {
+      if (mode.id === "rag" && historyTurn?.owner.kind === "native" && historyTurn.owner.documentTarget)
+        throw new Error(preflight.fullText)
       dispatched = isImageGenerationTurn
       fullText = preflight.fullText
       const sources = preflight.sources ?? []
@@ -890,12 +893,16 @@ export const runChatPipeline = async <TParams extends ChatModeParamsBase>(
     promptContent = promptData.promptContent
     promptId = promptData.promptId
     const sources = promptData.sources ?? []
+    const documentTarget = historyTurn?.owner.kind === "native" ? historyTurn.owner.documentTarget : undefined
+    const documentCitations = documentTarget && sources.length
+      ? projectDocumentChatCitations(sources, documentTarget)
+      : null
     const humanMessage = promptData.humanMessage
     const outgoingMessages = humanMessage
       ? [...promptData.chatHistory, humanMessage]
       : [...promptData.chatHistory]
 
-    const nativeCompletion = Boolean(historyTurn?.owner.kind === "native" &&
+    const nativeCompletion = Boolean(historyTurn?.owner.kind === "native" && !documentTarget &&
       historyTurn.capture.status === "captured" && historyTurn.capture.native_completion_v1?.supported === true &&
       !historyTurn.retryAdmission && !historyTurn.existingSelection && !historyTurn.historyEdit && promptData.nativeCurrentInput !== undefined && humanMessage && mode.id === "normal")
     if (nativeCompletion) historyTurn!.persistence = "server"
@@ -934,11 +941,12 @@ export const runChatPipeline = async <TParams extends ChatModeParamsBase>(
       : [...promptData.chatHistory]
     let preparedRequest: ChatCompletionRequest | undefined
     if (historyTurn) {
-      if (historyTurn.owner.kind === "native" && sources.length)
+      if (historyTurn.owner.kind === "native" && sources.length && !documentCitations)
         throw new Error("unsupported_history_native_result_metadata")
       preparedRequest = await admitHistoryInput(nativeCompletion
         ? modelClient.prepareNativeHistoryRequest([...promptData.nativeCurrentInput!, humanMessage] as BaseMessage[])
-        : modelClient.prepareClientManagedRequest(finalMessages as BaseMessage[]))
+        : modelClient.prepareClientManagedRequest(finalMessages as BaseMessage[],
+          historyTurn.owner.kind === "unavailable" ? undefined : historyTurn.owner.kind))
     }
 
     let nativeReplyInterrupted = false
@@ -1165,23 +1173,24 @@ export const runChatPipeline = async <TParams extends ChatModeParamsBase>(
         ? buildDynamicUIEnvelope("openui", fullText)
         : null
     const sourceProvenance =
-      mode.id === "rag" && params.saveToDb === false && sources.length
+      !documentTarget && mode.id === "rag" && params.saveToDb === false && sources.length
         ? projectWorkspaceRagSources(sources)
         : null;
     if (
-      mode.id === "rag" &&
+      !documentTarget && mode.id === "rag" &&
       params.saveToDb === false &&
       sources.length &&
       !sourceProvenance
     )
       throw new Error("Source history is invalid or too large to save");
     const assistantMetadataExtra =
-      dynamicUIEnvelope || sourceProvenance
+      dynamicUIEnvelope || sourceProvenance || documentCitations
         ? {
             ...(dynamicUIEnvelope ? { dynamic_ui: dynamicUIEnvelope } : {}),
             ...(sourceProvenance
               ? { [WORKSPACE_RAG_SOURCES_KEY]: sourceProvenance }
               : {}),
+            ...(documentCitations ? { [DOCUMENT_CHAT_SOURCES]: documentCitations } : {})
           }
         : undefined;
     setMessagesWithTransition((prev) =>

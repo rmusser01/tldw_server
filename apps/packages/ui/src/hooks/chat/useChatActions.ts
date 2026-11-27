@@ -151,11 +151,13 @@ import {
   aggregateChatSubmitResults,
   chatSubmitFailed,
   chatSubmitSkipped,
+  getLastThreadMessageId,
   normalizeChatSubmitResult,
   resolveTurnContextFiles,
   resolveTurnFileRetrievalEnabled,
   resolveTurnUploadedFiles,
   resolveTurnRagMediaIds,
+  shouldIncludeMessageForModel,
   shouldUseRagForTurn,
   type ChatModeOverrides,
   type ChatSubmitResult
@@ -286,6 +288,7 @@ const throwIfServicePromptScopeInvalidated = (
 }
 
 type SaveMessagePayload = Omit<SaveMessageData, "setHistoryId"> & {
+  historyServerChatId?: string
   setHistoryId?: (id: string, options?: { preserveServerChatId?: boolean }) => void
   conversationId?: string | number | null
   message_source?: "copilot" | "web-ui" | "server" | "branch"
@@ -437,6 +440,9 @@ const characterIdsMatch = (
 }
 
 type UseChatActionsOptions = {
+  historyDocumentId?: string
+  documentBrowserOnly?: boolean
+  onDocumentHistorySaved?: (historyId: string) => Promise<void>
   capturePrivateScene?: (commandIsCurrent: () => boolean) => ReturnType<typeof captureActorSceneSend>
   t: TFunction
   notification: NotificationInstance
@@ -622,12 +628,16 @@ export const useChatActions = ({
   clearMessageSteering,
   visualIdentityManualExpressionOverride,
   setVisualIdentityManualExpressionOverride,
-  capturePrivateScene
+  capturePrivateScene,
+  historyDocumentId,
+  documentBrowserOnly = false,
+  onDocumentHistorySaved
 }: UseChatActionsOptions) => {
-  const historySelection = useHistorySelectionContext()
-  const captureSceneForCommand = (isCurrent: () => boolean) => historySelection
-    ? captureActorSceneSend(historySelection, isCurrent)
-    : capturePrivateScene?.(isCurrent) ?? null
+  const defaultHistorySelection = useHistorySelectionContext()
+  const historySelection = defaultHistorySelection
+  const captureSceneForCommand = (isCurrent: () => boolean) => capturePrivateScene
+    ? capturePrivateScene(isCurrent)
+    : historySelection ? captureActorSceneSend(historySelection, isCurrent) : null
   const renderedDraftRevision = useStoreMessageOption.getState().chatDraftRevision
   const renderedSettingsDraft = useStoreMessageOption.getState().chatDraftAddress
   const renderedContinuationFence = historySelection?.fence()
@@ -887,7 +897,7 @@ export const useChatActions = ({
       options?: { preserveServerChatId?: boolean }
     ) => void
   )
-  const saveMessageOnError = createSaveMessageOnError(
+  const baseSaveMessageOnError = createSaveMessageOnError(
     temporaryChat,
     history,
     setHistory,
@@ -896,6 +906,12 @@ export const useChatActions = ({
       options?: { preserveServerChatId?: boolean }
     ) => void
   )
+
+  const saveMessageOnError: typeof baseSaveMessageOnError = async (data) => {
+    const key = await baseSaveMessageOnError(historyDocumentId ? { ...data, historyDocumentId } : data)
+    if (key && onDocumentHistorySaved) await onDocumentHistorySaved(key)
+    return key
+  }
 
   const resolveImageEventSyncModeForPayload = React.useCallback(
     (payload?: SaveMessagePayload): ImageGenerationEventSyncMode => {
@@ -962,6 +978,7 @@ export const useChatActions = ({
     let payloadForLocalPersistence = payload
       ? {
           ...payload,
+          ...(historyDocumentId ? { historyDocumentId } : {}),
           setHistoryId: (
             ...args: Parameters<NonNullable<SaveMessagePayload["setHistoryId"]>>
           ) => {
@@ -987,6 +1004,7 @@ export const useChatActions = ({
         }
       const key = await baseSaveMessageOnSuccess(payloadForLocalPersistence)
       throwIfScopeChanged()
+      if (key && onDocumentHistorySaved) await onDocumentHistorySaved(key)
       if (!payload?.historyId && key && sourceIsCurrent()) {
         markCompareHistoryCreated(key)
       }
@@ -1966,7 +1984,9 @@ export const useChatActions = ({
     serverChatIdOverride,
     historyIdOverride,
     servicePromptSnapshot,
-    onResponseDispatch
+    onResponseDispatch,
+    documentViewIsCurrent,
+    view = { setMessages, setHistory, setIsProcessing, setStreaming, setHistoryId }
   }: {
     message: string
     image: string
@@ -1981,12 +2001,16 @@ export const useChatActions = ({
     historyIdOverride?: string | null
     servicePromptSnapshot?: ServicePromptSnapshot
     onResponseDispatch?: () => void
+    documentViewIsCurrent?: () => boolean
+    view?: Pick<Awaited<ReturnType<typeof buildChatModeParams>>,
+      "setMessages" | "setHistory" | "setIsProcessing" | "setStreaming" | "setHistoryId">
     messageSteering: {
       continueAsUser: boolean
       impersonateUser: boolean
       forceNarrate: boolean
     }
   }): Promise<ChatSubmitResult> => {
+    const { setMessages, setHistory, setIsProcessing, setStreaming, setHistoryId } = view
     const executionSignal = servicePromptSnapshot?.scopeSignal ?? signal
     const requestOptions = {
       ...(scope ? { scope } : {}),
@@ -1996,6 +2020,7 @@ export const useChatActions = ({
     const throwIfTurnCancelled = () => {
       throwIfServicePromptScopeInvalidated(servicePromptSnapshot)
       executionSignal.throwIfAborted()
+      if (documentViewIsCurrent?.() === false) throw createServicePromptScopeChangedError()
     }
     // Capture the current turn's supported controls before asynchronous work.
     const { numPredict, temperature, topP, repeatPenalty } = currentChatModelSettings
@@ -2993,12 +3018,13 @@ export const useChatActions = ({
         assistantServerMessageId: persistedAssistantServerMessageId,
         assistantParentMessageId: resolvedAssistantParentMessageId ?? null,
         conversationId: activeChatId,
+        ...(historyDocumentId && activeChatId ? { historyServerChatId: activeChatId } : {}),
         saveToDb: true,
         serverMessagesAlreadyPersisted: assistantPersistedToServer,
         scopeSignal: servicePromptSnapshot?.scopeSignal,
         scopeInvalidatedSignal: servicePromptSnapshot?.scopeInvalidatedSignal,
         requestScope: servicePromptSnapshot?.requestScope
-      })
+      }, documentViewIsCurrent)
       throwIfServicePromptScopeInvalidated(servicePromptSnapshot)
 
       setIsProcessing(false)
@@ -3211,6 +3237,9 @@ export const useChatActions = ({
       const errorSave = await saveMessageOnError({
         e,
         conversationId: activeChatId,
+        ...(historyDocumentId && activeChatId ? { historyServerChatId: activeChatId } : {}),
+        setHistory,
+        setHistoryId,
         botMessage: assistantContent,
         history: historyBase,
         historyId: historyIdOverride ?? historyId,
@@ -3291,26 +3320,6 @@ export const useChatActions = ({
     [t]
   )
 
-  const getMessageModelKey = (message: Message) =>
-    message.modelId || message.modelName || message.name
-
-  const shouldIncludeMessageForModel = (
-    message: Message,
-    modelId: string
-  ) => {
-    if (!message.isBot) {
-      if (message.messageType === "compare:perModelUser") {
-        return message.modelId === modelId
-      }
-      return true
-    }
-    const messageModel = getMessageModelKey(message)
-    if (!messageModel) {
-      return false
-    }
-    return messageModel === modelId
-  }
-
   const buildHistoryFromMessages = React.useCallback(
     (items: Message[]): ChatHistory =>
       excludeLocalRagDiagnostics(items)
@@ -3334,27 +3343,6 @@ export const useChatActions = ({
     buildHistoryFromMessages(
       items.filter((message) => shouldIncludeMessageForModel(message, modelId))
     )
-
-  const getCompareUserMessageId = (items: Message[], clusterId: string) =>
-    items.find(
-      (message) =>
-        message.messageType === "compare:user" &&
-        message.clusterId === clusterId
-    )?.id || null
-
-  const getLastThreadMessageId = (
-    items: Message[],
-    clusterId: string,
-    modelId: string
-  ) => {
-    const threadMessages = items.filter(
-      (message) =>
-        message.clusterId === clusterId &&
-        getMessageModelKey(message) === modelId
-    )
-    const lastThreadMessage = threadMessages[threadMessages.length - 1]
-    return lastThreadMessage?.id || getCompareUserMessageId(items, clusterId)
-  }
 
   const refreshHistoryFromMessages = React.useCallback(() => {
     const next = buildHistoryFromMessages(messagesRef.current)
@@ -3492,7 +3480,9 @@ export const useChatActions = ({
     historyServerExistingInput,
     historyRecoveryRetry,
     historyRecoveryRetryIsCurrent,
-    historyRecoveryRetrySystemPrompts
+    historyRecoveryRetrySystemPrompts,
+    documentHistorySelection,
+    documentLocalOnly = documentBrowserOnly
   }: {
     message: string
     image: string
@@ -3538,7 +3528,11 @@ export const useChatActions = ({
     historyRecoveryRetry?: boolean
     historyRecoveryRetryIsCurrent?: () => boolean
     historyRecoveryRetrySystemPrompts?: string[]
+    documentHistorySelection?: import("@/hooks/chat/useHistorySelection").HistorySelectionController
+    documentLocalOnly?: boolean
   }, beginResponse: () => boolean): Promise<ChatSubmitResult> => {
+    const historySelection = documentHistorySelection ?? defaultHistorySelection
+    const documentTurn = Boolean(historyDocumentId && capturePrivateScene)
     const greetingSeed = requestedGreetingSeed ? structuredClone(requestedGreetingSeed) : undefined
     if (historyServerExistingInput && (compareModeActive || temporaryChat || isRegenerate || isContinue ||
         !historyServerExistingInput.isCurrent())) return chatSubmitFailed("unsupported_history_action_context")
@@ -3693,7 +3687,7 @@ export const useChatActions = ({
       requestOverrides,
       ragMediaIds
     })
-    const turnFileRetrievalEnabled = resolveTurnFileRetrievalEnabled({
+    const turnFileRetrievalEnabled = !documentTurn && resolveTurnFileRetrievalEnabled({
       requestOverrides,
       fileRetrievalEnabled
     })
@@ -3734,8 +3728,8 @@ export const useChatActions = ({
         routingSelectedAssistant
       )
     })
-    const turnResolvedSendMode =
-      getAssistantSelectionMode(routingSelectedAssistant) === "tracked" &&
+    const turnResolvedSendMode = documentTurn ? "plain"
+      : getAssistantSelectionMode(routingSelectedAssistant) === "tracked" &&
       routingSelectedAssistant?.kind === "persona"
         ? "tracked_persona"
         : getAssistantSelectionMode(routingSelectedAssistant) === "tracked" &&
@@ -3800,6 +3794,9 @@ export const useChatActions = ({
       currentHistorySelection?.owner?.kind === "local" &&
       !isRegenerate && !isContinue && !compareModeActive && !turnUsesImageMode &&
       (turnResolvedSendMode === "plain" || turnResolvedSendMode === "overlay")
+    const selectedDocumentTurn = selectedHistoryTurn && currentHistorySelection?.owner?.kind === "native" &&
+      currentHistorySelection.owner.documentTarget && !isRegenerate && !isContinue && !compareModeActive &&
+      !turnContextFiles.length && !docs?.length && !documentContext?.length
 
     if ((historyEditBoundary || historyRegenerateBoundary) && (
       historySelection?.getCurrent().owner?.kind !== "local" || temporaryChat ||
@@ -3895,7 +3892,7 @@ export const useChatActions = ({
           (isRegenerate && !historyRegenerate) ||
           isContinue ||
           turnUsesImageMode ||
-          (!selectedLocalContextTurn && (turnContextFiles.length ||
+          (!selectedLocalContextTurn && !selectedDocumentTurn && (turnContextFiles.length ||
             docs?.length || documentContext?.length || turnShouldUseRag)))
       ) {
         throw new Error("unsupported_history_action_context")
@@ -3999,6 +3996,9 @@ export const useChatActions = ({
         actorSceneSend,
         {
           ...(requestOverrides ?? {}),
+          // A first document send can bind a native chat before React rerenders.
+          ...(documentHistorySelection && serverChatIdOverride
+            ? { serverChatId: serverChatIdOverride, historyId: null } : {}),
           ...(!historySelection && !temporaryChat && !compareModeActive && (needsSavedNormalScope || turnResolvedSendMode === "tracked_persona" || (turnShouldUseRag && scope?.type === "workspace")) && !Object.prototype.hasOwnProperty.call(requestOverrides ?? {}, "historyId")
             ? { historyId: historyIdOverride ?? historyId } : {}),
           ragMediaIds: turnRagMediaIds,
@@ -4201,7 +4201,7 @@ export const useChatActions = ({
         return toChatSubmitResult(imageResult)
       }
       const alternateHistoryParams = historySelection && !temporaryChat && !isRegenerate && !compareModeActive &&
-        (selectedLocalContextTurn || (!selectedHistoryTurn && !chatModeParams.historyId && !chatModeParams.serverChatId &&
+        (selectedLocalContextTurn || selectedDocumentTurn || (!selectedHistoryTurn && !chatModeParams.historyId && !chatModeParams.serverChatId &&
           normalHistoryPreparation.sourceDraft?.kind === "fresh")) ? {
           surface: "playground" as const,
           historyPreparation: normalHistoryPreparation,
@@ -4255,7 +4255,7 @@ export const useChatActions = ({
       }
 
       if (turnShouldUseRag) {
-        const workspaceServerChat = alternateHistoryParams.historySelection
+        const workspaceServerChat = alternateHistoryParams.historySelection || documentLocalOnly
           ? { chatId: null, historyId: chatModeParams.historyId, sceneSend: actorSceneSend, viewIsCurrent: undefined }
           : await ensureWorkspaceServerChatForTurn({
           message,
@@ -4268,7 +4268,8 @@ export const useChatActions = ({
           ...chatModeParamsWithRegen,
           ...alternateHistoryParams,
           actorSceneSend: workspaceServerChat.sceneSend,
-          servicePromptSnapshot: turnServicePromptSnapshot
+          servicePromptSnapshot: turnServicePromptSnapshot,
+          ...(documentLocalOnly || (historyDocumentId && !chatModeParams.serverChatId) ? { saveToDb: false } : {})
         }
         const scopedRagModeParams = workspaceServerChat.chatId
           ? {
@@ -4532,7 +4533,12 @@ export const useChatActions = ({
               messageSteering: messageSteeringForTurn,
               serverChatIdOverride,
               servicePromptSnapshot: turnServicePromptSnapshot,
-              onResponseDispatch: markSteeringApplied
+              onResponseDispatch: markSteeringApplied,
+              ...(historyDocumentId ? {
+                view: servicePromptChatModeParams,
+                documentViewIsCurrent: () => commandSessionIsCurrent() &&
+                  actorSceneSend.scene.target.account?.isCurrent() === true
+              } : {})
             })
             return toChatSubmitResult(characterResult)
           }
@@ -4555,7 +4561,7 @@ export const useChatActions = ({
                     effectiveAssistantState.systemPromptSnapshot ?? undefined
                 }
               : servicePromptChatModeParams
-          const workspaceServerChat = normalHistorySelection
+          const workspaceServerChat = normalHistorySelection || documentLocalOnly
             ? { chatId: null, historyId: chatModeParams.historyId, sceneSend: actorSceneSend, viewIsCurrent: undefined }
             : await ensureWorkspaceServerChatForTurn({
                 message,
@@ -4565,7 +4571,10 @@ export const useChatActions = ({
                 allowGlobal: true
               })
           sdkViewIsCurrent = workspaceServerChat.viewIsCurrent
-          const normalParamsWithSdkScene = { ...normalModeParams, actorSceneSend: workspaceServerChat.sceneSend }
+          const normalParamsWithSdkScene = {
+            ...normalModeParams, actorSceneSend: workspaceServerChat.sceneSend,
+            ...(documentLocalOnly ? { saveToDb: false } : {})
+          }
           const scopedNormalModeParams = workspaceServerChat.chatId
             ? {
                 ...normalParamsWithSdkScene,

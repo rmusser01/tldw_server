@@ -7,34 +7,43 @@ import contextlib
 import os
 from collections.abc import AsyncGenerator
 
-from fastapi import APIRouter, Depends, Header, HTTPException, Path, Query, status
+from fastapi import APIRouter, Depends, Header, HTTPException, Path, Query, Request, status
 from fastapi.responses import StreamingResponse
 from loguru import logger
 
-from tldw_Server_API.app.api.v1.API_Deps.Collections_DB_Deps import get_collections_db_for_user
+import tldw_Server_API.app.core.Reminders.reminders_service as _reminders_service
+import tldw_Server_API.app.core.Streaming.streams as _streams
+import tldw_Server_API.app.services.reminders_scheduler as _reminders_scheduler
 from tldw_Server_API.app.api.v1.API_Deps.auth_deps import RequirePermission, rbac_rate_limit
-from tldw_Server_API.app.api.v1.utils.pagination import build_offset_pagination_meta
+from tldw_Server_API.app.api.v1.API_Deps.Collections_DB_Deps import get_collections_db_for_user
 from tldw_Server_API.app.api.v1.schemas.reminders_schemas import (
     NotificationCancelSnoozeResponse,
     NotificationDismissResponse,
+    NotificationKind,
     NotificationPreferencesResponse,
     NotificationPreferencesUpdateRequest,
     NotificationResponse,
     NotificationsListResponse,
     NotificationsMarkReadRequest,
     NotificationsMarkReadResponse,
-    NotificationsUnreadCountResponse,
     NotificationSnoozeRequest,
     NotificationSnoozeResponse,
+    NotificationsUnreadCountResponse,
 )
+from tldw_Server_API.app.api.v1.utils.pagination import build_offset_pagination_meta
+from tldw_Server_API.app.core.AuthNZ import interactive_session
 from tldw_Server_API.app.core.AuthNZ.permissions import NOTIFICATIONS_CONTROL, NOTIFICATIONS_READ
+from tldw_Server_API.app.core.AuthNZ.principal_model import AuthPrincipal
+from tldw_Server_API.app.core.AuthNZ.sign_in_alert import (
+    NEW_SIGN_IN_KIND,
+    caller_may_silence,
+    new_sign_in_protected_http_exception,
+    split_silenceable,
+)
 from tldw_Server_API.app.core.DB_Management.Collections_DB import CollectionsDatabase, UserNotificationRow
 from tldw_Server_API.app.core.Reminders.reminders_service import (
     NotificationSnoozeMatch,
 )
-import tldw_Server_API.app.core.Reminders.reminders_service as _reminders_service
-import tldw_Server_API.app.core.Streaming.streams as _streams
-import tldw_Server_API.app.services.reminders_scheduler as _reminders_scheduler
 
 router = APIRouter(prefix="/notifications", tags=["notifications"])
 
@@ -149,6 +158,15 @@ def _notification_stream_payload(row: UserNotificationRow) -> dict:
     }
 
 
+async def _require_may_silence(request: Request, principal: AuthPrincipal, db: CollectionsDatabase, notification_id: int) -> None:
+    """403 unless the caller may silence this notification (only new-sign-in alerts are restricted)."""
+    alerts = db.list_user_notifications_of_kind(NEW_SIGN_IN_KIND, [notification_id])
+    if alerts:
+        caller = await interactive_session.resolve_current_session_id(request, principal)
+        if not caller_may_silence(alerts[0], caller):
+            raise new_sign_in_protected_http_exception()
+
+
 @router.get(
     "",
     response_model=NotificationsListResponse,
@@ -159,6 +177,7 @@ async def list_notifications(
     offset: int = Query(0, ge=0),
     include_archived: bool = Query(False),
     only_snoozed: bool = Query(False),
+    kind: NotificationKind | None = Query(None),
     db: CollectionsDatabase = Depends(get_collections_db_for_user),
     _principal=Depends(RequirePermission(NOTIFICATIONS_READ)),  # noqa: B008
 ) -> NotificationsListResponse:
@@ -171,8 +190,8 @@ async def list_notifications(
     if only_snoozed:
         rows, snooze_matches, total = service.list_snoozed_notifications(limit=limit, offset=offset)
     else:
-        rows = db.list_user_notifications(include_archived=include_archived, limit=limit, offset=offset)
-        total = db.count_user_notifications(include_archived=include_archived)
+        rows = db.list_user_notifications(include_archived=include_archived, limit=limit, offset=offset, kind=kind)
+        total = db.count_user_notifications(include_archived=include_archived, kind=kind)
         if include_archived and rows:
             snooze_matches = service.list_notification_snoozes(notifications=rows)
     pagination = build_offset_pagination_meta(total=total, limit=limit, offset=offset, count=len(rows))
@@ -212,13 +231,24 @@ async def unread_count(
 )
 async def mark_read(
     payload: NotificationsMarkReadRequest,
+    request: Request,
     db: CollectionsDatabase = Depends(get_collections_db_for_user),
-    _principal=Depends(RequirePermission(NOTIFICATIONS_CONTROL)),  # noqa: B008
+    principal: AuthPrincipal = Depends(RequirePermission(NOTIFICATIONS_CONTROL)),  # noqa: B008
 ) -> NotificationsMarkReadResponse:
-    """Mark one or more notifications as read."""
+    """Mark one or more notifications as read (a new-sign-in alert only from an older browser session)."""
 
-    updated = db.mark_user_notifications_read(payload.ids)
-    return NotificationsMarkReadResponse(updated=updated)
+    ids = list(payload.ids)
+    refused: list[int] = []
+    alerts = db.list_user_notifications_of_kind(NEW_SIGN_IN_KIND, ids)
+    if alerts:
+        caller = await interactive_session.resolve_current_session_id(request, principal)
+        _allowed, refused = split_silenceable(alerts, caller)
+        if refused:
+            blocked = set(refused)
+            ids = [i for i in ids if i not in blocked]
+        if not ids:
+            raise new_sign_in_protected_http_exception()
+    return NotificationsMarkReadResponse(updated=db.mark_user_notifications_read(ids), refused_ids=refused)
 
 
 @router.post(
@@ -227,12 +257,14 @@ async def mark_read(
     dependencies=[Depends(rbac_rate_limit("notifications.control"))],
 )
 async def dismiss_notification(
+    request: Request,
     notification_id: int = Path(..., ge=1),
     db: CollectionsDatabase = Depends(get_collections_db_for_user),
-    _principal=Depends(RequirePermission(NOTIFICATIONS_CONTROL)),  # noqa: B008
+    principal: AuthPrincipal = Depends(RequirePermission(NOTIFICATIONS_CONTROL)),  # noqa: B008
 ) -> NotificationDismissResponse:
     """Dismiss a notification from the active inbox view."""
 
+    await _require_may_silence(request, principal, db, notification_id)
     return NotificationDismissResponse(dismissed=db.dismiss_user_notification(notification_id))
 
 
@@ -243,12 +275,14 @@ async def dismiss_notification(
 )
 async def snooze_notification(
     payload: NotificationSnoozeRequest,
+    request: Request,
     notification_id: int = Path(..., ge=1),
     db: CollectionsDatabase = Depends(get_collections_db_for_user),
-    _principal=Depends(RequirePermission(NOTIFICATIONS_CONTROL)),  # noqa: B008
+    principal: AuthPrincipal = Depends(RequirePermission(NOTIFICATIONS_CONTROL)),  # noqa: B008
 ) -> NotificationSnoozeResponse:
     """Create a one-time reminder derived from an existing notification."""
 
+    await _require_may_silence(request, principal, db, notification_id)
     service = _reminders_service.RemindersService(user_id=db.user_id, collections_db=db)
     try:
         task = service.snooze_notification(notification_id=notification_id, minutes=payload.minutes)
@@ -271,7 +305,7 @@ async def snooze_notification(
 async def cancel_notification_snooze(
     notification_id: int = Path(..., ge=1),
     db: CollectionsDatabase = Depends(get_collections_db_for_user),
-    _principal=Depends(RequirePermission(NOTIFICATIONS_CONTROL)),  # noqa: B008
+    _principal: AuthPrincipal = Depends(RequirePermission(NOTIFICATIONS_CONTROL)),  # noqa: B008
 ) -> NotificationCancelSnoozeResponse:
     """Cancel any active snooze reminder derived from an existing notification."""
 
@@ -319,7 +353,7 @@ async def get_preferences(
 async def patch_preferences(
     payload: NotificationPreferencesUpdateRequest,
     db: CollectionsDatabase = Depends(get_collections_db_for_user),
-    _principal=Depends(RequirePermission(NOTIFICATIONS_CONTROL)),  # noqa: B008
+    _principal: AuthPrincipal = Depends(RequirePermission(NOTIFICATIONS_CONTROL)),  # noqa: B008
 ) -> NotificationPreferencesResponse:
     """Update notification preference flags for the current user."""
 

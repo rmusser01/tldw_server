@@ -14,6 +14,7 @@ import { bgRequest, bgStream, bgUpload } from '@/services/background-proxy'
 import { buildQuery } from '../client-utils'
 import { createJsonResponseLike } from '../json-response-like'
 import { appendPathQuery } from '../path-utils'
+import { documentChatQuery, type DocumentChatTarget } from "./media"
 import { captureChatRequestDebugSnapshot } from '../chat-request-debug'
 import type { TldwApiClientCore } from '../TldwApiClient'
 import type { ChatScope } from '@/types/chat-scope'
@@ -363,6 +364,7 @@ export const chatRagMethods = {
     return {
       ...readRoleplayResumeMetadata(input),
       id: String(input?.id ?? ""),
+      ...(typeof input?.document_chat_record === "string" ? { document_chat_record: input.document_chat_record } : {}),
       title: String(input?.title || ""),
       created_at,
       updated_at: updated_at ? String(updated_at) : null,
@@ -784,6 +786,7 @@ export const chatRagMethods = {
       seedFirstMessage?: boolean
       greetingStrategy?: "default" | "alternate_random" | "alternate_index"
       alternateIndex?: number
+      documentTarget?: DocumentChatTarget
     }
   ): Promise<ServerChatSummary> {
     if (options?.alternateIndex != null &&
@@ -794,7 +797,8 @@ export const chatRagMethods = {
     const query = buildQuery({
       seed_first_message: options?.seedFirstMessage,
       greeting_strategy: options?.greetingStrategy,
-      alternate_index: options?.alternateIndex
+      alternate_index: options?.alternateIndex,
+      ...documentChatQuery(options?.documentTarget)
     })
     const res = await bgRequest<any>({
       path: appendPathQuery("/api/v1/chats/", query),
@@ -884,13 +888,13 @@ export const chatRagMethods = {
   async getChat(
     this: TldwApiClientCore,
     chat_id: string | number,
-    options?: { scope?: ChatScope; requiredMetadata?: readonly string[]; requireHistoryVersion?: boolean; requireRoleplayResume?: boolean } & ScopedRequestOptions
+    options?: { scope?: ChatScope; requiredMetadata?: readonly string[]; requireHistoryVersion?: boolean; requireRoleplayResume?: boolean; documentTarget?: DocumentChatTarget } & ScopedRequestOptions
   ): Promise<ServerChatSummary> {
     const scopeFields = requestScopeFields(options?.requestScope)
     const cid = String(chat_id)
     const requiredMetadata = [...(options?.requiredMetadata ?? [])]
     options?.signal?.throwIfAborted()
-    const query = buildQuery(toChatScopeParams(options?.scope))
+    const query = buildQuery({ ...toChatScopeParams(options?.scope), ...documentChatQuery(options?.documentTarget) })
     const res = await bgRequest<any>({
       ...scopeFields,
       ...(options?.signal ? { abortSignal: options.signal } : {}),
@@ -1457,6 +1461,7 @@ export const chatRagMethods = {
       signal?: AbortSignal
       requestScope: ServicePromptRequestScope
       includeNativeCompletion?: boolean
+      documentTarget?: DocumentChatTarget
     }
   ): Promise<unknown> {
     const scoped = requestScopeFields(options.requestScope)
@@ -1465,6 +1470,7 @@ export const chatRagMethods = {
         `/api/v1/chat/conversations/${encodeURIComponent(chatId)}/history/selection`,
         buildQuery({
           ...toChatScopeParams(options.scope),
+          ...documentChatQuery(options.documentTarget),
           ...(options.includeNativeCompletion === true
             ? { include_native_completion: true, include_reasoning_history_support: true }
             : {})
@@ -1506,10 +1512,11 @@ export const chatRagMethods = {
       scope?: ChatScope
       signal?: AbortSignal
       requestScope?: ServicePromptRequestScope
+      documentTarget?: DocumentChatTarget
     }
   ): Promise<ServerChatMessage> {
     const cid = String(chat_id)
-    const query = buildQuery(toChatScopeParams(options?.scope))
+    const query = buildQuery({ ...toChatScopeParams(options?.scope), ...documentChatQuery(options?.documentTarget) })
     const scopeFields = requestScopeFields(options?.requestScope)
     const selection = payload.tldw_history_selection_v1
     const submittedSelection =

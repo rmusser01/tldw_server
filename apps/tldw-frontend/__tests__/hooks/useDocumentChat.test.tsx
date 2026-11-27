@@ -1,8 +1,18 @@
 import { describe, it, expect, beforeEach, vi } from "vitest"
-import { renderHook, act } from "@testing-library/react"
+import { renderHook, act, waitFor } from "@testing-library/react"
 import { DEFAULT_RAG_SETTINGS } from "@/services/rag/unified-rag"
 import { useStoreMessageOption } from "@/store/option"
+import type { QuickIngestOperation } from "@/services/tldw/quick-ingest-authority"
 import { useDocumentChat } from "@/hooks/document-workspace/useDocumentChat"
+
+const operation: QuickIngestOperation = {
+  authorityKey: "verified-account",
+  authorityRevision: 1,
+  requestScope: { config: { serverUrl: "http://chat.test", authMode: "multi-user" }, userId: "alice" },
+  signal: new AbortController().signal,
+  isCurrent: () => true,
+  assertCurrent: () => {}
+}
 
 let connectionState = {
   state: { isConnected: true, mode: "normal" }
@@ -11,6 +21,18 @@ let connectionState = {
 vi.mock("@/store/connection", () => ({
   useConnectionStore: (selector: (state: typeof connectionState) => unknown) =>
     selector(connectionState)
+}))
+vi.mock("@/services/service-prompts", () => ({
+  loadServicePromptSnapshot: async () => ({
+    requestScope: operation.requestScope,
+    scopeSignal: operation.signal,
+    scopeInvalidatedSignal: operation.signal,
+    release: () => {}
+  })
+}))
+vi.mock("@/db/dexie/helpers", async (original) => ({
+  ...await original<typeof import("@/db/dexie/helpers")>(),
+  getAllHistoriesByDocId: async () => []
 }))
 
 const resetChatStore = (
@@ -46,67 +68,40 @@ describe("useDocumentChat", () => {
     resetChatStore()
   })
 
-  it("swaps chat sessions per document and restores when revisiting", () => {
-    const { rerender } = renderHook(
-      ({ mediaId }) => useDocumentChat(mediaId),
+  it("swaps chat drafts per document and restores when revisiting", async () => {
+    const { rerender, result } = renderHook(
+      ({ mediaId }) => useDocumentChat(mediaId, operation),
       { initialProps: { mediaId: 1 } }
     )
 
     expect(useStoreMessageOption.getState().ragMediaIds).toEqual([1])
 
-    const doc1Message = {
-      isBot: false,
-      name: "You",
-      message: "Doc 1 message",
-      sources: []
-    }
-
-    act(() => {
-      useStoreMessageOption.setState({
-        messages: [doc1Message],
-        history: [{ role: "user", content: "Doc 1 message" }],
-        historyId: "doc-1",
-        isFirstMessage: false
-      })
-    })
+    await waitFor(() => expect(result.current.isChatReady).toBe(true))
+    act(() => result.current.setInputValue("Doc 1 draft"))
 
     act(() => {
       rerender({ mediaId: 2 })
     })
 
     expect(useStoreMessageOption.getState().ragMediaIds).toEqual([2])
-    expect(useStoreMessageOption.getState().messages).toEqual([])
-
-    const doc2Message = {
-      isBot: false,
-      name: "You",
-      message: "Doc 2 message",
-      sources: []
-    }
-
-    act(() => {
-      useStoreMessageOption.setState({
-        messages: [doc2Message],
-        history: [{ role: "user", content: "Doc 2 message" }],
-        historyId: "doc-2",
-        isFirstMessage: false
-      })
-    })
+    await waitFor(() => expect(result.current.isChatReady).toBe(true))
+    expect(result.current.inputValue).toBe("")
+    act(() => result.current.setInputValue("Doc 2 draft"))
 
     act(() => {
       rerender({ mediaId: 1 })
     })
 
-    expect(useStoreMessageOption.getState().messages).toEqual([doc1Message])
-    expect(useStoreMessageOption.getState().historyId).toBe("doc-1")
+    expect(result.current.inputValue).toBe("Doc 1 draft")
   })
 
-  it("toggles RAG per document and restores ragSources on disable", () => {
+  it("toggles RAG per document and restores ragSources on disable", async () => {
     const baselineSources = ["media_db", "notes"]
     resetChatStore({ ragSources: baselineSources })
 
-    const { result } = renderHook(() => useDocumentChat(1))
+    const { result } = renderHook(() => useDocumentChat(1, operation))
 
+    await waitFor(() => expect(result.current.isChatReady).toBe(true))
     expect(result.current.ragEnabled).toBe(false)
 
     act(() => {
@@ -146,7 +141,7 @@ describe("useDocumentChat", () => {
       ragSources: baselineRagSources
     })
 
-    const { unmount } = renderHook(() => useDocumentChat(1))
+    const { unmount } = renderHook(() => useDocumentChat(1, operation))
 
     act(() => {
       useStoreMessageOption.setState({

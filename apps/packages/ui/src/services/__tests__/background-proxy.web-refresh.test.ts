@@ -487,6 +487,24 @@ describe("background proxy web token refresh", () => {
     expect(mocks.store.tldwConfig).toEqual(config)
   })
 
+  it("records session_replaced when the web refresh returns it", async () => {
+    localStorage.removeItem("tldw:session-replaced")
+    mocks.store.tldwConfig = {
+      serverUrl: "https://api.example.com", authMode: "multi-user" as const,
+      accessToken: jwtForUser(42), refreshToken: "replaced-refresh"
+    }
+    vi.stubGlobal("fetch", vi.fn(async (input: RequestInfo | URL) =>
+      String(input).endsWith("/api/v1/auth/refresh")
+        ? Response.json({ detail: { code: "session_replaced", message: "x" } }, { status: 401 })
+        : new Response("unauthorized", { status: 401 })))
+    const { bgRequest } = await importProxy()
+    await expect(bgRequest({ path: "/api/v1/notes/private-note", method: "GET" }))
+      .rejects.toMatchObject({ status: 401 })
+    const { hasSessionReplacedNotice, clearSessionReplacedNotice } = await import("@/services/tldw/session-identity")
+    expect(hasSessionReplacedNotice()).toBe(true)
+    clearSessionReplacedNotice()
+  })
+
   it("keeps cancellation during refresh out of the backend-unreachable modal", async () => {
     let started!: () => void
     let release!: () => void

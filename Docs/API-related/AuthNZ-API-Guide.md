@@ -241,10 +241,17 @@ Authorization: Bearer your-jwt-token
     "user_agent": "Mozilla/5.0...",
     "created_at": "2024-01-15T08:00:00Z",
     "last_activity": "2024-01-15T10:00:00Z",
-    "expires_at": "2024-01-15T12:00:00Z"
+    "expires_at": "2024-01-15T12:00:00Z",
+    "device_label": "Firefox on macOS",
+    "is_current": true,
+    "same_install": true
   }
 ]
 ```
+
+- `is_current` is true only for the session making the request. The server derives it from the verified credential (the `session_id` claim of the access token, or the validated single-user cookie) and checks that the session is one of the caller's live sessions. A client cannot claim it.
+- `device_label` is a short browser and OS label computed on read from the stored user agent. It is client-reported and not a proof of identity.
+- `same_install` is true when a session was signed in from the same browser install (the `X-TLDW-Device-Id` header) as the caller's. The install id itself is never returned.
 
 #### Revoke Session
 ```http
@@ -265,8 +272,10 @@ Authorization: Bearer your-jwt-token
 
 #### Revoke All Sessions
 ```http
-POST /api/v1/users/sessions/revoke-all
+POST /api/v1/users/sessions/revoke-all?keep_current=true
 ```
+
+`keep_current=true` keeps the caller's own session and ends the others. The count in the response covers live sessions only; sessions that were already revoked or expired are neither counted nor changed (their `revoke_reason`, for example `session_cap`, is kept).
 
 **Headers:**
 ```http
@@ -280,6 +289,48 @@ Authorization: Bearer your-jwt-token
   "details": {"sessions_revoked": 2}
 }
 ```
+
+#### Interactive session required
+
+Revoke one session, revoke all sessions, and `POST /auth/logout` with `all_devices: true` (or with a token that carries no `session_id`) need an interactive browser session. A browser session is an access token that carries `session_id`, or a single-user cookie session. API keys, virtual keys, service tokens and impersonation tokens are refused with:
+
+```json
+{"detail": {"code": "interactive_session_required", "message": "..."}}
+```
+(HTTP 403.) Before this change an API key sent as a Bearer token to `logout` could sign every session out; it can no longer. Listing sessions is not restricted. If the session store cannot be read, the endpoints answer 503 rather than treating the caller as a non-browser credential.
+
+#### New sign-in alert
+
+When a user signs in while another live session exists, or while the sign-in evicted a session through the session cap, the server writes a notification to that user's inbox, off the request path and best effort (a failure never fails the sign-in). It is not written when the same browser install signs in again, and a user's first sign-in with no other session gets none.
+
+| Field | Value |
+| --- | --- |
+| `kind` | `new_sign_in` |
+| `title` | `New sign-in to your account` |
+| `severity` | `warning` |
+| `link_url` | `/settings/sessions` |
+| `dedupe_key` | `new_sign_in:<hash>`, bucketed in 10-minute windows (a sign-in storm is one alert; the key is a hash so the install id never leaves the server) |
+| `source_job_id` | the id of the new session. The server uses it for ordering; clients also match it against the sessions list to hide the alert on the browser that signed in |
+
+The message names the device label "as the browser reported it", the IP the server saw and the time. It carries no token, cookie or install id. `new_sign_in` notifications are pruned after 30 days.
+
+Who may silence it (mark read, dismiss or snooze):
+
+- Only an interactive session older than the alert (a lower `sessions.id` than the alert's `source_job_id`). A newer session cannot hide the alert of its own sign-in.
+- After 24 hours any interactive browser session may, including the one the alert is about. An owner who is signed out by the intruder and does not sign in again for a day may never see the alert.
+- API keys and other non-browser credentials never may.
+
+Refusals: dismiss and snooze answer 403 `new_sign_in_protected`. `POST /notifications/mark-read` answers 200 with `refused_ids` listing the alerts it kept unread when other ids were allowed, and 403 `new_sign_in_protected` when every id was refused.
+
+`GET /notifications` accepts an optional `kind` filter (for example `?kind=new_sign_in`); the sign-in banner uses it so other notification kinds cannot bury the alert.
+
+#### Caveats
+
+- The IP in the alert and in the listing is the address the server saw. Behind the bundled Next.js proxy with no reverse proxy in front, that is the proxy's address, because Next's rewrite proxy cannot forward the browser's IP. A reverse proxy that sets `X-Forwarded-For` is honoured only when `AUTH_TRUST_X_FORWARDED_FOR=true` and the physical peer is listed in `AUTH_TRUSTED_PROXY_IPS`.
+- Single-user mode: the protection is the alert plus the session cap, not isolation from a holder of the API key. `POST /auth/single-user/session` mints a cookie session for anyone with the key, and that session counts as interactive. "Sign out all other sessions" ends other browsers, not a script that holds the key. The remedy is to rotate the API key.
+- Sign-ins without an install id (scripts, OIDC) are grouped for the 10-minute dedupe window by IP address and user agent. A repeat from the same address with the same user agent can therefore fold into an alert the owner already dismissed, and write no new one.
+- Cancelling a snooze ("remind me later") is not covered by the silence rule. Snoozing dismisses the alert, and only an allowed session can snooze, so the owner has already seen it. The snooze's reminder task can be changed or deleted with any credential through `PATCH` and `DELETE /api/v1/tasks/{task_id}`, and when it fires it is an ordinary `reminder_due` notification that anyone may dismiss. Gating cancel-snooze alone would close nothing; protecting "remind me later" would mean gating reminder tasks derived from an alert.
+- PostgreSQL session ids are not commit-ordered, so two sign-ins racing within milliseconds can invert by one id in the silence rule.
 
 ## Request Examples
 

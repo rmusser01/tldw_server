@@ -113,7 +113,7 @@ export const isServicePromptRequestPath = (
   )) return true
   if (requestMethod === "POST" && [
     "/api/v1/research-workspace/artifacts/generate", "/api/v1/quizzes/generate",
-    "/api/v1/slides/generate/from-media", "/api/v1/audio/speech",
+    "/api/v1/slides/generate/from-media", "/api/v1/audio/speech", "/api/v1/translate",
   ].includes(pathname)) return true
   if (/^\/api\/v1\/workspaces\/[^/]+\/outputs$/.test(pathname)) return requestMethod === "POST"
   if (/^\/api\/v1\/workspaces\/[^/]+\/outputs\/[A-Za-z0-9_-]+$/.test(pathname)) return requestMethod === "GET"
@@ -123,6 +123,9 @@ export const isServicePromptRequestPath = (
   const tablePath = /^\/api\/v1\/data-tables\/[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}(\/regenerate)?$/i.exec(pathname)
   if (tablePath) return requestMethod === (tablePath[1] ? "POST" : "GET")
   if (/^\/api\/v1\/media\/[1-9][0-9]*\/progress$/.test(pathname)) return ["GET", "PUT", "DELETE"].includes(requestMethod)
+  const documentChatsPath = /^\/api\/v1\/media\/[1-9][0-9]*\/chat-conversations(\/[^/]+)?$/.exec(pathname)
+  if (documentChatsPath) return requestMethod === (documentChatsPath[1] ? "PUT" : "GET")
+  if (pathname === "/api/v1/chats/import" && requestMethod === "POST") return true
   const annotationsPath = /^\/api\/v1\/media\/[1-9][0-9]*\/annotations(?:\/(sync|[A-Za-z0-9_-]+))?$/.exec(pathname)
   if (annotationsPath) {
     if (!annotationsPath[1]) return ["GET", "POST"].includes(requestMethod)

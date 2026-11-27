@@ -203,6 +203,7 @@ R1-R8 are the controller's and binding. R9-R21 are the planner's. Each gives its
     - A run of whole statements of one block becomes `[async] def <name>(cst[, *args]) -> None` and is replaced by `[await] <ref>(cst[, *args])`.
     - `args` passes read-only names local to the enclosing block. These are the handler variables `e` (non-stream N10, streaming S8) and `he` (streaming S7), which cannot become `cst` attributes.
     - V1 still forbids `return`, `yield` and `nonlocal` in a span, and `break`/`continue` leaving it. A bare `raise` inside a moved handler span re-raises the handled exception, across suspensions too.
+    - **Correction (final review, 2026-11-25):** the last claim was wrong. When a task resumes a coroutine chain by throwing a failed future's exception into it, the outer coroutines' exception state is not pushed, so a moved span loses the handled exception after such an await and its own raises are re-chained at the new boundary. Tool rule V18 now refuses handler spans that contain an await.
 12. **R12, the entry split** (Tasks 5 and 9). The remaining body moves whole, `return`s included, into the orchestrator in the destination module. The executor becomes the R7 shim. This is .24's `entry_split`, generalised to write the entry into another module.
 13. **R13, destinations (Appendix B).**
     - **Non-stream:**
@@ -550,7 +551,7 @@ Task 3's pattern, applied to `execute_streaming_call`:
 
 ### Task 8: Streaming callbacks (PR H; R10, R13, AC1)
 
-**Lifts:** Appendix B's S10-S14 rows (manifest `c25h_stream_callbacks.py`), callee-first, depth 2 included.
+**Lifts:** Appendix B's S10-S14 rows (manifest `c25h_stream_callbacks.py`), callee-first, depth 2 included. After #3538 (R14) the lift shipped as `c25h1_stream_moonshot_state.py` (rewrite-only) + `c25h2_stream_callbacks.py`.
 - To `moderation_pipeline`: `_apply_stream_output_policies` and `_out_transform`.
 - To `streaming_pipeline`: everything else.
 - `_finalize_stream` stays nested in `tracked_streaming_generator`.

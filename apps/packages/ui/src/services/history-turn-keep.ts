@@ -236,7 +236,8 @@ const keep = async (
     const generationInfo = native
       ? undefined
       : interruptionGenerationInfo(turn.outcome, turn.interruption_reason)
-    const reply: StoredMessage = turn.existing_selection && turn.settlement_payload
+    const reply: StoredMessage = (turn.existing_selection || (owner.kind === "native" && owner.documentTarget)) &&
+      turn.settlement_payload
       ? structuredClone(turn.settlement_payload)
       : {
           id: turn.assistant_id,

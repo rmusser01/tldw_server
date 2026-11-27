@@ -1,10 +1,44 @@
-# The admin web UI (admin-ui)
+# Standalone Admin Panel architecture
 
-This document describes the sysadmin console: its deliberately separate stack, the same-origin proxy that keeps tokens out of the browser, edge-middleware auth with local JWT verification, the triple-gated API-key login, deployment, and testing. It is a client of the API only — no database, no direct filesystem.
+The Admin Panel is the operator console in [`admin-ui/`](../../admin-ui/). Its Next.js App Router host runs on port 3001 by default and ships with its own build and dependency lockfile. The [end-user WebUI](./webui.md) has a separate set of `/admin/*` pages that use the WebUI connection and session. Both surfaces reach the same [FastAPI server](./server.md).
 
-## What it is (and is not)
+See the [system and container views](./c4.md) for the Admin Panel's place in tldw_server.
 
-A Next.js 16 (App Router) + React 19 + Radix + Tailwind 4 console on port **3001**, with its own `package.json` and `bun.lock` — deliberately **not** part of the `apps/` bun workspace and deliberately a different stack from the end-user WebUI (`apps/tldw-frontend`: Pages Router, React 18, antd, port 8080). Never cross-import between the two. The browser never talks to the backend directly: all privileged traffic goes through a same-origin server-side proxy (`/api/proxy/*`), enforced by CSP `connect-src 'self'`.
+## C4 level 3 — Admin Panel host components
+
+The boundary contains the Next.js server components. The Admin Panel browser app and FastAPI are supporting containers. Labeled arrows point from the requester to the component or container it calls. The dashed arrow is the backend validation path used when middleware needs a remote credential check.
+
+```mermaid
+flowchart TB
+    browser["Container · Admin Panel browser app<br/>React · operator pages and same-origin API client"]
+
+    subgraph host["Admin Panel host"]
+        middleware["Component · Page middleware<br/>Next.js · checks identity on protected page requests"]
+        pages["Component · Page delivery<br/>App Router · serves login and operator routes"]
+        session["Component · Session routes<br/>Route handlers · exchange credentials and manage cookies"]
+        proxy["Component · API proxy<br/>Route handler · forwards HTTP requests with credentials"]
+        health["Component · Health routes<br/>Route handlers · report liveness and readiness"]
+    end
+
+    api["Container · FastAPI server<br/>Python · authenticates and authorizes API requests"]
+
+    browser -->|"Requests protected pages (HTTP)"| middleware
+    middleware -->|"Allows authenticated navigation"| pages
+    browser -->|"Manages sessions (HTTP)"| session
+    browser -->|"Calls /api/proxy (HTTP)"| proxy
+    middleware -.->|"Checks identity via /users/me (HTTP)"| api
+    session -->|"Exchanges login credentials (HTTP)"| api
+    proxy -->|"Forwards with credentials (HTTP)"| api
+    health -->|"Probes backend readiness (HTTP)"| api
+```
+
+### Trace an admin request
+
+1. Start at [Admin Panel navigation](../../admin-ui/lib/navigation.ts) to find the page, or use [the browser API client](../../admin-ui/lib/api-client.ts) to find the request it sends. [PermissionGuard](../../admin-ui/components/PermissionGuard.tsx) uses effective permissions to control what the UI shows.
+2. A user list request to `/api/proxy/admin/users` reaches the [host proxy](../../admin-ui/app/api/proxy/%5B...path%5D/route.ts). The proxy attaches the credential server-side and forwards to `/api/v1/admin/users` under the default API version.
+3. The [FastAPI admin router](../../tldw_Server_API/app/api/v1/endpoints/admin/__init__.py) gates admission before the [user-list handler](../../tldw_Server_API/app/api/v1/endpoints/admin/admin_user.py) runs. The API enforces the role, permissions and scope required by each operation. The [admin router registry](../../tldw_Server_API/app/api/v1/router_groups/admin.py) also includes specialized operations across multiple route families, so begin with the exact API path when tracing Jobs or organization actions. [AuthNZ architecture](./authnz.md) explains the backend identity and authorization model.
+
+Protected page navigation goes through [middleware](../../admin-ui/middleware.ts). Login and API requests go straight to their respective route handlers. [Session routes](../../admin-ui/app/api/auth/) manage HttpOnly credential cookies, and the [server auth helper](../../admin-ui/lib/server-auth.ts) translates those cookies into the upstream authorization headers.
 
 ## Authoritative files
 
@@ -22,8 +56,8 @@ All paths under `admin-ui/` unless noted.
 | Rate limiting | `lib/rate-limiter.ts` | 10 req / 60 s per IP (requires `TRUST_PROXY_HEADERS` behind a proxy) |
 | Env/flags | `lib/env.ts`, `lib/admin-ui-flags.ts` | zod-validated `NEXT_PUBLIC_*` at build; the unsafe-local-tools gate for DSR/backup/monitoring mutations |
 | Build | `next.config.mjs` | standalone output (repo-root tracing); full CSP/HSTS headers |
-| Packaging | `Dockerfiles/Dockerfile.admin-ui`, `docker-compose.admin-ui.yml` | bun builder → node:20-slim runtime, non-root UID, healthcheck against `/api/health/ready`; starts only after the backend is healthy |
-| Backend counterpart | `tldw_Server_API/app/api/v1/endpoints/admin.py`, `router_groups/admin.py`, `endpoints/test_support/admin_e2e.py` | the `/api/v1/admin/*` surface (16 router specs) and the E2E test-support router (flag-gated) |
+| Packaging | `Dockerfiles/Dockerfile.admin-ui`, `Dockerfiles/docker-compose.admin-ui.yml` | bun builder → node:20-slim runtime, non-root UID, healthcheck against `/api/health/ready`; starts only after the backend is healthy |
+| Backend counterpart | `tldw_Server_API/app/api/v1/endpoints/admin/__init__.py`, `app/api/v1/router_groups/admin.py`, `app/api/v1/endpoints/test_support/admin_e2e.py` | admin router, related route families and the flag-gated E2E test-support router |
 
 ## Login (dataflow)
 
@@ -46,7 +80,7 @@ API-key login (single-user convenience) is **triple-gated**: refused if enterpri
 | Backend down via proxy | 504 (30 s timeout) / 502 (network); GET-only single retry |
 | Backend down at readiness | 503 (Docker healthcheck fails) |
 | Login rate limit | 429 + `Retry-After` |
-| Revoked token | Accepted up to ~30 s per instance (best-effort cache; logout proactively invalidates) |
+| Revoked token | Remote validation can cache a prior success for up to 30 s per instance. Locally verified JWTs can pass page middleware until expiry. FastAPI independently enforces API access. |
 | Backend `set-cookie` | Stripped — backend sessions never reach the browser |
 | Malformed/oversized tokens | Rejected pre-verification (length/charset caps) |
 
@@ -57,15 +91,15 @@ Build-time (baked into the client bundle; changes require a rebuild): `NEXT_PUBL
 ## Verified gotchas
 
 1. Two stacks, two lockfiles — admin-ui vs the `apps/` monorepo; also two Next versions and two React versions. Cross-imports are the classic breakage.
-2. The auth cache is per-instance and non-persistent — multi-replica deployments have per-pod caches and revoked tokens linger ≤30 s.
-3. Without `JWT_SECRET_KEY`, every protected page request becomes a backend probe — local verify is the fast path.
+2. Each instance keeps its own in-memory validation cache.
+3. Without `JWT_SECRET_KEY`, a cache miss for a protected page request requires a backend probe.
 4. The middleware matcher excludes `/api/*`; API routes enforce their own auth (the proxy reads cookies server-side).
 5. `ai-overview` and `invitations` pages exist but are missing from the README's feature list (minor drift).
-6. ADR-029 explicitly keeps admin-ui outside the PyPI static-bundle decision (its middleware/app-routes design needs a separate one).
+6. The proposed ADR-029 keeps admin-ui outside the PyPI static bundle (its middleware/app-routes design needs a separate one).
 
 ## Governing decisions and docs
 
-ADR-029 (`Docs/ADR/029-tldw-frontend-static-pypi-bundle.md` — admin-ui excluded), ADR-052 tangentially (MCP admin claims the console manages). Current references: `admin-ui/README.md`, `admin-ui/docs/{architecture,api-reference,deployment-guide,troubleshooting}.md`, feature guides, the living `Release_Checklist.md`. Tests: colocated Vitest (incl. axe a11y lane), Playwright smoke (stubbed), and real-backend E2E (two sequential projects: JWT and single-user, port-mapped against real backends, `--workers=1`).
+See [ADR-018](../ADR/018-resource-governance-endpoint-policy-and-route-map.md) for claim-first endpoint authorization and [ADR-017](../ADR/017-scoped-org-team-rbac-core-semantics.md) for scoped organization and team permissions. The proposed [ADR-029](../ADR/029-tldw-frontend-static-pypi-bundle.md) covers the end-user WebUI. Current references: `admin-ui/README.md`, `admin-ui/docs/{architecture,api-reference,deployment-guide,troubleshooting}.md`, feature guides, the living `Release_Checklist.md`. Tests: colocated Vitest (incl. axe a11y lane), Playwright smoke (stubbed), and real-backend E2E (two sequential projects: JWT and single-user, port-mapped against real backends, `--workers=1`).
 
 ## Related docs
 

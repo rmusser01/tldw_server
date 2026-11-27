@@ -17,13 +17,15 @@ The Chat module powers the `/api/v1/chat/completions` endpoint, orchestrating re
 | File / Folder | Purpose |
 | --- | --- |
 | `chat_orchestrator.py` | Orchestrates chat flows: canonical async `achat`, sync wrapper `chat`, plus provider helpers (`chat_api_call`, `chat_api_call_async`). |
-| `chat_service.py` | Compatibility facade and endpoint-facing coordinator for `/api/v1/chat/completions`. |
-| `completion_pipeline.py` | `ChatCompletionPipeline` coordinator for non-streaming and streaming execution paths. |
+| `chat_service.py` | Compatibility facade and endpoint-facing coordinator for `/api/v1/chat/completions`. Holds the kwargs shims `execute_streaming_call` and `_execute_non_stream_call_impl` and re-exports `build_context_and_messages`. |
+| `call_state.py` | `NonStreamCall` and `StreamCall`, the per-call state the pipeline stages share. |
+| `completion_pipeline.py` | `run_non_stream_call`, the non-streaming stage orchestrator, and its provider-call, failover and usage stages (the forwarding-only `ChatCompletionPipeline` was deleted, TASK-13950.25). |
 | `response_processor.py` | Non-streaming choice extraction, response content mutation, structured validation, usage estimates, and assistant-name injection. |
 | `moderation_pipeline.py` | Output self-monitoring, moderation, topic-monitoring scheduling, and moderation audit/review records. |
 | `persistence_service.py` | Assistant and tool-message persistence helpers. |
 | `tool_execution_service.py` | Local tool auto-execution eligibility checks and execution orchestration. |
-| `streaming_pipeline.py` | Streaming response assembly wrapper around the existing SSE handler. |
+| `streaming_pipeline.py` | `run_streaming_call`, the streaming stage orchestrator: queue bridge, save and usage callbacks, and the tracked SSE generator. |
+| `history_context.py` | `build_context_and_messages` and the history-projection helpers. |
 | `command_authorization.py` | Slash-command authorization decisions shared by dispatch and command listing. |
 | `chat_logging.py` | Safe summaries for prompt, content, tool, and exception logs. |
 | `chat_helpers.py` | Validation, character + conversation loading/creation, history assembly, ensuring default persona, etc. |
@@ -39,13 +41,15 @@ The Chat module powers the `/api/v1/chat/completions` endpoint, orchestrating re
 ---
 
 ## Completion Pipeline Ownership
-`chat_service.py` remains the compatibility facade for existing imports and endpoint wiring. New behavior should be added behind `ChatCompletionPipeline` or one of its focused services:
+`chat_service.py` remains the compatibility facade for existing imports and endpoint wiring. New behavior should be added behind `completion_pipeline.run_non_stream_call`, `streaming_pipeline.run_streaming_call` or one of the focused services:
 
 - `response_processor.py`: non-streaming choice extraction, response content mutation, structured validation, response usage estimates, and assistant-name injection.
 - `moderation_pipeline.py`: output self-monitoring, moderation, topic-monitoring scheduling, and moderation audit/review records.
 - `persistence_service.py`: assistant and tool-message persistence helpers.
 - `tool_execution_service.py`: local tool auto-execution eligibility checks and execution orchestration.
-- `streaming_pipeline.py`: streaming response assembly without changing SSE event shapes.
+- `streaming_pipeline.py`: `run_streaming_call` and its stages, without changing SSE event shapes.
+- `history_context.py`: `build_context_and_messages`.
+- `call_state.py`: the `NonStreamCall` / `StreamCall` state objects.
 - `command_authorization.py`: slash-command authorization decisions for dispatch and command listing.
 - `chat_logging.py`: safe summaries for prompt, content, tool, and exception logs.
 

@@ -18,6 +18,8 @@ export type HistoryInfo = {
   is_pinned?: boolean;
   createdAt: number;
   doc_id?: string;
+  document_media_uuid?: string;
+  document_chat_import?: import("./document-chat-import").DocumentChatImportReservation;
   last_used_prompt?: LastUsedModelType;
   model_id?: string;
   server_chat_id?: string;

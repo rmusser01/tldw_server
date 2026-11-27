@@ -507,7 +507,7 @@ async def verify(root: str | Path) -> dict[str, Any]:
     if user is None:
         raise FixtureVerificationError("destination account record is missing")
     profile = {"identity.email": str(user.get("email") or "")}
-    _require_equal(profile, expected["profile"], "destination profile")
+    _require_equal(profile, {"identity.email": DESTINATION_EMAIL}, "destination profile")
 
     settings_rows = await UserProfileOverridesRepo(pool).list_overrides_for_user(destination_user_id)
     settings = {

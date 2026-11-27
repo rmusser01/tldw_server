@@ -28,6 +28,7 @@ import {
 } from "lucide-react"
 import { Alert as DesignSystemAlert } from "@/components/ui/primitives"
 import { useDocumentOperation } from "@/hooks/document-workspace/useDocumentOperation"
+import type { DocumentChatCache } from "@/hooks/document-workspace/useDocumentChat"
 import { useDocumentWorkspaceStore } from "@/store/document-workspace"
 import { useMobile, useTablet } from "@/hooks/useMediaQuery"
 import { useAntdMessage } from "@/hooks/useAntdMessage"
@@ -258,7 +259,10 @@ const LeftSidebarContent: React.FC = () => {
 const RIGHT_PRIMARY_KEYS: RightPanelTab[] = ["chat", "annotations"]
 const RIGHT_SECONDARY_KEYS: RightPanelTab[] = ["citations", "quiz"]
 
-const RightPanelContent: React.FC = () => {
+const RightPanelContent: React.FC<{
+  operation: QuickIngestOperation
+  conversations: DocumentChatCache
+}> = ({ operation, conversations }) => {
   const { t } = useTranslation(["option", "common"])
   const activeRightTab = useDocumentWorkspaceStore((s) => s.activeRightTab)
   const setActiveRightTab = useDocumentWorkspaceStore(
@@ -268,7 +272,7 @@ const RightPanelContent: React.FC = () => {
   const renderRightTab = (tab: RightPanelTab) => {
     switch (tab) {
       case "chat":
-        return <DocumentChat />
+        return <DocumentChat operation={operation} conversations={conversations} />
       case "annotations":
         return <AnnotationsPanel />
       case "citations":
@@ -552,6 +556,7 @@ const OwnedDocumentWorkspace: React.FC<{operation: QuickIngestOperation}> = ({op
   const isMobile = useMobile()
   const isTablet = useTablet()
   const message = useAntdMessage()
+  const conversations = useRef<DocumentChatCache>(new Map()).current
 
   // Get active document for hooks
   const activeDocumentId = useDocumentWorkspaceStore((s) => s.activeDocumentId)
@@ -590,6 +595,18 @@ const OwnedDocumentWorkspace: React.FC<{operation: QuickIngestOperation}> = ({op
   const [activeTab, setActiveTab] = useState<"sidebar" | "viewer" | "chat">(
     "viewer"
   )
+
+  const pendingSelectionPrompt = useDocumentWorkspaceStore(state => state.pendingSelectionPrompt)
+  useLayoutEffect(() => {
+    if (!pendingSelectionPrompt || !owner.isCurrent()) return
+    if (pendingSelectionPrompt.documentId !== activeDocumentId) {
+      useDocumentWorkspaceStore.setState({ pendingSelectionPrompt: null })
+      return
+    }
+    if (isMobile) setActiveTab("chat")
+    else if (isTablet) setRightDrawerOpen(true)
+    else if (!rightPaneOpen) setRightPaneOpen(true)
+  }, [activeDocumentId, isMobile, isTablet, owner, pendingSelectionPrompt, rightPaneOpen, setRightPaneOpen])
 
   // Keyboard shortcuts modal state
   const [shortcutsModalOpen, setShortcutsModalOpen] = useState(false)
@@ -1083,7 +1100,7 @@ const OwnedDocumentWorkspace: React.FC<{operation: QuickIngestOperation}> = ({op
           />
         </Suspense>
       ),
-      chat: <RightPanelContent />
+      chat: <RightPanelContent operation={owner} conversations={conversations} />
     }
 
     return (
@@ -1243,7 +1260,7 @@ const OwnedDocumentWorkspace: React.FC<{operation: QuickIngestOperation}> = ({op
           </main>
 
           {/* Right pane - Chat/Annotations (desktop) */}
-          {rightPaneOpen && (
+          {!isTablet && rightPaneOpen && (
             <div
               className="hidden lg:flex h-full w-1 cursor-col-resize items-center justify-center hover:bg-primary/30 active:bg-primary/50 transition-colors"
               onMouseDown={rightPanel.handleMouseDown}
@@ -1252,9 +1269,9 @@ const OwnedDocumentWorkspace: React.FC<{operation: QuickIngestOperation}> = ({op
               aria-label="Resize right panel"
             />
           )}
-          {rightPaneOpen && (
+          {!isTablet && rightPaneOpen && (
             <aside className="hidden shrink-0 border-l border-border bg-surface lg:flex lg:flex-col" style={{ width: rightPanel.width }}>
-              <RightPanelContent />
+              <RightPanelContent operation={owner} conversations={conversations} />
             </aside>
           )}
 
@@ -1268,12 +1285,12 @@ const OwnedDocumentWorkspace: React.FC<{operation: QuickIngestOperation}> = ({op
             }
             placement="right"
             onClose={() => setRightDrawerOpen(false)}
-            open={rightDrawerOpen}
+            open={isTablet && rightDrawerOpen}
             size={Math.min(360, typeof window !== "undefined" ? window.innerWidth * 0.85 : 360)}
             className="lg:hidden"
             styles={{ body: { padding: 0 } }}
           >
-            <RightPanelContent />
+            {isTablet && rightDrawerOpen && <RightPanelContent operation={owner} conversations={conversations} />}
           </Drawer>
         </div>
       </div>

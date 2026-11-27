@@ -1,6 +1,7 @@
 import json
 import os
 import time
+from contextlib import asynccontextmanager
 from datetime import datetime, timedelta, timezone
 from types import SimpleNamespace
 
@@ -9,6 +10,7 @@ from fastapi import HTTPException, Response
 from pydantic import ValidationError
 from starlette.requests import Request
 
+from tldw_Server_API.app.core.AuthNZ.interactive_session import InteractiveSession
 from tldw_Server_API.app.core.AuthNZ.lockout_tracker import (
     build_login_client_lockout_key,
     validate_login_client_lockout_key,
@@ -966,14 +968,10 @@ async def test_login_returns_mfa_challenge_when_enabled(monkeypatch):
         def __init__(self):
             self.cached = {}
             self.stored_value = None
-            self.created_kwargs = {}
-            self.created_at = None
             self.redis_client = object()
 
         async def create_session(self, **kwargs):
-            self.created_kwargs = dict(kwargs)
-            self.created_at = datetime.now(timezone.utc)
-            return {"session_id": 777}
+            raise AssertionError("no session row before MFA completes")
 
         async def store_ephemeral_value(self, key: str, value: str, ttl_seconds: int):
             self.stored_value = value
@@ -1033,26 +1031,62 @@ async def test_login_returns_mfa_challenge_when_enabled(monkeypatch):
     assert result.session_token
     assert session_manager.cached
     cached = json.loads(session_manager.stored_value)
-    assert cached == {
-        "user_id": 5,
-        "session_id": 777,
-        "login_lockout_key": build_login_client_lockout_key("203.0.113.9", "mfa_user"),
-    }
+    assert cached == {"user_id": 5, "login_lockout_key": build_login_client_lockout_key("203.0.113.9", "mfa_user")}
     assert "203.0.113.9" not in session_manager.stored_value
     assert "mfa_user" not in session_manager.stored_value
-    expires_at = session_manager.created_kwargs.get("expires_at_override")
-    refresh_expires_at = session_manager.created_kwargs.get("refresh_expires_at_override")
-    assert expires_at is not None
-    assert refresh_expires_at == expires_at
-    # Should be a short-lived expiry (roughly the MFA TTL)
-    assert expires_at.tzinfo is not None
-    delta = (expires_at - session_manager.created_at).total_seconds()
-    assert 290 <= delta <= 305
 
 
-@pytest.mark.asyncio
-@pytest.mark.parametrize("legacy_payload", [False, True])
-async def test_mfa_login_completes_tokens(monkeypatch, legacy_payload):
+class _MFALoginSessionManager:
+    def __init__(self):
+        self.ephemeral = {}
+        self.updated = {}
+        self.consumed = []
+        self.created_calls = []
+        self.revoked = []
+        self.redis_client = object()
+
+    @property
+    def created(self):
+        return self.created_calls[-1]
+
+    async def get_ephemeral_value(self, key: str):
+        return self.ephemeral.get(key)
+
+    async def consume_ephemeral_value(self, key: str):
+        self.consumed.append(key)
+        return self.ephemeral.pop(key, None)
+
+    async def create_session(self, **kwargs):
+        self.created_calls.append(kwargs)
+        return {"session_id": 56}
+
+    @asynccontextmanager
+    async def revoke_on_failure(self, session_id, user_id):
+        try:
+            yield
+        except Exception:
+            self.revoked.append((session_id, user_id))
+            raise
+
+    async def update_session_tokens(self, **kwargs):
+        self.updated.update(kwargs)
+
+
+class _MFALoginLimiter:
+    enabled = True
+
+    def __init__(self):
+        self.reset_calls = []
+
+    async def check_user_rate_limit(self, user_id: int, endpoint: str):
+        return True, {}
+
+    async def reset_failed_attempts(self, identifier: str, attempt_type: str):
+        self.reset_calls.append((identifier, attempt_type))
+
+
+def _patch_mfa_login(monkeypatch):
+    """Stub everything ``mfa_login`` touches except the session manager and limiter."""
     monkeypatch.setenv("AUTH_MODE", "multi_user")
     monkeypatch.setenv("REDIS_URL", "redis://localhost:6379/0")
     reset_settings()
@@ -1084,51 +1118,11 @@ async def test_mfa_login_completes_tokens(monkeypatch, legacy_payload):
         async def verify_backup_code(self, user_id: int, code: str) -> bool:
             return False
 
-    class _StubSessionManager:
-        def __init__(self):
-            self.ephemeral = {}
-            self.updated = {}
-            self.deleted = []
-            self.redis_client = object()
-
-        async def get_ephemeral_value(self, key: str):
-            return self.ephemeral.get(key)
-
-        async def delete_ephemeral_value(self, key: str):
-            self.deleted.append(key)
-
-        async def update_session_tokens(self, **kwargs):
-            self.updated.update(kwargs)
-
-    reset_calls = []
-
-    class _StubLimiter:
-        enabled = True
-
-        async def check_user_rate_limit(self, user_id: int, endpoint: str):
-            return True, {}
-
-        async def reset_failed_attempts(self, identifier: str, attempt_type: str):
-            reset_calls.append((identifier, attempt_type))
-
-    class _StubJWT:
-        def create_access_token(self, **kwargs):
-            return "ACCESS"
-
-        def create_refresh_token(self, **kwargs):
-            return "REFRESH"
-
-    monkeypatch.setattr(auth, "_is_mfa_backend_supported", _fake_mfa_supported)
-    monkeypatch.setattr("tldw_Server_API.app.services.auth_service.fetch_active_user_by_id", _fake_fetch_active_user)
-    monkeypatch.setattr(auth, "_get_mfa_service", lambda: _StubMFA())
     async def _noop_async(*args, **kwargs):
         return None
 
     async def _noop_claims(*args, **kwargs):
         return {}
-
-    monkeypatch.setattr("tldw_Server_API.app.services.auth_service.update_user_last_login", _noop_async)
-    monkeypatch.setattr(auth, "_build_scope_claims", _noop_claims)
 
     class _StubAuditService:
         async def log_login(self, *args, **kwargs):
@@ -1140,12 +1134,50 @@ async def test_mfa_login_completes_tokens(monkeypatch, legacy_payload):
     async def _fake_audit_service(*args, **kwargs):
         return _StubAuditService()
 
+    monkeypatch.setattr(auth, "_is_mfa_backend_supported", _fake_mfa_supported)
+    monkeypatch.setattr("tldw_Server_API.app.services.auth_service.fetch_active_user_by_id", _fake_fetch_active_user)
+    monkeypatch.setattr(auth, "_get_mfa_service", lambda: _StubMFA())
+    monkeypatch.setattr("tldw_Server_API.app.services.auth_service.update_user_last_login", _noop_async)
+    monkeypatch.setattr(auth, "_build_scope_claims", _noop_claims)
     monkeypatch.setattr(auth, "get_or_create_audit_service_for_user_id", _fake_audit_service)
+    return auth
 
-    session_manager = _StubSessionManager()
+
+async def _submit_mfa_login(auth, session_manager, limiter, token: str):
+    class _StubJWT:
+        def create_access_token(self, **kwargs):
+            return "ACCESS"
+
+        def create_refresh_token(self, **kwargs):
+            return "REFRESH"
+
+    request = Request({
+        "type": "http", "method": "POST", "path": "/api/v1/auth/mfa/login", "headers": [],
+        "client": ("198.51.100.44", 1234), "scheme": "http", "query_string": b"",
+        "server": ("testserver", 80),
+    })
+    return await auth.mfa_login(
+        data=auth.MFALoginRequest(session_token=token, mfa_token="123456"),
+        request=request,
+        response=Response(),
+        db=None,
+        jwt_service=_StubJWT(),
+        session_manager=session_manager,
+        rate_limiter=limiter,
+        settings=auth.get_settings(),
+    )
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("legacy_payload", [False, True])
+async def test_mfa_login_completes_tokens(monkeypatch, legacy_payload):
+    auth = _patch_mfa_login(monkeypatch)
+    session_manager = _MFALoginSessionManager()
+    limiter = _MFALoginLimiter()
     token = "mfa-session-token"
     cache_key = auth._mfa_login_cache_key(token)
     original_login_lockout_key = build_login_client_lockout_key("203.0.113.9", "mfa_user")
+    # A legacy payload's session_id (the removed placeholder row) is ignored.
     cached_payload = {
         "user_id": 5,
         "session_id": 55,
@@ -1154,35 +1186,14 @@ async def test_mfa_login_completes_tokens(monkeypatch, legacy_payload):
         cached_payload["login_lockout_key"] = original_login_lockout_key
     session_manager.ephemeral[cache_key] = json.dumps(cached_payload)
 
-    scope = {
-        "type": "http",
-        "method": "POST",
-        "path": "/api/v1/auth/mfa/login",
-        "headers": [],
-        "client": ("198.51.100.44", 1234),
-        "scheme": "http",
-        "query_string": b"",
-        "server": ("testserver", 80),
-    }
-    request = Request(scope)
-    response = Response()
-
-    result = await auth.mfa_login(
-        data=auth.MFALoginRequest(session_token=token, mfa_token="123456"),
-        request=request,
-        response=response,
-        db=None,
-        jwt_service=_StubJWT(),
-        session_manager=session_manager,
-        rate_limiter=_StubLimiter(),
-        settings=auth.get_settings(),
-    )
+    result = await _submit_mfa_login(auth, session_manager, limiter, token)
 
     assert result.access_token == "ACCESS"
     assert result.refresh_token == "REFRESH"
-    assert session_manager.updated["session_id"] == 55
-    assert cache_key in session_manager.deleted
-    assert reset_calls == (
+    assert session_manager.created["user_id"] == 5
+    assert session_manager.updated["session_id"] == 56
+    assert cache_key in session_manager.consumed
+    assert limiter.reset_calls == (
         [("mfa_user", "login")]
         if legacy_payload
         else [
@@ -1190,7 +1201,47 @@ async def test_mfa_login_completes_tokens(monkeypatch, legacy_payload):
             ("mfa_user", "login"),
         ]
     )
-    assert all(identifier != "198.51.100.44" for identifier, _ in reset_calls)
+    assert all(identifier != "198.51.100.44" for identifier, _ in limiter.reset_calls)
+
+
+@pytest.mark.asyncio
+async def test_mfa_login_guards_the_placeholder_session_against_a_failed_token_update(monkeypatch):
+    auth = _patch_mfa_login(monkeypatch)
+    session_manager = _MFALoginSessionManager()
+    token = "mfa-session-token"
+    session_manager.ephemeral[auth._mfa_login_cache_key(token)] = json.dumps({"user_id": 5})
+
+    async def _fail(**kwargs):
+        raise RuntimeError("token update failed")
+
+    session_manager.update_session_tokens = _fail
+
+    with pytest.raises(auth.HTTPException) as exc:
+        await _submit_mfa_login(auth, session_manager, _MFALoginLimiter(), token)
+    assert exc.value.status_code == 500
+    assert session_manager.revoked == [(56, 5)]
+
+
+@pytest.mark.asyncio
+async def test_mfa_login_is_single_use(monkeypatch):
+    auth = _patch_mfa_login(monkeypatch)
+    session_manager = _MFALoginSessionManager()
+    token = "mfa-session-token"
+    payload = json.dumps({"user_id": 5})
+    session_manager.ephemeral[auth._mfa_login_cache_key(token)] = payload
+
+    async def _read_before_either_consumed(key: str):
+        return payload
+
+    # Two submits that both read the challenge before either consumed it.
+    session_manager.get_ephemeral_value = _read_before_either_consumed
+
+    first = await _submit_mfa_login(auth, session_manager, _MFALoginLimiter(), token)
+    assert first.access_token == "ACCESS"
+    with pytest.raises(auth.HTTPException) as exc:
+        await _submit_mfa_login(auth, session_manager, _MFALoginLimiter(), token)
+    assert exc.value.status_code == 400
+    assert len(session_manager.created_calls) == 1
 
 
 @pytest.mark.asyncio
@@ -1586,6 +1637,30 @@ async def test_logout_accepts_lowercase_bearer(monkeypatch):
     assert captured["revoked"] is True
 
 
+def _interactive_logout_args(session_id: int = 5, user_id: int = 12):
+    """A browser-session principal plus a request whose bearer carries a ``session_id`` claim."""
+    from tldw_Server_API.app.core.AuthNZ.jwt_service import get_jwt_service
+    from tldw_Server_API.app.core.AuthNZ.principal_model import AuthPrincipal
+
+    token = get_jwt_service().create_access_token(
+        user_id, "alice", "user", additional_claims={"session_id": session_id}
+    )
+    request = Request(
+        {
+            "type": "http",
+            "method": "POST",
+            "path": "/api/v1/auth/logout",
+            "headers": [(b"authorization", f"Bearer {token}".encode())],
+            "client": ("203.0.113.5", 1234),
+            "scheme": "http",
+            "query_string": b"",
+            "server": ("testserver", 80),
+        }
+    )
+    principal = AuthPrincipal(kind="user", user_id=user_id, token_type="access")
+    return request, principal
+
+
 @pytest.mark.asyncio
 async def test_logout_all_devices_uses_session_manager_only(monkeypatch):
     reset_settings()
@@ -1595,6 +1670,9 @@ async def test_logout_all_devices_uses_session_manager_only(monkeypatch):
     captured = {"calls": 0, "user_id": None, "reason": None}
 
     class _StubSessionManager:
+        async def get_user_sessions(self, user_id, strict=False):
+            return [{"id": 5}]
+
         async def revoke_all_user_sessions(
             self,
             *,
@@ -1616,22 +1694,12 @@ async def test_logout_all_devices_uses_session_manager_only(monkeypatch):
 
     monkeypatch.setattr("tldw_Server_API.app.core.AuthNZ.token_blacklist.get_token_blacklist", lambda: _BlacklistShouldNotBeCalled())
 
-    scope = {
-        "type": "http",
-        "method": "POST",
-        "path": "/api/v1/auth/logout",
-        "headers": [(b"authorization", b"Bearer unused-for-all-devices")],
-        "client": ("203.0.113.5", 1234),
-        "scheme": "http",
-        "query_string": b"",
-        "server": ("testserver", 80),
-    }
-    request = Request(scope)
+    request, principal = _interactive_logout_args()
 
     result = await auth.logout(
         data=auth.LogoutRequest(all_devices=True),
         request=request,
-        current_user=SimpleNamespace(id=12),
+        current_user=principal,
         session_manager=_StubSessionManager(),
         jwt_service=object(),
     )
@@ -1703,6 +1771,9 @@ async def test_logout_all_devices_ignores_blacklist_factory_failure(monkeypatch)
     import tldw_Server_API.app.api.v1.endpoints.auth as auth
 
     class _StubSessionManager:
+        async def get_user_sessions(self, user_id, strict=False):
+            return [{"id": 5}]
+
         async def revoke_all_user_sessions(
             self,
             *,
@@ -1717,22 +1788,12 @@ async def test_logout_all_devices_ignores_blacklist_factory_failure(monkeypatch)
 
     monkeypatch.setattr("tldw_Server_API.app.core.AuthNZ.token_blacklist.get_token_blacklist", _failing_blacklist_factory)
 
-    scope = {
-        "type": "http",
-        "method": "POST",
-        "path": "/api/v1/auth/logout",
-        "headers": [],
-        "client": ("203.0.113.5", 1234),
-        "scheme": "http",
-        "query_string": b"",
-        "server": ("testserver", 80),
-    }
-    request = Request(scope)
+    request, principal = _interactive_logout_args()
 
     result = await auth.logout(
         data=auth.LogoutRequest(all_devices=True),
         request=request,
-        current_user=SimpleNamespace(id=12),
+        current_user=principal,
         session_manager=_StubSessionManager(),
         jwt_service=object(),
     )
@@ -1747,6 +1808,9 @@ async def test_logout_all_devices_raises_when_session_revoke_fails(monkeypatch):
     import tldw_Server_API.app.api.v1.endpoints.auth as auth
 
     class _FailingSessionManager:
+        async def get_user_sessions(self, user_id, strict=False):
+            return [{"id": 5}]
+
         async def revoke_all_user_sessions(
             self,
             *,
@@ -1756,23 +1820,13 @@ async def test_logout_all_devices_raises_when_session_revoke_fails(monkeypatch):
         ) -> int:
             raise RuntimeError("session revoke failed")
 
-    scope = {
-        "type": "http",
-        "method": "POST",
-        "path": "/api/v1/auth/logout",
-        "headers": [],
-        "client": ("203.0.113.5", 1234),
-        "scheme": "http",
-        "query_string": b"",
-        "server": ("testserver", 80),
-    }
-    request = Request(scope)
+    request, principal = _interactive_logout_args()
 
     with pytest.raises(auth.HTTPException) as exc:
         await auth.logout(
             data=auth.LogoutRequest(all_devices=True),
             request=request,
-            current_user=SimpleNamespace(id=12),
+            current_user=principal,
             session_manager=_FailingSessionManager(),
             jwt_service=object(),
         )
@@ -1805,6 +1859,8 @@ async def test_revoke_all_sessions_returns_revoked_count():
     result = await auth.revoke_all_sessions(
         current_user={"id": 77, "username": "carol"},
         session_manager=_StubSessionManager(),
+        keep_current=False,
+        interactive=InteractiveSession(user_id=77, session_id=5),
     )
 
     assert result.message == "Successfully revoked 3 sessions"
@@ -1829,6 +1885,7 @@ async def test_list_user_sessions_sanitizes_backend_error_in_test_mode(monkeypat
         await auth.list_user_sessions(
             current_user=SimpleNamespace(id=77),
             session_manager=_FailingSessionManager(),
+            current_session_id=None,
         )
 
     assert exc.value.status_code == 500

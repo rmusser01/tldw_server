@@ -50,6 +50,9 @@ type UseMessageOptionOptions = {
   capturePrivateScene?: Parameters<typeof useChatActions>[0]["capturePrivateScene"];
   /** Only the chat surface owns hydration; toolbars and settings are passive. */
   hydrateServerChat?: boolean;
+  historyDocumentId?: string;
+  documentBrowserOnly?: boolean;
+  onDocumentHistorySaved?: (historyId: string) => Promise<void>;
   forceCompareEnabled?: boolean;
   scope?: ChatScope;
   inheritedAssistant?: AssistantSelection | null;
@@ -708,7 +711,7 @@ export const useMessageOption = (
     documentContext,
     setDocumentContext,
     uploadedFiles,
-    compareModeActive,
+    compareModeActive: !opts.historyDocumentId && compareModeActive,
     compareSelectedModels,
     compareMaxModels,
     compareFeatureEnabled,
@@ -728,6 +731,9 @@ export const useMessageOption = (
     inheritedPersonaMemoryMode,
     scope: opts.scope,
     capturePrivateScene: opts.capturePrivateScene,
+    historyDocumentId: opts.historyDocumentId,
+    documentBrowserOnly: opts.documentBrowserOnly,
+    onDocumentHistorySaved: opts.onDocumentHistorySaved,
     visualIdentityManualExpressionOverride:
       opts.visualIdentityManualExpressionOverride,
     setVisualIdentityManualExpressionOverride:

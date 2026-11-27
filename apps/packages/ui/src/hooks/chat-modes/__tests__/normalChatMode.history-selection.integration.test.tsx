@@ -125,6 +125,7 @@ vi.mock("@/models", async () => {
 const preparation = vi.hoisted(() => ({ beforeModel: vi.fn(), defaultPrompt: vi.fn(async () => ""), multimodal: false, realFactory: false }))
 
 import { normalChatMode } from "../normalChatMode"
+import { ragMode } from "../ragMode"
 import { createEditMessage } from "@/hooks/handlers/messageHandlers"
 import { protectedEditRequestSchema } from "@/services/__tests__/history-edit-fixture"
 import { useChatActions } from "@/hooks/chat/useChatActions"
@@ -240,6 +241,7 @@ const send = (
     setStreaming?: Parameters<typeof normalChatMode>[6]["setStreaming"]
     saveOnSuccess?: typeof saveMessageOnSuccess
     surface?: "playground" | "sidepanel"
+    documentRag?: boolean
   } = {}
 ) => {
   const params: Parameters<typeof normalChatMode>[6] = {
@@ -286,6 +288,18 @@ const send = (
     saveMessageOnError,
     userMessageId: options.userMessageId ?? "first-user",
     assistantMessageId: options.assistantMessageId ?? "first-answer"
+  }
+  if (options.documentRag) {
+    return ragMode(options.message ?? "First question", "", false, [], [], new AbortController().signal, {
+      ...params,
+      selectedKnowledge: null,
+      ragMediaIds: [999],
+      ragSearchMode: "fts",
+      ragTopK: 3,
+      ragEnableGeneration: false,
+      ragEnableCitations: true,
+      ragSources: ["other"]
+    })
   }
   return normalChatMode(
     options.message ?? "First question",
@@ -1235,6 +1249,43 @@ describe("normal Chat owned history creation and H1 admission", () => {
     })
     expect(tldwChat.streamMessage).not.toHaveBeenCalled()
     expect(await savedMessages()).toEqual([])
+    mounted.unmount()
+  })
+
+  it("continues a verified linked document through ragMode", async () => {
+    const target = { mediaId: 77, mediaUuid: "b679f16d-b053-4f9d-9f39-a6153d2d3cab" }
+    const citation = { media_uuid: target.mediaUuid, title: "Sample PDF", excerpt: "A quoted passage.", page: 2 }
+    const definitions = Object.fromEntries(["chat.rag.answer", "chat.rag.question_rewrite"].map(id => [id, {
+      definition: { id, parts: [{ key: "template", mode: "template", required_variables: ["context", "question"] }] },
+      parts: { template: "{context}\n{question}" }, source: "packaged", revision: null
+    }])) as ServicePromptSnapshot["definitions"]
+    const capture = vi.spyOn(tldwClient, "captureHistorySelection").mockImplementation(async (_id, request) =>
+      emptyServerCapture(request))
+    const retrieve = vi.spyOn(tldwClient, "ragSearch").mockResolvedValue({ results: [{
+      text: citation.excerpt, metadata: { title: citation.title, page: citation.page, media_id: target.mediaId }
+    }] } as never)
+    const write = vi.spyOn(tldwClient, "addChatMessage").mockImplementation(async (_id, body) => {
+      const selection = body.tldw_history_selection_v1
+      return { id: body.id, ...(selection ? { tldw_history_admission_v1: {
+        version: 1, owner_key: "server-owner", conversation_id: newServerId, input_message_id: body.id,
+        input_message_revision: "1", selection_digest: selection.selection_digest,
+        messages: selection.messages, originating_selection_revision: selection.selection_revision
+      } } : {}) } as never
+    })
+    const mounted = renderHook(() => useHistorySelection())
+    await act(async () => {
+      await mounted.result.current.loadConversation({ serverChatId: newServerId, documentTarget: target })
+    })
+    await act(async () => {
+      await expect(send(mounted.result.current, {
+        serverChatId: newServerId, documentRag: true, snapshot: { ...snapshot(), definitions }
+      })).resolves.toEqual({ status: "submitted" })
+    })
+    expect(capture.mock.calls[0][2]).toMatchObject({ documentTarget: target })
+    expect(retrieve.mock.calls[0][1]).toMatchObject({ include_media_ids: [target.mediaId], sources: ["media_db"] })
+    expect(write.mock.calls[0][1]).toMatchObject({ tldw_history_branch: false })
+    expect(write.mock.calls[0][2]).toMatchObject({ documentTarget: target })
+    expect(write.mock.calls[1][1]).toMatchObject({ document_chat_sources_v1: [citation] })
     mounted.unmount()
   })
 

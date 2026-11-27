@@ -8,9 +8,10 @@ import hashlib
 import hmac
 import json
 import os
+import re
 import stat
 import threading
-from contextlib import contextmanager, suppress
+from contextlib import asynccontextmanager, contextmanager, suppress
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from typing import Any, Optional
@@ -31,6 +32,7 @@ from apscheduler.triggers.interval import IntervalTrigger
 from cryptography.fernet import Fernet, InvalidToken
 from cryptography.hazmat.primitives import hashes
 from cryptography.hazmat.primitives.kdf.pbkdf2 import PBKDF2HMAC
+from fastapi import HTTPException
 from jose import jwt as jose_jwt
 from jose.exceptions import JWSError, JWTError
 from loguru import logger
@@ -52,15 +54,26 @@ from tldw_Server_API.app.core.AuthNZ.exceptions import (
     SessionError,
     SessionRevokedException,
 )
-from tldw_Server_API.app.core.AuthNZ.repos.sessions_repo import AuthnzSessionsRepo
+from tldw_Server_API.app.core.AuthNZ.repos.sessions_repo import (
+    SESSION_CAP_REVOKE_REASON,
+    AuthnzSessionsRepo,
+)
+from tldw_Server_API.app.core.AuthNZ.repos.token_blacklist_repo import AuthnzTokenBlacklistRepo
 
 #
 # Local imports
 from tldw_Server_API.app.core.AuthNZ.settings import Settings, get_settings
+from tldw_Server_API.app.core.AuthNZ.sign_in_alert import (
+    SIGN_IN_ALERT_NONCRITICAL_EXCEPTIONS,
+    schedule_new_sign_in_alert,
+)
 from tldw_Server_API.app.core.AuthNZ.token_blacklist import get_token_blacklist
 from tldw_Server_API.app.core.Metrics.metrics_logger import log_counter, log_histogram
 from tldw_Server_API.app.core.testing import is_test_mode, is_truthy
 from tldw_Server_API.app.core.Utils.app_services import app_services
+
+# Most recently active evicted sessions whose tokens are blacklisted inside one sign-in.
+SESSION_CAP_INLINE_BLACKLIST_LIMIT = 100
 
 _SESSION_MANAGER_NONCRITICAL_EXCEPTIONS = (
     asyncio.TimeoutError,
@@ -94,6 +107,32 @@ try:
     from tldw_Server_API.app.core.config import settings as core_settings
 except _SESSION_MANAGER_NONCRITICAL_EXCEPTIONS:  # pragma: no cover - defensive fallback
     core_settings = {}
+
+# Browser install id, which groups a user's sessions for the per-user cap.
+DEVICE_ID_HEADER = "X-TLDW-Device-Id"
+# No ":", so a client id can never pose as a server-composed tag such as "single-user-cookie:v1:<id>".
+_DEVICE_ID_PATTERN = re.compile(r"[A-Za-z0-9_-]{8,64}")
+
+
+def request_device_id(request: Any) -> Optional[str]:
+    """Return the request's install id header, or None when it is absent or malformed."""
+    headers = getattr(request, "headers", None)
+    value = headers.get(DEVICE_ID_HEADER) if headers is not None else None
+    if isinstance(value, str) and _DEVICE_ID_PATTERN.fullmatch(value):
+        return value
+    return None
+
+def session_replaced_http_exception() -> HTTPException:
+    """401 telling a browser its session was ended by the per-user session cap."""
+    return HTTPException(
+        status_code=401,
+        detail={
+            "code": "session_replaced",
+            "message": "You were signed out because your account was signed in on another device.",
+        },
+        headers={"WWW-Authenticate": "Bearer"},
+    )
+
 
 #######################################################################################################################
 #
@@ -1055,6 +1094,7 @@ class SessionManager:
         device_id: Optional[str] = None,
         expires_at_override: Optional[datetime] = None,
         refresh_expires_at_override: Optional[datetime] = None,
+        alert_new_sign_in: bool = False,
     ) -> dict[str, Any]:
         """
         Create a new session for a user
@@ -1068,6 +1108,7 @@ class SessionManager:
             device_id: Optional device identifier
             expires_at_override: Optional override for access token expiry
             refresh_expires_at_override: Optional override for refresh token expiry
+            alert_new_sign_in: Write a new-sign-in inbox alert (best-effort, off the request path)
 
         Returns:
             Session information dictionary
@@ -1106,7 +1147,7 @@ class SessionManager:
         try:
             db_pool = await self._ensure_db_pool()
             repo = AuthnzSessionsRepo(db_pool)
-            session_id = await repo.create_session_record(
+            session_id, evicted = await repo.create_session_record_with_cap(
                 user_id=user_id,
                 token_hash=access_hash,
                 refresh_token_hash=refresh_hash,
@@ -1119,7 +1160,50 @@ class SessionManager:
                 device_id=device_id,
                 access_jti=access_jti,
                 refresh_jti=refresh_jti,
+                max_live_sessions=self.settings.MAX_SESSIONS_PER_USER,
             )
+            if evicted:
+                # Evicted session:<hash> cache keys lapse on their TTL; validation re-reads is_active.
+                # ponytail: at most SESSION_CAP_INLINE_BLACKLIST_LIMIT evicted sessions are blacklisted
+                # inline; beyond it a token gets the generic 401 instead of session_replaced once
+                # its revoked row is purged. Move the rest to a background task if that matters.
+                recent_first = sorted(
+                    evicted,
+                    key=lambda e: str(e.get("last_activity") or e.get("created_at") or ""),
+                    reverse=True,
+                )
+                await self._blacklist_session_tokens(
+                    recent_first[:SESSION_CAP_INLINE_BLACKLIST_LIMIT],
+                    reason=SESSION_CAP_REVOKE_REASON,
+                    revoked_by=None,
+                )
+                if len(evicted) > SESSION_CAP_INLINE_BLACKLIST_LIMIT:
+                    logger.info(
+                        f"Session cap blacklisted {SESSION_CAP_INLINE_BLACKLIST_LIMIT} of "
+                        f"{len(evicted)} evicted sessions inline; "
+                        f"{len(evicted) - SESSION_CAP_INLINE_BLACKLIST_LIMIT} left to row validation"
+                    )
+                log_counter("auth_session_cap_evicted", value=len(evicted))
+                if self.settings.PII_REDACT_LOGS:
+                    logger.info(f"Session cap evicted {len(evicted)} session(s) [redacted]")
+                else:
+                    logger.info(f"Session cap evicted {len(evicted)} session(s) for user {user_id}")
+
+            if alert_new_sign_in:
+                # Own try: the outer except would turn an error here into SessionError after the row exists.
+                try:
+                    schedule_new_sign_in_alert(
+                        user_id=user_id,
+                        session_id=session_id,
+                        ip_address=ip_address,
+                        user_agent=user_agent,
+                        device_id=device_id,
+                        db_pool=db_pool,
+                        evicted_device_ids=tuple(e.get("device_id") for e in evicted),
+                    )
+                except SIGN_IN_ALERT_NONCRITICAL_EXCEPTIONS as exc:
+                    log_counter("auth_sign_in_alert_failed")
+                    logger.bind(error_type=type(exc).__name__).warning("New sign-in alert not scheduled")
 
             # Cache in Redis if available
             if self.redis_client:
@@ -1351,6 +1435,27 @@ class SessionManager:
                 )
             return session_details is not None
 
+    @asynccontextmanager
+    async def revoke_on_failure(self, session_id: int, user_id: int):
+        """
+        Guard the steps after ``create_session`` commits a placeholder row.
+
+        If the body raises, best-effort revoke that row (so it does not stay live
+        holding temporary tokens until refresh expiry), then re-raise the original error.
+        """
+        try:
+            yield
+        except Exception:
+            try:
+                await self.revoke_session(
+                    session_id, reason="sign_in_failed", expected_user_id=int(user_id)
+                )
+            except Exception as revoke_exc:  # noqa: BLE001 - best-effort; must not mask the original error
+                logger.bind(exception_type=type(revoke_exc).__name__).warning(
+                    "Could not revoke the placeholder session after a failed sign-in"
+                )
+            raise
+
     async def revoke_all_user_sessions(
         self,
         user_id: int,
@@ -1563,6 +1668,9 @@ class SessionManager:
                 encrypted_access_token=encrypted_access_token,
                 encrypted_refresh_token=encrypted_refresh_token,
             )
+            if user_id is None:
+                # No live row to update: the session was revoked (e.g. cap-evicted) meanwhile.
+                raise SessionError("Session is no longer active")
 
             expires_at_dt = access_exp
             if isinstance(expires_at_dt, str):
@@ -1666,6 +1774,34 @@ class SessionManager:
             logger.error(f"Error checking token blacklist; treating token as revoked: {e}")
             return True
 
+    async def get_revoke_reason(self, token: str) -> Optional[str]:
+        """
+        Return why a revoked token was revoked, or None (unknown or any lookup error).
+
+        Call only for a token whose signature and expiry were already verified
+        and which is already known to be revoked; this never decides access.
+        """
+        try:
+            claims = self._get_unverified_claims(token) or {}
+            jti = claims.get("jti")
+            db_pool = await self._ensure_db_pool()
+            if jti:
+                reason = await AuthnzTokenBlacklistRepo(db_pool).get_reason_for_jti(jti)
+                if reason:
+                    return reason
+            return await AuthnzSessionsRepo(db_pool).fetch_revoke_reason_for_token_hash_candidates(
+                self._token_hash_candidates(token)
+            )
+        except _SESSION_MANAGER_NONCRITICAL_EXCEPTIONS as exc:
+            logger.warning("Revoke reason lookup failed ({})", type(exc).__name__)
+            return None
+
+    async def revoked_token_exception(self, token: str, default: HTTPException) -> HTTPException:
+        """Return the session_replaced 401 for a cap-evicted token, else ``default``."""
+        if await self.get_revoke_reason(token) == SESSION_CAP_REVOKE_REASON:
+            return session_replaced_http_exception()
+        return default
+
     async def get_user_sessions(
         self,
         user_id: int,
@@ -1707,7 +1843,11 @@ class SessionManager:
 
             db_pool = await self._ensure_db_pool()
             repo = AuthnzSessionsRepo(db_pool)
-            deleted = await repo.cleanup_expired_sessions()
+            deleted = await repo.cleanup_expired_sessions(
+                session_cap_retention=timedelta(
+                    minutes=max(60, self.settings.ACCESS_TOKEN_EXPIRE_MINUTES)
+                )
+            )
 
             if deleted:
                 logger.info(f"Cleaned up {deleted} expired sessions")

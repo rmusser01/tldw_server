@@ -40,6 +40,8 @@ _WRITABLE_USER_FIELDS = PROFILE_VISIBLE_USER_FIELDS | frozenset(
         "is_locked",
         "locked_until",
         "metadata",
+        "previous_email",
+        "email_changed_at",
     }
 )
 _UPDATE_USERS_PATTERN = re.compile(

@@ -1,6 +1,7 @@
 import { useQuery } from "@tanstack/react-query"
 import { tldwClient } from "@/services/tldw"
 import { useConnectionStore } from "@/store/connection"
+import type { QuickIngestOperation } from "@/services/tldw/quick-ingest-authority"
 import type { DocumentMetadata, DocumentType } from "@/components/DocumentWorkspace/types"
 
 interface MediaDetailResponse {
@@ -140,23 +141,27 @@ function parseDate(value: unknown): Date | undefined {
  * @param mediaId - The media ID to fetch metadata for (null to disable query)
  * @returns Query result with metadata, loading state, and error
  */
-export function useDocumentMetadata(mediaId: number | null) {
+export function useDocumentMetadata(mediaId: number | null, operation?: QuickIngestOperation) {
   const isConnected = useConnectionStore((s) => s.state.isConnected)
   const mode = useConnectionStore((s) => s.state.mode)
   const isServerAvailable = isConnected && mode !== "demo"
 
   return useQuery({
-    queryKey: ["document-metadata", mediaId],
-    queryFn: async (): Promise<DocumentMetadata | null> => {
+    queryKey: ["document-metadata", mediaId, operation?.authorityKey, operation?.authorityRevision],
+    queryFn: async ({ signal }): Promise<DocumentMetadata | null> => {
       if (mediaId === null) return null
+      operation?.assertCurrent()
 
       const response: MediaDetailResponse = await tldwClient.getMediaDetails(
         mediaId,
         {
           include_content: false,
-          include_versions: false
+          include_versions: false,
+          requestScope: operation?.requestScope,
+          signal
         }
       )
+      operation?.assertCurrent()
 
       const metadataSources = [
         asRecord(response.processing?.safe_metadata),
@@ -242,6 +247,7 @@ export function useDocumentMetadata(mediaId: number | null) {
 
       return {
         id: response.media_id ?? response.id ?? mediaId,
+        uuid: response.uuid,
         title:
           response.source?.title ||
           response.title ||

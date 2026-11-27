@@ -411,6 +411,9 @@ vi.mock('@web/components/layout/BackendUnavailableModalGate', () => ({
   },
 }));
 
+// The banner has its own tests and needs a mounted Next router.
+vi.mock('@web/components/notifications/NewSignInBanner', () => ({ NewSignInBanner: () => null }));
+
 vi.mock('@web/lib/api/notifications', () => ({
   getUnreadCount: (...args: unknown[]) => getUnreadCountMock(...args),
   listNotifications: vi.fn(async () => ({ items: [], total: 0 })),

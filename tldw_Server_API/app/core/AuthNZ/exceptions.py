@@ -68,6 +68,12 @@ class InvalidTokenError(AuthenticationError):
         super().__init__(message)
 
 
+class SessionReplacedError(InvalidTokenError):
+    """The session was ended by the per-user session cap (signed in elsewhere)."""
+    def __init__(self):
+        super().__init__("Session replaced by a newer sign-in")
+
+
 class TokenExpiredError(AuthenticationError):
     """Token has expired"""
     def __init__(self):

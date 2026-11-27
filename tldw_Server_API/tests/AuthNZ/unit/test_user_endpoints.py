@@ -101,7 +101,7 @@ class TestUserEndpoints:
                 response = await client.put(
                     "/api/v1/users/me",
                     headers={"Authorization": f"Bearer {valid_access_token}"},
-                    json={"email": "newemail@example.com"},
+                    json={"email": "newemail@example.com", "current_password": test_user["password"]},
                 )
 
             assert response.status_code == 200
@@ -275,7 +275,7 @@ class TestUserEndpoints:
 
     @pytest.mark.asyncio
     async def test_revoke_session(self, session_manager, test_user, valid_access_token):
-        """Test revoking a user session."""
+        """Test revoking a user session (ending sessions needs an interactive session, supplied here)."""
         # Mock get_user_sessions to return a session with id 123
         session_manager.get_user_sessions = AsyncMock(
             return_value=[
@@ -295,6 +295,12 @@ class TestUserEndpoints:
             return test_user
 
         app.dependency_overrides[get_current_active_user] = mock_get_current_active_user
+        from tldw_Server_API.app.api.v1.API_Deps.interactive_session_deps import require_interactive_session
+        from tldw_Server_API.app.core.AuthNZ.interactive_session import InteractiveSession
+
+        app.dependency_overrides[require_interactive_session] = lambda: InteractiveSession(
+            user_id=test_user["id"], session_id=123
+        )
         app.dependency_overrides[get_session_manager_dep] = lambda: session_manager
 
         async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client:
@@ -309,7 +315,10 @@ class TestUserEndpoints:
 
         # Verify the session was revoked
         session_manager.revoke_session.assert_called_once_with(
-            123, revoked_by=test_user["id"], reason="User requested revocation"
+            123,
+            revoked_by=test_user["id"],
+            reason="User requested revocation",
+            expected_user_id=test_user["id"],
         )
 
         app.dependency_overrides.clear()

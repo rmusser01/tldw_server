@@ -89,7 +89,7 @@ class TestUserEndpointsProperty:
                 response = await client.put(
                     "/api/v1/users/me",
                     headers={"Authorization": f"Bearer {valid_access_token}"},
-                    json={"email": email},
+                    json={"email": email, "current_password": test_user["password"]},
                 )
         finally:
             users_endpoints.update_user_email = original_update_email

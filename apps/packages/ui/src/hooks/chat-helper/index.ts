@@ -1,4 +1,5 @@
 import type { HistorySendTurn } from "@/types/chat-modes"
+import { DOCUMENT_CHAT_SOURCES, readDocumentChatCitations } from "@/utils/document-chat-citations"
 import { settleAcceptedAssistant, settleSelectedExistingInput } from "@/services/chat-history-selection"
 import {
   getLastChatHistory,
@@ -19,7 +20,9 @@ import { buildAssistantErrorContent } from "@/utils/chat-error-message"
 import { runChatPersistenceTransaction } from "@/db/dexie/chat-persistence-transaction"
 import type { ServicePromptRequestScope } from "@/services/tldw/domains/service-prompts"
 import type { UploadedFile } from "@/db/dexie/types"
-import { isRequestConfigScopeChangedError } from "@/services/tldw/service-prompt-scope-error"
+import { db } from "@/db/dexie/schema"
+import { serverChatMirrorOwnerKey } from "@/db/dexie/server-chat-mirror"
+import { createServicePromptScopeChangedError, isRequestConfigScopeChangedError } from "@/services/tldw/service-prompt-scope-error"
 
 let didLogSetHistoryMissing = false
 
@@ -73,6 +76,23 @@ const resolveHistorySetter = (
   return null
 }
 
+const indexDocumentHistory = async (
+  historyId: string | null,
+  historyDocumentId: string | undefined,
+  requestScope: ServicePromptRequestScope | undefined
+) => {
+  if (!historyDocumentId) return
+  if (!requestScope) throw createServicePromptScopeChangedError()
+  if (!historyId) return
+
+  const header = await db.chatHistories.get(historyId)
+  if (!header || header.server_scope_key !== serverChatMirrorOwnerKey({ requestScope }) ||
+      (header.doc_id && header.doc_id !== historyDocumentId)) {
+    throw createServicePromptScopeChangedError()
+  }
+  if (!header.doc_id) await db.chatHistories.update(historyId, { doc_id: historyDocumentId })
+}
+
 export const saveMessageOnError = async ({
   historyTurn,
   e,
@@ -82,6 +102,8 @@ export const saveMessageOnError = async ({
   userMessage,
   botMessage,
   historyId,
+  historyDocumentId,
+  historyServerChatId,
   selectedModel,
   setHistoryId,
   isRegenerating,
@@ -121,6 +143,8 @@ export const saveMessageOnError = async ({
   image: string
   botMessage: string
   historyId: string | null
+  historyDocumentId?: string
+  historyServerChatId?: string
   selectedModel: string
   setHistoryId: (
     historyId: string,
@@ -203,7 +227,7 @@ export const saveMessageOnError = async ({
     }
   }
 
-  if (scopeSignal || scopeInvalidatedSignal) {
+  if (scopeSignal || scopeInvalidatedSignal || historyDocumentId) {
     if (
       scopeInvalidatedSignal?.aborted &&
       (shouldAbortForScopeChange?.() ?? true)
@@ -224,8 +248,9 @@ export const saveMessageOnError = async ({
     const persistedHistoryId = await runChatPersistenceTransaction(
       scopeInvalidatedSignal,
       async () => {
+        await indexDocumentHistory(historyId, historyDocumentId, requestScope)
         const targetHistoryId = historyId ?? (
-          await saveHistory(title!, false, message_source, undefined, undefined, requestScope)
+          await saveHistory(title!, false, message_source, historyDocumentId, historyServerChatId, requestScope)
         ).id
         const shouldSaveUser = !isRegenerating && (
           !historyId || !isAbort || !isContinue
@@ -498,6 +523,8 @@ export const saveMessageOnError = async ({
 export const saveMessageOnSuccess = async ({
   historyTurn,
   historyId,
+  historyDocumentId,
+  historyServerChatId,
   setHistoryId,
   isRegenerate,
   selectedModel,
@@ -537,6 +564,8 @@ export const saveMessageOnSuccess = async ({
 }: {
   historyTurn?: HistorySendTurn
   historyId: string | null
+  historyDocumentId?: string
+  historyServerChatId?: string
   setHistoryId: (
     historyId: string,
     options?: { preserveServerChatId?: boolean }
@@ -588,12 +617,14 @@ export const saveMessageOnSuccess = async ({
       return historyId ?? historyTurn.admission.conversation_id;
     }
     const native = historyTurn.owner.kind === "native"
+    const target = historyTurn.owner.kind === "native" ? historyTurn.owner.documentTarget : undefined
+    const citations = target && readDocumentChatCitations(assistantMetadataExtra?.[DOCUMENT_CHAT_SOURCES], target)
     // ponytail: native history retains full reasoning text, not client elapsed-time telemetry.
     // Add a negotiated metadata field if cross-client timing becomes required.
     if (
       native &&
-      (source?.length ||
-        assistantMetadataExtra ||
+      ((source?.length && !citations) ||
+        Object.keys(assistantMetadataExtra ?? {}).some(key => key !== DOCUMENT_CHAT_SOURCES || !citations) ||
         generationInfo || sessionFilesToAdd.length)
     ) {
       throw new Error("unsupported_history_native_result_metadata")
@@ -612,6 +643,7 @@ export const saveMessageOnSuccess = async ({
       parent_message_id: historyTurn.existingSelection
         ? historyTurn.selection!.messages.at(-1)!.id
         : historyTurn.admission!.input_message_id,
+      ...(citations ? { metadataExtra: { [DOCUMENT_CHAT_SOURCES]: citations } } : {}),
       ...(!native
         ? {
             sources: source,
@@ -634,13 +666,14 @@ export const saveMessageOnSuccess = async ({
       await historyTurn.stageSettlementPayload(assistant)
       await settleSelectedExistingInput(historyTurn.owner, historyTurn.selection!, assistant)
     } else {
-    await settleAcceptedAssistant(
-      historyTurn.owner,
-      historyTurn.admission!,
-      assistant,
-      undefined,
-      sessionFilesToAdd
-    )
+      if (citations) await historyTurn.stageSettlementPayload?.(assistant)
+      await settleAcceptedAssistant(
+        historyTurn.owner,
+        historyTurn.admission!,
+        assistant,
+        undefined,
+        sessionFilesToAdd
+      )
     }
     historyTurn.resultId = assistant.id
     await historyTurn.complete?.(assistant.content)
@@ -668,8 +701,9 @@ export const saveMessageOnSuccess = async ({
   const persistedHistoryId = await runChatPersistenceTransaction(
     scopeInvalidatedSignal,
     async () => {
+      await indexDocumentHistory(historyId, historyDocumentId, requestScope)
       const targetHistoryId = historyId ?? (
-        await saveHistory(title!, false, message_source, undefined, undefined, requestScope)
+        await saveHistory(title!, false, message_source, historyDocumentId, historyServerChatId, requestScope)
       ).id
 
       if (isRegenerate && retryFailedTurn && userMessageId && userServerMessageId) {
