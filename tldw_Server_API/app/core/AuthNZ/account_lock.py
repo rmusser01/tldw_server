@@ -306,16 +306,18 @@ async def write_account_audit(
 async def unsuspend_api_key(*, user_id: int, key_id: int) -> dict | None:
     """Restore one suspended key of the user; its metadata row, or None when it is not theirs or not suspended."""
     repo = AuthnzApiKeysRepo(db_pool=(await AuthnzUsersRepo.from_pool()).db_pool)
-    if not await repo.unsuspend_key_for_user(key_id=key_id, user_id=user_id):
-        return None
-    await api_key_audit.emit_mandatory_api_key_management_audit(
-        user_id=user_id,
-        event_type=AuditEventType.DATA_UPDATE,
-        category=AuditEventCategory.DATA_MODIFICATION,
-        action="api_key.unsuspend",
-        resource_id=str(key_id),
-        actor_user_id=user_id,
-    )
+    # The restore and its mandatory audit commit together: a failed audit raises and rolls the restore back.
+    async with repo.db_pool.transaction() as conn:
+        if not await repo.unsuspend_key_for_user(key_id=key_id, user_id=user_id, conn=conn):
+            return None
+        await api_key_audit.emit_mandatory_api_key_management_audit(
+            user_id=user_id,
+            event_type=AuditEventType.DATA_UPDATE,
+            category=AuditEventCategory.DATA_MODIFICATION,
+            action="api_key.unsuspend",
+            resource_id=str(key_id),
+            actor_user_id=user_id,
+        )
     row = await repo.fetch_key_for_user(key_id=key_id, user_id=user_id)
     if row is None:
         return None

@@ -1516,14 +1516,26 @@ class AuthnzApiKeysRepo:
             )
         return _affected_row_count(result)
 
-    async def unsuspend_key_for_user(self, *, key_id: int, user_id: int) -> bool:
-        """Lift the suspension of one of the user's keys; True when it was suspended (TASK-15671)."""
-        result = await self.db_pool.execute(
+    async def unsuspend_key_for_user(self, *, key_id: int, user_id: int, conn: Any | None = None) -> bool:
+        """Lift the suspension of one of the user's keys; True when it was suspended (TASK-15671).
+
+        With ``conn`` the update joins the caller's transaction; without it, it runs in its own.
+        """
+        if conn is None:
+            async with self.db_pool.transaction() as txn:
+                return await self.unsuspend_key_for_user(key_id=key_id, user_id=user_id, conn=txn)
+        if self._is_postgres_backend():
+            result = await conn.execute(
+                "UPDATE api_keys SET suspended_at = NULL WHERE id = $1 AND user_id = $2 AND suspended_at IS NOT NULL",
+                int(key_id),
+                int(user_id),
+            )
+            return _affected_row_count(result) > 0
+        cursor = await conn.execute(
             "UPDATE api_keys SET suspended_at = NULL WHERE id = ? AND user_id = ? AND suspended_at IS NOT NULL",
-            int(key_id),
-            int(user_id),
+            (int(key_id), int(user_id)),
         )
-        return _affected_row_count(result) > 0
+        return getattr(cursor, "rowcount", 0) > 0
 
     async def insert_audit_log(
         self,

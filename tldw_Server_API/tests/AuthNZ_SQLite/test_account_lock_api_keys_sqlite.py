@@ -6,6 +6,9 @@ from datetime import datetime, timedelta, timezone
 
 import pytest
 
+from tldw_Server_API.app.core.Audit.unified_audit_service import MandatoryAuditWriteError
+from tldw_Server_API.app.core.AuthNZ import api_key_audit
+
 from tldw_Server_API.app.core.AuthNZ.account_lock import set_lock
 from tldw_Server_API.app.core.AuthNZ.database import get_db_pool
 from tldw_Server_API.app.core.AuthNZ.profile_version import VersionedUserWriteGateway
@@ -164,3 +167,37 @@ async def test_bobs_key_keeps_working_while_alice_is_locked(two_user_client) -> 
     await lock_user(ctx.alice_id)
     response = ctx.client.get(PROFILE, headers={"X-API-KEY": key})
     assert response.status_code == 200 and response.json()["user"]["id"] == ctx.bob_id
+
+
+async def test_unsuspend_is_undone_when_its_audit_cannot_be_written(two_user_client, monkeypatch) -> None:
+    ctx = two_user_client
+    _old_id, old_key, new_id, new_key, tokens = await _two_keys_across_a_lock(ctx)
+
+    async def _failing_audit(**_kwargs) -> None:
+        raise MandatoryAuditWriteError("Mandatory audit persistence unavailable")
+
+    monkeypatch.setattr(api_key_audit, "emit_mandatory_api_key_management_audit", _failing_audit)
+    response = ctx.client.post(_unsuspend(new_id), headers=bearer(tokens))
+    assert response.status_code == 503 and response.json()["detail"] == "Mandatory audit persistence unavailable"
+    listed = {k["id"]: k for k in ctx.client.get(KEYS, headers=bearer(tokens)).json()}
+    assert listed[new_id]["suspended_at"] is not None
+    refused = ctx.client.get(PROFILE, headers={"X-API-KEY": new_key})
+    assert refused.status_code == 401 and refused.json()["detail"] == "Invalid API key"
+
+
+async def test_unsuspend_writes_its_audit_event(two_user_client, monkeypatch) -> None:
+    ctx = two_user_client
+    _old_id, _old_key, new_id, _new_key, tokens = await _two_keys_across_a_lock(ctx)
+    calls: list[dict] = []
+    real = api_key_audit.emit_mandatory_api_key_management_audit
+
+    async def _recording_audit(**kwargs) -> None:
+        calls.append(kwargs)
+        await real(**kwargs)
+
+    monkeypatch.setattr(api_key_audit, "emit_mandatory_api_key_management_audit", _recording_audit)
+    response = ctx.client.post(_unsuspend(new_id), headers=bearer(tokens))
+    assert response.status_code == 200 and response.json()["suspended_at"] is None
+    assert [(c["action"], c["resource_id"], c["user_id"]) for c in calls] == [
+        ("api_key.unsuspend", str(new_id), ctx.alice_id)
+    ]
