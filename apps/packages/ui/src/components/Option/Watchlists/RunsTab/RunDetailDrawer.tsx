@@ -659,27 +659,29 @@ export const RunDetailDrawer: React.FC<RunDetailDrawerProps> = ({
       }
       const finishedAt = new Date().toISOString()
       if (hostedMode) await cancelWatchlistsQuery("run-detail", runId)
-      setData((prev) =>
-        prev
-          ? {
-              ...prev,
-              status: "cancelled",
-              finished_at: prev.finished_at || finishedAt,
-              error_msg: prev.error_msg || "cancelled_by_user"
-            }
-          : prev
-      )
+      if (!hostedMode || isCurrentRun()) {
+        setData((prev) =>
+          prev
+            ? {
+                ...prev,
+                status: "cancelled",
+                finished_at: prev.finished_at || finishedAt,
+                error_msg: prev.error_msg || "cancelled_by_user"
+              }
+            : prev
+        )
+      }
       patchRunLists(runId, {
         status: "cancelled",
         finished_at: finishedAt,
         error_msg: "cancelled_by_user"
       })
       void invalidateWatchlists("runs", "jobs", "overview")
-      if (!isCurrentRun()) return
       if (hostedMode) {
         void refreshWatchlistsQuery("run-detail", runId)
-        void refreshWatchlistsQuery("items", itemsParams)
+        void refreshWatchlistsQuery("items", { run_id: runId }, { exact: false })
       }
+      if (!isCurrentRun()) return
       setCancelState("idle")
       message.success(t("watchlists:runs.cancelRunSuccess", "Run cancelled"))
       manuallyClosedRef.current = true

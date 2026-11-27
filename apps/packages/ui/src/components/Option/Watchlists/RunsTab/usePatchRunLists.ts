@@ -6,6 +6,7 @@ import {
   useWatchlistsAccountGeneration
 } from "@/hooks/useWatchlistsQuery"
 import type { PaginatedResponse, WatchlistRun } from "@/types/watchlists"
+import { isWatchlistRunActive, isWatchlistRunTerminal } from "../shared/runStatus"
 
 const isFilteredRunList = (key: QueryKey): boolean => {
   const params = key[3] as { q?: string; status?: string } | undefined
@@ -31,6 +32,7 @@ export const usePatchRunLists = () => {
     for (const [key, page] of pages) {
       const run = page?.items?.find((item) => item.id === runId)
       if (!page || !run) continue
+      if (isWatchlistRunTerminal(run.status) && isWatchlistRunActive(patch.status)) continue
       // A status change can affect membership and pagination across filtered pages.
       if (patch.status !== undefined && run.status !== patch.status && isFilteredRunList(key)) {
         refreshFilteredLists = true
