@@ -15,20 +15,8 @@ from tldw_Server_API.app.core.AuthNZ.database import (
     should_enforce_sqlite_schema_strictness,
     validate_required_sqlite_api_key_schema,
 )
+from tldw_Server_API.app.core.AuthNZ.repos._dual_backend import affected_rows as _affected_row_count
 from tldw_Server_API.app.core.exceptions import APIKeyRotationRejected
-
-
-def _affected_row_count(result: Any) -> int:
-    """Normalize SQLite cursor/asyncpg status values to an affected-row count."""
-    rowcount = getattr(result, "rowcount", None)
-    if isinstance(rowcount, int):
-        return rowcount
-    if isinstance(result, str):
-        parts = result.strip().split()
-        if parts and parts[-1].isdigit():
-            return int(parts[-1])
-    return 0
-
 
 _SQLITE_API_KEY_LOOKUP_COLUMNS = (
     ("id", "id", None),
@@ -1496,6 +1484,39 @@ class AuthnzApiKeysRepo:
         except Exception as exc:  # pragma: no cover - surfaced via higher layers
             logger.error(f"AuthnzApiKeysRepo.mark_key_expired failed: {exc}")
             raise
+
+    async def suspend_keys_created_since(self, *, user_id: int, since: datetime, now: datetime) -> int:
+        """Suspend the user's active, unsuspended keys created after ``since``; return how many (TASK-15671).
+
+        ``created_at`` is written by the database default (UTC text on SQLite, a naive session-time-zone
+        TIMESTAMP on PostgreSQL), so the comparison happens in SQL on each backend.
+        """
+        if self._is_postgres_backend():
+            result = await self.db_pool.execute(
+                "UPDATE api_keys SET suspended_at = $1 WHERE user_id = $2 AND status = 'active' "
+                "AND suspended_at IS NULL AND created_at > $3::timestamptz",
+                now,
+                int(user_id),
+                since,
+            )
+        else:
+            result = await self.db_pool.execute(
+                "UPDATE api_keys SET suspended_at = ? WHERE user_id = ? AND status = 'active' "
+                "AND suspended_at IS NULL AND datetime(created_at) > datetime(?)",
+                now.isoformat(),
+                int(user_id),
+                since.isoformat(),
+            )
+        return _affected_row_count(result)
+
+    async def unsuspend_key_for_user(self, *, key_id: int, user_id: int) -> bool:
+        """Lift the suspension of one of the user's keys; True when it was suspended (TASK-15671)."""
+        result = await self.db_pool.execute(
+            "UPDATE api_keys SET suspended_at = NULL WHERE id = ? AND user_id = ? AND suspended_at IS NOT NULL",
+            int(key_id),
+            int(user_id),
+        )
+        return _affected_row_count(result) > 0
 
     async def insert_audit_log(
         self,

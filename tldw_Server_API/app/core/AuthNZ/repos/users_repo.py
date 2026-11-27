@@ -3,12 +3,14 @@ from __future__ import annotations
 import contextlib
 import uuid as uuid_module
 from dataclasses import dataclass
+from datetime import datetime
 from typing import Any
 
 from loguru import logger
 
 from tldw_Server_API.app.core.AuthNZ.database import DatabasePool, get_db_pool
 from tldw_Server_API.app.core.AuthNZ.profile_version import VersionedUserWriteGateway
+from tldw_Server_API.app.core.AuthNZ.repos._dual_backend import affected_rows
 from tldw_Server_API.app.core.AuthNZ.settings import get_profile, get_settings
 from tldw_Server_API.app.core.DB_Management.Users_DB import DatabaseError, UserNotFoundError, UsersDB
 
@@ -179,6 +181,63 @@ class AuthnzUsersRepo:
         except Exception as exc:  # pragma: no cover - defensive
             logger.error(f"AuthnzUsersRepo.get_user_by_uuid failed: {exc}")
             raise
+
+    # --- account security lock (TASK-15671). The two lock columns are raw-write safe. ---------
+
+    def _bind_time(self, value: datetime) -> Any:
+        """PostgreSQL binds the aware datetime; SQLite stores ISO-8601 text."""
+        return value if self._is_postgres_backend() else value.isoformat()
+
+    async def set_security_lock(self, user_id: int, *, now: datetime) -> bool:
+        """Lock the account unless it is already locked; True when this call locked it."""
+        result = await self.db_pool.execute(
+            "UPDATE users SET security_locked_at = ? WHERE id = ? AND security_locked_at IS NULL",
+            self._bind_time(now),
+            int(user_id),
+        )
+        return affected_rows(result) == 1
+
+    async def clear_security_lock(self, user_id: int, *, locked_at: Any, valid_after: datetime) -> bool:
+        """Clear the lock only if it still holds ``locked_at``, bound exactly as it was read (compare-and-set)."""
+        result = await self.db_pool.execute(
+            "UPDATE users SET security_locked_at = NULL, credentials_valid_after = ? "
+            "WHERE id = ? AND security_locked_at = ?",
+            self._bind_time(valid_after),
+            int(user_id),
+            locked_at,
+        )
+        return affected_rows(result) == 1
+
+    async def force_security_lock(self, user_id: int, *, now: datetime) -> None:
+        """Write a fresh lock whatever the current state (take-back only)."""
+        await self.db_pool.execute(
+            "UPDATE users SET security_locked_at = ? WHERE id = ?", self._bind_time(now), int(user_id)
+        )
+
+    async def set_credentials_valid_after(self, user_id: int, *, valid_after: datetime) -> None:
+        """Refuse every token of this user issued before ``valid_after``."""
+        await self.db_pool.execute(
+            "UPDATE users SET credentials_valid_after = ? WHERE id = ?", self._bind_time(valid_after), int(user_id)
+        )
+
+    async def find_locked_user_by_previous_email(self, email: str, *, since: datetime) -> dict[str, Any] | None:
+        """The one locked user whose previous address is ``email``, changed after ``since``; None when not exactly one."""
+        query = (
+            "SELECT * FROM users WHERE security_locked_at IS NOT NULL AND LOWER(previous_email) = LOWER(?) "
+            "AND email_changed_at > ? LIMIT 2"
+            if self._is_postgres_backend()
+            else "SELECT * FROM users WHERE security_locked_at IS NOT NULL AND LOWER(previous_email) = LOWER(?) "
+            "AND datetime(email_changed_at) > datetime(?) LIMIT 2"
+        )
+        rows = await self.db_pool.fetchall(query, email.strip(), self._bind_time(since))
+        return self._normalize_user_record(rows[0]) if len(rows) == 1 else None
+
+    async def email_in_use_by_another_user(self, email: str, *, user_id: int) -> bool:
+        """Whether a user other than ``user_id`` has ``email`` as their address (any letter case)."""
+        found = await self.db_pool.fetchval(
+            "SELECT 1 FROM users WHERE LOWER(email) = LOWER(?) AND id <> ? LIMIT 1", email.strip(), int(user_id)
+        )
+        return found is not None
 
     async def list_users(
         self,

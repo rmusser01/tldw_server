@@ -66,6 +66,16 @@ async def authorize_own_email_change(
             "current_password_invalid",
             "Current password is incorrect. If you sign in with SSO or an email link, use Forgot password to set one first.",
         )
+    # Another account's owner can take its previous address back for 7 days (TASK-15671, Decision 18).
+    changed = [value for value in new_emails if str(value).strip().lower() != stored]
+    if await password_service.email_recently_released_by_another_user(
+        db_conn, changed, user_id=user_id, is_postgres=is_postgres
+    ):
+        raise _refuse(
+            user_id,
+            "email_recently_released",
+            "This address left another account in the last 7 days and cannot be used yet. Try again later.",
+        )
 
 
 async def notify_previous_address(

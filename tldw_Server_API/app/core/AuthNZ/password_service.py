@@ -6,6 +6,7 @@ import re
 import secrets
 import string
 import threading
+from collections.abc import Sequence
 from typing import Any, Optional
 
 #
@@ -544,6 +545,33 @@ async def fetch_email_and_password_hash(
         except (IndexError, KeyError, TypeError):
             return None, None
     return (str(email) if email else None), (str(password_hash) if password_hash else None)
+
+
+async def email_recently_released_by_another_user(
+    db_connection: Any, emails: Sequence[str], *, user_id: int, is_postgres: bool
+) -> bool:
+    """Whether another user's ``previous_email`` is one of ``emails`` (any case), changed in the last 7 days.
+
+    Reads on the caller's connection only. Such an address may still be taken back by its owner (TASK-15671).
+    """
+    addresses = sorted({str(value).strip().lower() for value in emails if str(value).strip()})
+    if not addresses:
+        return False
+    if is_postgres:
+        found = await db_connection.fetchval(
+            "SELECT 1 FROM users WHERE id <> $1 AND LOWER(previous_email) = ANY($2::text[])"
+            " AND email_changed_at > CURRENT_TIMESTAMP - INTERVAL '7 days' LIMIT 1",
+            user_id,
+            addresses,
+        )
+        return found is not None
+    placeholders = ", ".join("?" for _ in addresses)
+    cursor = await db_connection.execute(
+        f"SELECT 1 FROM users WHERE id <> ? AND LOWER(previous_email) IN ({placeholders})"  # nosec B608 - placeholders only
+        " AND datetime(email_changed_at) > datetime('now', '-7 days') LIMIT 1",
+        (user_id, *addresses),
+    )
+    return await cursor.fetchone() is not None
 
 # Global instance with thread-safe initialization
 _password_service: Optional[PasswordService] = None

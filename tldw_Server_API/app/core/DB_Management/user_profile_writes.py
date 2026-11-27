@@ -25,6 +25,42 @@ _UPDATE_EMAIL_POSTGRES = (
 )
 
 
+_RESTORE_PREVIOUS_EMAIL_SQLITE = (
+    "UPDATE users SET email = ?, previous_email = NULL, email_changed_at = CURRENT_TIMESTAMP,"
+    " password_hash = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ? AND LOWER(previous_email) = LOWER(?)"
+)
+_RESTORE_PREVIOUS_EMAIL_POSTGRES = (
+    "UPDATE users SET email = $1, previous_email = NULL, email_changed_at = CURRENT_TIMESTAMP,"
+    " password_hash = $2, updated_at = CURRENT_TIMESTAMP WHERE id = $3 AND LOWER(previous_email) = LOWER($4)"
+)
+
+
+async def restore_previous_email(
+    connection: Any,
+    *,
+    backend: str,
+    user_id: int,
+    previous_email: str,
+    password_hash: str,
+    gateway: VersionedUserWriteGateway | None = None,
+    ownership: UserVersionOwnership = UserVersionOwnership.GATEWAY_OWNS_ANCHOR,
+) -> UserWriteResult:
+    """Make the previous address the account's email again and replace the password (account take-back).
+
+    Only when ``previous_email`` is still the stored previous address (any letter case); otherwise
+    nothing changes (empty ``affected_user_ids``). TASK-15671.
+    """
+    statement = _RESTORE_PREVIOUS_EMAIL_POSTGRES if backend == "postgres" else _RESTORE_PREVIOUS_EMAIL_SQLITE
+    return await (gateway or VersionedUserWriteGateway(backend)).execute_update(
+        connection,
+        user_id=user_id,
+        profile_visible_fields=("email",),
+        statement=statement,
+        parameters=(previous_email, password_hash, user_id, previous_email),
+        ownership=ownership,
+    )
+
+
 async def update_user_email(
     connection: Any,
     *,
