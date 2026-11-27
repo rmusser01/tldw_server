@@ -1,22 +1,20 @@
 ---
-id: TASK-15620
+id: TASK-15672
 title: Fix hosted Watchlists run polling with cookie sessions
 status: Done
 assignee:
-  - '@codex'
+- '@codex'
 created_date: '2026-11-23T20:57:00Z'
 updated_date: '2026-11-23T21:14:00Z'
 labels:
-  - frontend
-  - watchlists
+- frontend
+- watchlists
 dependencies: []
 references:
-  - https://github.com/rmusser01/tldw_server/pull/3580
+- https://github.com/rmusser01/tldw_server/pull/3580
 modified_files:
-  - >-
-    apps/packages/ui/src/components/Option/Watchlists/RunsTab/RunDetailDrawer.tsx
-  - >-
-    apps/packages/ui/src/components/Option/Watchlists/RunsTab/__tests__/RunDetailDrawer.stream-lifecycle.test.tsx
+- apps/packages/ui/src/components/Option/Watchlists/RunsTab/RunDetailDrawer.tsx
+- apps/packages/ui/src/components/Option/Watchlists/RunsTab/__tests__/RunDetailDrawer.stream-lifecycle.test.tsx
 type: bug
 ordinal: 14969
 ---
@@ -32,6 +30,7 @@ Hosted WebUI sessions authenticate through cookies and keep the browser access t
 - [x] #1 Active hosted runs refresh through the existing cookie-authenticated run-details request and display their terminal status.
 - [x] #2 Polling stops on completion, close, and Live off. Late responses keep the selected run and its actions consistent.
 - [x] #3 The regression covers a cookie session with no browser token and the existing self-hosted WebSocket tests pass.
+- [x] #4 Global and job-scoped run lists revalidate their status filters and totals when a hosted run changes status.
 <!-- AC:END -->
 
 ## Definition of Done
@@ -61,6 +60,8 @@ Local verification passed 79 Watchlists run and hosted-auth tests, 106 Watchlist
 
 Opened public draft PR #3580 against dev. Hosted browser acceptance belongs to the private deployment and is pending.
 Rebased #3580 onto dev while retaining its Watchlists React Query migration. Hosted sessions reuse the scoped run-details query and refresh the exact items page when the observed run reaches a terminal state. ADR required: no. This uses the existing account-scoped query keys, hosted transport, and persisted run state.
+Renumbered for PR #3580 after backend-required found that TASK-15620 was already assigned to the quick-launch production WebUI build on dev. This is the same original Watchlists work record under a free ID.
+Independent review found that patching a completed row in a Running list could leave the row and total stale and stop that list polling. Both filter shapes failed the new regression on the original branch. Updated the account-scoped patch to refetch filtered membership after status transitions while keeping compatible row patches for other pages. Watchlists verification on the prepared dev replay: 112 accessibility tests, 56 scale tests, and 3 static checks passed. No Python files changed. The previously recorded Change summary waiver applies to PR #3580. Hosted deployment acceptance remains pending.
 <!-- SECTION:IMPLEMENTATION_NOTES:END -->
 
 ## Final Summary
