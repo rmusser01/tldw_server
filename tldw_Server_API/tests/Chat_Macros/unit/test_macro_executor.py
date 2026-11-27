@@ -716,6 +716,25 @@ async def test_failed_branch_retries_once_and_partial_failure_is_rendered(repo, 
 
 
 @pytest.mark.asyncio
+async def test_moderation_refused_branch_fails_without_retry(repo, wrapup_definition):
+    """TASK-13950.27: a refusal is deterministic, so the branch fails once with its own code."""
+    from tldw_Server_API.app.core.exceptions import LLMPolicyRefusal
+
+    class Refusing(RecordingBranchRunner):
+        async def run_branch(self, **kwargs):
+            self.prompts.append(kwargs["prompt"])
+            self.attempts[kwargs["prompt"]] = self.attempts.get(kwargs["prompt"], 0) + 1
+            raise LLMPolicyRefusal("Input violates moderation policy")
+
+    runner = Refusing()
+    run = _create_run(repo, wrapup_definition)
+    await _executor(repo, wrapup_definition, runner).execute_run(run.run_id)
+    branches = repo.list_branches(run.run_id)
+    assert branches and all(b.status == "failed" and b.error_code == "llm_policy_refused" for b in branches)
+    assert set(runner.attempts.values()) == {1}
+
+
+@pytest.mark.asyncio
 async def test_failed_branch_waits_before_retry(
     repo,
     wrapup_definition,

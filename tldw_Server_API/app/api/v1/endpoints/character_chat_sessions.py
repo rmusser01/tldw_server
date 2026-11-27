@@ -171,7 +171,7 @@ from tldw_Server_API.app.core.Character_Chat.world_book_prompt_context import (
     build_world_book_prompt_context,
 )
 from tldw_Server_API.app.core.config_llm_providers import get_default_provider
-from tldw_Server_API.app.core.exceptions import LLMQuotaExceededError, raise_detached_error
+from tldw_Server_API.app.core.exceptions import LLMPolicyRefusal, LLMQuotaExceededError, raise_detached_error
 from tldw_Server_API.app.core.LLM_Calls.provider_results import ADMIN_POLICY_CODES
 from tldw_Server_API.app.core.Provider_Credentials.byok_runtime import (
     ByokResolutionError,
@@ -614,8 +614,8 @@ async def _execute_character_provider_call(
         return await _execute_provider_call()
     except asyncio.CancelledError:
         raise
-    except LLMQuotaExceededError:
-        raise  # the user's limit, refused at the call: the route answers the 402
+    except (LLMQuotaExceededError, LLMPolicyRefusal):
+        raise  # the user's limit (402) or a moderation refusal (400), refused at the call
     except ChatAPIError as e:
         logger.error(
             "Character chat provider call failed error_type={}",
@@ -1152,6 +1152,7 @@ async def _select_auto_character_llm_router_choice(
                     model=router_model.model,
                     max_tokens=64,
                     streaming=False,
+                    llm_surface="character.router",
                     user_identifier=str(getattr(current_user, "id", "auto-router")),
                     app_config=provider_credentials.app_config,
                     credentials_resolved=provider_credentials.credentials_resolved,
@@ -1204,6 +1205,8 @@ async def _select_auto_character_llm_router_choice(
             )
         except asyncio.CancelledError:
             raise
+        except LLMPolicyRefusal:
+            raise  # a moderation block of the router prompt: the caller's 400, not "router failed"
         except _CHAR_CHAT_SESSIONS_NONCRITICAL_EXCEPTIONS as exc:
             logger.debug(
                 "Auto character-chat LLM router call failed error_type={}",
@@ -6906,7 +6909,7 @@ async def _complete_roleplay_resume(
         result = await _execute_character_provider_call(
             partial(
                 _chat_service.perform_chat_api_call,
-                api_endpoint=provider,
+                api_endpoint=provider, llm_surface="character.roleplay_resume",
                 **provider_arguments,
                 api_key=credentials.api_key,
                 call_policy=ProviderCallPolicy(
@@ -7503,7 +7506,7 @@ async def character_chat_completion(
                 llm_resp = await _execute_character_provider_call(
                     partial(
                         _chat_service.perform_chat_api_call,
-                        api_endpoint=provider,
+                        api_endpoint=provider, llm_surface="character.completion",
                         messages_payload=formatted,
                         api_key=provider_credentials.api_key,
                         temp=resolved_temperature,

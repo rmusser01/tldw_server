@@ -5,6 +5,7 @@ from __future__ import annotations
 import asyncio
 import json
 from dataclasses import dataclass
+from functools import partial
 from typing import Any, Callable
 
 from loguru import logger
@@ -267,7 +268,9 @@ async def resolve_chat_route(
     resolve_provider_and_model_fn: Callable[..., tuple[str, str, str, str, dict[str, Any]]] = resolve_provider_and_model,
     resolve_provider_api_key_fn: Callable[..., tuple[str | None, dict[str, Any]]] = resolve_provider_api_key,
     resolve_byok_credentials_fn: Callable[..., Any] = resolve_byok_credentials,
-    perform_chat_api_call_async_fn: Callable[..., Any] = perform_chat_api_call_async,
+    perform_chat_api_call_async_fn: Callable[..., Any] = partial(
+        perform_chat_api_call_async, llm_surface="chat.prompt_improvement"
+    ),
     log_model_router_usage_fn: Callable[..., Any] = log_model_router_usage,
     priority_resolver: Callable[..., list[str] | None] = get_override_model_priority,
     apply_provider_overrides_fn: Callable[[dict[str, Any]], dict[str, Any]] = apply_llm_provider_overrides_to_listing,

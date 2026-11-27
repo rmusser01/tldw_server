@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from collections.abc import Awaitable, Callable
+from functools import partial
 from typing import Any, Protocol
 
 from pydantic import BaseModel, ConfigDict, Field
@@ -64,7 +65,7 @@ class ChatMacroLLMBranchRunner:
         if chat_call is None:
             from tldw_Server_API.app.core.Chat.chat_service import perform_chat_api_call_async
 
-            chat_call = perform_chat_api_call_async
+            chat_call = partial(perform_chat_api_call_async, llm_surface="chat.macros")
 
         call_kwargs: dict[str, Any] = {
             "messages": [{"role": "user", "content": _branch_user_prompt(snapshot, prompt)}],
