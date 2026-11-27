@@ -1,10 +1,13 @@
 """Public setup status must honor server-wide overrides without exposing keys."""
 
+import asyncio
+
 import pytest
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
 
 from tldw_Server_API.app.api.v1.endpoints import config_info
+from tldw_Server_API.app.core import config_llm_providers
 from tldw_Server_API.app.core.Provider_Credentials import byok_runtime, llm_provider_overrides
 from tldw_Server_API.app.core.Provider_Credentials.llm_provider_overrides import LLMProviderOverride
 
@@ -12,7 +15,9 @@ from tldw_Server_API.app.core.Provider_Credentials.llm_provider_overrides import
 @pytest.fixture
 def provider_status(monkeypatch):
     static_keys = {}
-    monkeypatch.setattr(config_info, "_resolve_provider_key", static_keys.get)
+    for env_var in config_info._PROVIDER_ENV_KEY_MAP.values():
+        monkeypatch.delenv(env_var, raising=False)
+    monkeypatch.setattr(config_llm_providers, "get_api_keys", lambda: static_keys)
 
     def no_external_calls(*_args, **_kwargs):
         pytest.fail("Public provider status attempted discovery or principal resolution")
@@ -161,6 +166,7 @@ def test_reads_one_consistent_override_snapshot_per_request(provider_status, mon
 
     def capture_before_replacement():
         nonlocal reads
+        asyncio.get_running_loop()
         reads += 1
         snapshot = capture()
         _set_override(is_enabled=False)

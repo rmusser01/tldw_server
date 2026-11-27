@@ -571,7 +571,7 @@ class TestListConfiguredProviders:
             "tldw_Server_API.app.core.config_llm_providers.get_api_keys",
             return_value={},
         ):
-            response = await list_configured_providers()
+            response = await list_configured_providers({})
 
         assert hasattr(response, "providers")
         assert hasattr(response, "any_configured")
@@ -591,7 +591,7 @@ class TestListConfiguredProviders:
             "tldw_Server_API.app.core.config_llm_providers.get_api_keys",
             return_value={"openai": "sk-test-12345678"},
         ):
-            response = await list_configured_providers()
+            response = await list_configured_providers({})
 
         openai_item = next(p for p in response.providers if p.name == "openai")
         assert openai_item.configured is True
@@ -607,7 +607,7 @@ class TestListConfiguredProviders:
             "tldw_Server_API.app.core.config_llm_providers.get_api_keys",
             return_value={},
         ):
-            response = await list_configured_providers()
+            response = await list_configured_providers({})
 
         ollama = next(p for p in response.providers if p.name == "ollama")
         assert ollama.configured is True
@@ -624,7 +624,7 @@ class TestListConfiguredProviders:
             "tldw_Server_API.app.core.config_llm_providers.get_api_keys",
             return_value={},
         ):
-            response = await list_configured_providers()
+            response = await list_configured_providers({})
 
         for provider_name in ("custom-openai-api", "custom-openai-api-2", "custom-openai-api-99"):
             provider = next(p for p in response.providers if p.name == provider_name)
@@ -649,7 +649,7 @@ class TestListConfiguredProviders:
             "tldw_Server_API.app.core.config_llm_providers.get_api_keys",
             return_value={},
         ):
-            response = await list_configured_providers()
+            response = await list_configured_providers({})
 
         assert response.any_configured is False
 
@@ -662,7 +662,7 @@ class TestListConfiguredProviders:
             "tldw_Server_API.app.core.config_llm_providers.get_api_keys",
             return_value={"openai": full_key},
         ):
-            response = await list_configured_providers()
+            response = await list_configured_providers({})
 
         openai_item = next(p for p in response.providers if p.name == "openai")
         assert openai_item.key_hint is not None

@@ -12,7 +12,7 @@ import shutil
 import time
 from collections import defaultdict
 from pathlib import Path
-from typing import Optional
+from typing import Annotated, Optional
 
 from fastapi import APIRouter, Depends, HTTPException, Request, Response, status
 from fastapi.responses import HTMLResponse, RedirectResponse
@@ -27,6 +27,9 @@ from tldw_Server_API.app.api.v1.API_Deps.auth_deps import (
     RequireRole,
     get_auth_principal,
     require_expected_user,
+)
+from tldw_Server_API.app.api.v1.API_Deps.provider_credentials_deps import (
+    require_provider_override_snapshot,
 )
 from tldw_Server_API.app.core import config as config_mod
 from tldw_Server_API.app.core.AuthNZ.permissions import SYSTEM_CONFIGURE
@@ -748,7 +751,12 @@ class ProviderValidateResponse(BaseModel):
 
 
 @router.get("/config/providers", response_model=ProvidersStatusResponse)
-async def list_configured_providers() -> ProvidersStatusResponse:
+async def list_configured_providers(
+    provider_overrides: Annotated[
+        dict[str, _llm_provider_overrides.LLMProviderOverride],
+        Depends(require_provider_override_snapshot),
+    ],
+) -> ProvidersStatusResponse:
     """List all supported LLM providers and their configuration status.
 
     Returns which providers have API keys set (from environment variables or
@@ -761,14 +769,6 @@ async def list_configured_providers() -> ProvidersStatusResponse:
         )
     except Exception:
         PROVIDER_REQUIRES_KEY = {}
-
-    try:
-        provider_overrides = _llm_provider_overrides.get_llm_provider_overrides_snapshot()
-    except ByokResolutionError:
-        raise HTTPException(
-            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
-            detail="Provider configuration unavailable",
-        ) from None
 
     # Ordered list of cloud providers first, then local
     cloud_providers = [
