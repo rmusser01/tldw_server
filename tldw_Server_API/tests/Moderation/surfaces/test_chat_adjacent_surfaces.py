@@ -125,7 +125,9 @@ def test_prompt_improvement_router_block_propagates(moderation_hooks, stub_llm_r
 
 
 def test_prompt_improvement_content_filter_not_refallen_back(moderation_hooks, stub_llm_registry):
-    """A router answer the output hook blocked (content_filter) gives no choice and is not asked again."""
+    """A router answer the output hook blocked (content_filter) gives no choice and is not asked again.
+
+    The resolver has no provider-fallback loop, so one request is the whole story; this pins that."""
     from tldw_Server_API.app.core.Chat import chat_route_resolver as r
     from tldw_Server_API.app.core.LLM_Calls.routing import RouterRequest, RoutingPolicy
 

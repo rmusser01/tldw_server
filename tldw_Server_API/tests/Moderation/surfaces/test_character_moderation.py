@@ -13,6 +13,7 @@ from tldw_Server_API.app.core.exceptions import LLMPolicyRefusal
 from tldw_Server_API.tests.Moderation.conftest import (
     DONE,
     anthropic_frame,
+    google_frame,
     finish_frame,
     openai_frame,
     reply,
@@ -56,18 +57,19 @@ def test_complete_v2_output_redact(chat, moderation_hooks, stub_llm_registry):
     assert response.json()["assistant_content"] == "the [X] word"
 
 
-def test_complete_v2_stream_redact_with_anthropic_frames_leaks_nothing(chat, moderation_hooks, stub_llm_registry):
+@pytest.mark.parametrize("frame", [anthropic_frame, google_frame], ids=["anthropic", "google"])
+def test_complete_v2_stream_redact_with_provider_frames_leaks_nothing(chat, moderation_hooks, stub_llm_registry, frame):
+    """The raw-line forwarding must carry the moderated frame: no ``provider_response`` copy of the original text."""
     client, url = chat
-    stub_llm_registry.items = [
-        anthropic_frame("the sec", original="the sec"),
-        anthropic_frame("ret word", original="ret word"),
-        finish_frame(), usage_frame(), DONE,
-    ]
+    stub_llm_registry.items = [frame("the sec"), frame("ret word"), finish_frame(), usage_frame(), DONE]
     with client.stream("POST", url, json=_body(stream=True)) as response:
         assert response.status_code == 200, response.read()
-        text = "".join(response.iter_text())
-    assert "secret" not in text
+        lines = [line for line in response.iter_lines() if line]
+    text = "\n".join(lines)
     assert "[X]" in text
+    assert "provider_response" not in text
+    assert "sec" not in text.replace("[X]", "")
+    assert "ret word" not in text
 
 
 def test_character_surface_off_is_not_moderated(chat, make_service, stub_llm_registry):
