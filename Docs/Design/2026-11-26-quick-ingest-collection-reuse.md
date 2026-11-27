@@ -10,6 +10,10 @@ An unsuccessful setup request stops dispatch. A successful response must identif
 
 Two clients may also reach a direct scrape or synchronous upload fallback together. The server decides which caller may dispatch that side effect. If delivery or completion is uncertain, the receipt reports that uncertainty. A stale browser cannot replace an accepted or saved receipt with a setup failure.
 
+## PostgreSQL upgrades
+
+For deployments with separate migration and serving roles, run the Collections schema migration as the table owner before serving requests with the application role. The migration applies row-level security to the plan, source and attempt tables in place, preserving existing retry keys and receipts. Requests and workers access those rows under the source owner's user ID. The application checks the policies when it opens the Collections database and reports when an owner migration is needed.
+
 ## Verification
 
 The database tests exercise a failed write, concurrent resumes, reordered sources, later edits, separate owners and both fresh and upgraded SQLite and PostgreSQL databases. The receiver tests cover Jobs, direct scraping and the synchronous upload fallback.
