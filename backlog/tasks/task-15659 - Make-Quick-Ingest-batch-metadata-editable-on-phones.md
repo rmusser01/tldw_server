@@ -1,7 +1,7 @@
 ---
 id: TASK-15659
 title: Make Quick Ingest batch metadata editable on phones
-status: Done
+status: In Progress
 labels:
 - webui
 - ux
@@ -31,6 +31,9 @@ Implemented one keyed editor per source. The phone disclosure and inclusion labe
 Verified the full Quick Ingest Chromium suite (16 passed), scoped Vitest suite (497 passed), frontend TypeScript, scoped ESLint, translation parity and diff whitespace. Bandit inspected the touched directories; there are no Python code changes. The WebUI source guide and published copy document phone editing. GitHub confirms both screenshot blobs and dev as the base of https://github.com/rmusser01/tldw_server/pull/3639.
 Review found that source-only edits do not trigger a collection and native uploads drop metadata. Verify actual collection-item and file-job request payloads for those two supported inputs.
 Follow-up saved per-source-only metadata with the default collection name and added durable item bindings for uploaded video files. Mixed URL/file requests retain URL-list binding semantics. A repeated file request reuses the owner-scoped job and original cancellation batch. Regression tests first showed zero planned items and HTTP 422 for a bound native upload. Final checks passed 501 UI tests, 35 API/collection tests (including an actual file job, repeat submit, worker and collection DB read), frontend TypeScript, scoped ESLint and diff whitespace. Bandit found no application issues; the existing B106 in the test fixture and three baseline Ruff import findings are unchanged. User guides updated. Existing ADR assessment still applies.
+Resolve the cross-review failure path: a partial item plan must stop all ingest dispatches including shared-only edits, and its already-created rows must reflect the failure.
+Also verify the owner and collection binding on URL retry replay, preserve an actual cancellation target when a grouped request reuses jobs, and retain unbound clients’ existing idempotency keys.
+Partial shared-only planning reproduced two unintended uploads. After the correction 80 service tests passed, including both a rejected second row and an accepted second row whose response was lost. All confirmed pending rows become submit_failed and no source is dispatched. Frontend TypeScript, scoped ESLint and whitespace checks passed.
 <!-- SECTION:IMPLEMENTATION_NOTES:END -->
 
 ## Final Summary

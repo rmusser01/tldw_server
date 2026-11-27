@@ -692,24 +692,58 @@ const createPlannedConferenceCollection = async (
       ...DIRECT_QUICK_INGEST_TRANSPORT,
     }),
   );
+  if (!Number.isSafeInteger(collection.id) || collection.id <= 0) throw new Error("The server did not confirm the collection.");
 
   const itemsByEntryId = new Map<string, PlannedConferenceCollectionItem>();
-  for (const entry of selectedEntries) {
-    const item = normalizeMediaCollectionItem(
-      await scopedQuickIngestRequest<ApiMediaCollectionItem>(input, {
-        path: `/api/v1/media/collections/${encodeURIComponent(String(collection.id))}/items`,
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: buildConferenceCollectionItemPayload(metadata, entry),
-        timeoutMs: DIRECT_INGEST_TIMEOUT_MS,
-        ...DIRECT_QUICK_INGEST_TRANSPORT,
-      }),
-    );
-    itemsByEntryId.set(entry.id, {
-      collectionId: collection.id,
-      itemId: item.id,
-      idempotencyKey: item.idempotencyKey,
-    });
+  const pendingItemIds = new Set<number>();
+  try {
+    for (const entry of selectedEntries) {
+      const item = normalizeMediaCollectionItem(
+        await scopedQuickIngestRequest<ApiMediaCollectionItem>(input, {
+          path: `/api/v1/media/collections/${collection.id}/items`,
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: buildConferenceCollectionItemPayload(metadata, entry),
+          timeoutMs: DIRECT_INGEST_TIMEOUT_MS,
+          ...DIRECT_QUICK_INGEST_TRANSPORT,
+        }),
+      );
+      if (!Number.isSafeInteger(item.id) || item.id <= 0) throw new Error("The server did not confirm the collection item.");
+      if (item.status === "planned") pendingItemIds.add(item.id);
+      itemsByEntryId.set(entry.id, {
+        collectionId: collection.id, itemId: item.id, idempotencyKey: item.idempotencyKey,
+      });
+    }
+  } catch (error) {
+    assertQuickIngestRequestCurrent(input, error);
+    let cleanupUnconfirmed = false;
+    // A failed POST response can still have committed the last item.
+    try {
+      const stored = await scopedQuickIngestRequest<ApiMediaCollection>(input, {
+        path: `/api/v1/media/collections/${collection.id}`, method: "GET", ...DIRECT_QUICK_INGEST_TRANSPORT,
+      });
+      const sourceIds = new Set(selectedEntries.map(entry => entry.id));
+      for (const item of normalizeMediaCollectionResponse(stored).items) {
+        if (!sourceIds.has(String(item.metadata.quick_ingest_item_id))) continue;
+        if (item.status === "planned") pendingItemIds.add(item.id);
+        else pendingItemIds.delete(item.id);
+      }
+    } catch (readError) {
+      assertQuickIngestRequestCurrent(input, readError);
+      cleanupUnconfirmed = true;
+    }
+    for (const itemId of pendingItemIds) {
+      try {
+        await updateConferenceCollectionItem(input, { collectionId: collection.id, itemId }, {
+          status: "submit_failed", error_summary: "Collection setup failed before ingestion started.",
+        });
+      } catch (patchError) {
+        assertQuickIngestRequestCurrent(input, patchError);
+        cleanupUnconfirmed = true;
+      }
+    }
+    if (cleanupUnconfirmed) throw new Error(`Could not confirm all unsubmitted rows in collection ${collection.id}.`, { cause: error });
+    throw error;
   }
 
   return {
@@ -718,7 +752,7 @@ const createPlannedConferenceCollection = async (
   };
 };
 
-const patchConferenceCollectionItem = async (
+const updateConferenceCollectionItem = async (
   input: QuickIngestRequestContext,
   planned: PlannedConferenceCollectionItem | undefined,
   payload: Record<string, unknown>,
@@ -741,10 +775,12 @@ const patchConferenceCollectionItem = async (
     },
     timeoutMs: DIRECT_INGEST_TIMEOUT_MS,
     ...DIRECT_QUICK_INGEST_TRANSPORT,
-  }).catch(() => {
-    // Collection status updates should not hide the ingest result itself.
   });
 };
+
+// Once a job is running, its receipt remains available if its collection update fails.
+const patchConferenceCollectionItem = (...args: Parameters<typeof updateConferenceCollectionItem>) =>
+  updateConferenceCollectionItem(...args).catch(() => undefined);
 
 const getConferenceTerminalStatus = (
   duplicate: boolean,
@@ -880,14 +916,26 @@ const runDirectQuickIngestBatch = async (
     if (shouldStoreRemote) {
       const sources = [...entries, ...files.map(file => ({
         id: file.id, fileName: file.name, url: `local://${encodeURIComponent(file.name)}`,
+        type: inferUploadMediaTypeFromFile(file.name, file.directFile?.type ?? file.type),
         conferenceOverride: file.conferenceOverride,
       }))];
       try {
         conferencePlan = await createPlannedConferenceCollection(input, sources);
       } catch (error) {
         assertQuickIngestRequestCurrent(input, error);
-        if (input.conferenceRetry || sources.some(hasItemMetadata)) throw error;
-        console.warn("[tldw] Conference collection planning failed", error);
+        if (input.conferenceRetry) throw error;
+        const reason = error instanceof Error ? error.message : String(error);
+        for (const source of sources) {
+          const existing = "playlist" in source && !resolveConferenceDuplicatePolicy(
+            source.playlist?.duplicateStatus, source.conferenceOverride?.duplicatePolicy, source.processAgain,
+          ).shouldSubmitJob;
+          recordResult({
+            id: source.id, type: source.type, status: "error", outcome: "submit_failed",
+            ...("fileName" in source ? { fileName: source.fileName } : { url: source.url }),
+            error: `Could not save collection metadata. ${reason}${existing ? " Its existing Media record was preserved." : ""}`,
+          });
+        }
+        return { ok: true, results: out };
       }
     }
 

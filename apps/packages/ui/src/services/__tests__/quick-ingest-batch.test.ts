@@ -1931,6 +1931,38 @@ describe("submitQuickIngestBatch", () => {
     expect(result.results?.[0]).toMatchObject({ id: "repeat-talk", status: "ok", mediaId: 901 })
   })
 
+  it.each([false, true])("stops every upload and marks partial shared-tag plans unsubmitted (last item created=%s)", async lastCreated => {
+    const rows: Array<{ id: number; status: string; metadata: Record<string, unknown> }> = []
+    mocks.bgRequest.mockImplementation(async ({ path, method, body }) => {
+      if (path === "/api/v1/media/collections") return { id: 7, ...body }
+      if (path === "/api/v1/media/collections/7/items") {
+        const id = 11 + rows.length
+        if (id === 11 || lastCreated) rows.push({ ...body, id, collection_id: 7 })
+        if (id === 12) throw new Error("Item write interrupted")
+        return rows[0]
+      }
+      if (path === "/api/v1/media/collections/7") return { id: 7, items: rows }
+      if (method === "PATCH") {
+        const row = rows.find(item => path.endsWith(`/${item.id}`))
+        if (row) Object.assign(row, body)
+        return row
+      }
+      throw new Error(`Unexpected request: ${path}`)
+    })
+    const result = await submitQuickIngestBatch({
+      entries: [{ id: "url", type: "video", url: "https://youtu.be/session" }],
+      files: [{ id: "file", directFile: new File(["video"], "session.mp4", { type: "video/mp4" }) }],
+      conferenceBatchMetadata: { collectionName: "", sharedTags: ["systems"] },
+      storeRemote: true, processOnly: false,
+    })
+    expect(mocks.bgUpload).not.toHaveBeenCalled()
+    expect(result.results).toMatchObject([
+      { id: "url", status: "error", outcome: "submit_failed" },
+      { id: "file", status: "error", outcome: "submit_failed" },
+    ])
+    expect(rows.map(row => row.status)).toEqual(lastCreated ? ["submit_failed", "submit_failed"] : ["submit_failed"])
+  })
+
   it("saves per-source metadata for selected videos without shared metadata and binds uploaded files", async () => {
     const directFile = new File(["video"], "local talk.mp4", { type: "video/mp4" })
     const onTrackingMetadata = vi.fn()
