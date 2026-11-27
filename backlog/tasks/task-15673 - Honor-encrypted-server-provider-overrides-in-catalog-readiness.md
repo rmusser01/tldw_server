@@ -46,7 +46,7 @@ Historical record preserved from PR #3180 under a free ID because the old ID bel
 ## Final Summary
 
 <!-- SECTION:FINAL_SUMMARY:BEGIN -->
-Restored encrypted server override visibility in both llm catalog and public config/providers status under ADR025. Per-provider invalid credentials fail closed without suppressing healthy peers; global store-health errors fail closed. Public status never derives hints/source from overrides and preserves static/local behavior. Latest 133 adjacent tests pass, compilation/diff/Bandit checks pass, tests lint passes; endpoint lint has four verified baseline global_settings errors only. Stable config_info.py hashes recorded. Hosted tokenless multi-user model-service guard remains a separate frontend source bug; parent handles deployment, browser acceptance and merge.
+The public setup status honors enabled encrypted server overrides using one healthy request snapshot. Disabled and invalid credentials are excluded while healthy peers stay visible, and encrypted override hints remain private. The provider catalog fix shipped separately in #3191 via #3353. Current replacement verification passed 130 offline tests, the committed OpenAPI fingerprint and path union, and production Bandit. The earlier catalog and setup test results are preserved in the historical notes above.
 <!-- SECTION:FINAL_SUMMARY:END -->
 
 ## Definition of Done
