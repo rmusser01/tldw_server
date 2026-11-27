@@ -1,5 +1,5 @@
 ---
-id: TASK-15637
+id: TASK-15677
 title: Save Research Workspace Study outputs with replay receipts
 status: Done
 labels:
@@ -33,6 +33,7 @@ ADR required: yes. ADR path: Docs/ADR/097-research-workspace-study-publication.m
 The Workspace Study contract publishes a canonical deck with cards or quiz with questions and cites captured, selected source associations. The native owner and its bounded receipt commit together. A matching operation retries against the same scoped owner. A changed request, stale source, moved or deleted owner, or mismatched account fails without another write. Exact native deck reads let Study reopen records outside its first page. SQLite v87 and PostgreSQL v93 install the receipt store after Document Workspace links. Both prior schema variants upgrade in place, and PostgreSQL applies forced owner RLS.
 
 Verified 100 targeted Workspace, migration, and RLS contract tests and 19 tests on the final publication contract, including both live database backends. Ruff, touched-scope Bandit, and the generated OpenAPI checks passed. Chatbook TASK-21510 verified both kinds over HTTP with selected Media, a stub provider, responses dropped after commit, and fresh native Study reads after reconnecting.
+PR #3625 received a new Study task ID after the license-dispatch work landed on dev with the original ID.
 <!-- SECTION:IMPLEMENTATION_NOTES:END -->
 
 ## Final Summary

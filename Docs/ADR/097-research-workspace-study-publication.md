@@ -4,7 +4,7 @@
 **Date:** 2026-11-24
 **Backfilled from:** New decision
 **Decision owner:** Research Workspace workstream
-**Related task:** TASK-15637
+**Related task:** TASK-15677
 **Related design:** [Research Workspace Study publication](https://github.com/rmusser01/tldw_server/blob/dev/Docs/Design/research-workspace-study-publication.md)
 
 ## Decision
