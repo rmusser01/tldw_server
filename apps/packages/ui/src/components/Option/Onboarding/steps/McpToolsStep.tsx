@@ -2,6 +2,7 @@ import React from "react";
 import { Boxes, ExternalLink } from "lucide-react";
 import { Link } from "react-router-dom";
 
+import { READY_STATE_LABEL, UNAVAILABLE_STATE_LABEL } from "@/design-system/states";
 import type {
   McpToolsApplyRequest,
   McpToolsApplyResponse,
@@ -64,8 +65,8 @@ const isValidationState = (
 
 const EXTERNAL_STATUS_LABELS: Record<string, string> = {
   not_configured: "Not configured",
-  ready: "Ready",
-  unavailable: "Unavailable",
+  ready: READY_STATE_LABEL,
+  unavailable: UNAVAILABLE_STATE_LABEL,
   incomplete: "Incomplete",
 };
 
