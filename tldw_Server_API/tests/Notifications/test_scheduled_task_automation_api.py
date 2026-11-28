@@ -4,6 +4,7 @@ import inspect
 import json
 from datetime import datetime, timedelta, timezone
 from typing import Any
+from unittest.mock import AsyncMock
 
 import pytest
 from fastapi import Request
@@ -14,6 +15,7 @@ from tldw_Server_API.app.core.AuthNZ.permissions import TASKS_CONTROL, TASKS_REA
 from tldw_Server_API.app.core.AuthNZ.principal_model import AuthContext, AuthPrincipal
 from tldw_Server_API.app.core.AuthNZ.User_DB_Handling import User, get_request_user
 from tldw_Server_API.app.core.DB_Management.Scheduled_Tasks_DB import ScheduledTasksDatabase
+from tldw_Server_API.app.core.Scheduled_Tasks import agent_task_jobs
 from tldw_Server_API.app.core.Scheduled_Tasks.execution_certification import (
     ExecutionCertification,
 )
@@ -24,6 +26,7 @@ from tldw_Server_API.app.services.scheduled_task_automation_service import (
 from tldw_Server_API.app.services.scheduled_task_recurring_question_service import (
     ScheduledTaskRecurringQuestionService,
 )
+
 
 @pytest.fixture(autouse=True)
 def _message_store_test_key(monkeypatch):
@@ -165,6 +168,7 @@ def _payload(
     definition_version: int | None = None,
     name: str = "Daily research check",
     input_payload: dict[str, Any] | None = None,
+    config: dict[str, Any] | None = None,
     schedule: dict[str, Any] | None = None,
     visibility_policy: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
@@ -182,6 +186,7 @@ def _payload(
         "name": name,
         "description": "Endpoint lifecycle test",
         "input": input_payload,
+        "config": config or {},
         "schedule": schedule or {"kind": "daily", "time": "09:00", "timezone": "UTC"},
         "visibility_policy": visibility_policy or {"mode": "findings_only"},
         "notification_policy": {"channels": ["in_app"]},
@@ -1016,10 +1021,13 @@ def test_sync_automation_handlers_do_not_run_sqlite_work_on_event_loop():
 
 
 @pytest.mark.integration
-def test_run_now_triggers_real_dispatch_and_returns_run_reference(
+@pytest.mark.asyncio
+async def test_run_now_dispatches_recurring_question_and_publishes_its_finding(
     scheduled_tasks_client, auth_headers, monkeypatch
 ):
-    definition = _create_definition(scheduled_tasks_client, auth_headers)
+    definition = _create_definition(
+        scheduled_tasks_client, auth_headers, config={"generation_mode": "optional"}
+    )
 
     created: list[dict[str, Any]] = []
 
@@ -1054,6 +1062,40 @@ def test_run_now_triggers_real_dispatch_and_returns_run_reference(
         f"definition:{definition['id']}:{body['run_slot_utc']}"
     )  # nosec B101
     assert created[0]["payload"]["manual"] is True  # nosec B101
+
+    answer = "The scheduled question produced an answer.\n\n" + "More detail. " * 100
+    executor = AsyncMock(return_value=answer)
+    monkeypatch.setitem(agent_task_jobs._EXECUTORS, "recurring_question", executor)
+    repo = scheduled_tasks_client.scheduled_task_automation_repo
+    job = {**created[0], "id": body["job_id"]}
+    execution = await agent_task_jobs.handle_agent_task_job(job, scheduled_db=repo)
+    assert execution["status"] == "succeeded"  # nosec B101
+    run_id = execution["run_id"]
+    audits, _ = repo.list_audit_events(owner_id=880, definition_id=definition["id"])
+    assert any(  # nosec B101
+        event.event_type == "run_succeeded" and (event.after or {}).get("run_id") == run_id
+        for event in audits
+    )
+    results_path = "/api/v1/scheduled-tasks/results"
+    results = scheduled_tasks_client.get(results_path, params={"run_id": run_id}, headers=auth_headers)
+    assert results.status_code == 200, results.text  # nosec B101
+    (finding,) = results.json()["items"]
+    assert finding["definition_id"] == definition["id"] and finding["run_id"] == run_id  # nosec B101
+    assert finding["kind"] == "finding" and finding["answer_mode"] == "synthesized"  # nosec B101
+    assert finding["answer"] == answer and finding["review_state"] == "unread"  # nosec B101
+    assert len(finding["summary"]) <= agent_task_jobs.RESULT_SUMMARY_MAX_CHARS  # nosec B101
+
+    reviewed = scheduled_tasks_client.post(
+        f"{results_path}/{finding['id']}/review", headers=auth_headers, json={"review_state": "read"}
+    )
+    assert reviewed.status_code == 200, reviewed.text  # nosec B101
+    replay = await agent_task_jobs.handle_agent_task_job(job, scheduled_db=repo)
+    assert replay["deduped"] is True  # nosec B101
+    executor.assert_awaited_once()
+    results = scheduled_tasks_client.get(results_path, params={"run_id": run_id}, headers=auth_headers)
+    assert results.status_code == 200, results.text  # nosec B101
+    (after_replay,) = results.json()["items"]
+    assert after_replay["id"] == finding["id"] and after_replay["review_state"] == "read"  # nosec B101
 
 
 @pytest.mark.integration

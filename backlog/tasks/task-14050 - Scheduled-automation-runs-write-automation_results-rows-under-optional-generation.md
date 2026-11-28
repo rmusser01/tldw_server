@@ -1,15 +1,21 @@
 ---
 id: TASK-14050
-title: 'Scheduled-automation runs write automation_results rows under optional generation'
-status: To Do
+title: Scheduled-automation runs write automation_results rows under optional generation
+status: Done
 assignee: []
-created_date: '2026-10-13 00:00'
-updated_date: '2026-10-13 00:00'
+created_date: 2026-10-13 00:00
+updated_date: 2026-10-13 00:00
 labels:
-  - scheduled-tasks
-  - automation
-  - recurring-question
+- scheduled-tasks
+- automation
+- recurring-question
 dependencies: []
+references:
+- https://github.com/rmusser01/tldw_server/issues/2864
+- https://github.com/rmusser01/tldw_server/pull/3637
+- Docs/superpowers/specs/2026-06-09-scheduled-tasks-phase4b-backend-api-foundation-design.md
+- Docs/superpowers/specs/2026-06-30-scheduled-tasks-phase4c-recurring-question-execution-design.md
+- Docs/User_Guides/WebUI/Automation_Admin_Operations.md
 ---
 
 ## Description (the why)
@@ -53,3 +59,20 @@ the ADR-077/184 result pass-back story.
 
 ADR required: no — completes the existing ADR-077 pass-back contract; no
 new boundary.
+
+## Implementation Notes
+
+<!-- SECTION:IMPLEMENTATION_NOTES:BEGIN -->
+ADR required: no. The Phase 4B visibility policy and scheduled-job compatibility contract govern this fix. The worker uses the existing claim-checked Scheduled Tasks write transaction for the run and finding. The guide documents the Phase 4C no-match rule for the separate RAG API.
+
+The dev baseline reproduced the exact report. A manual optional run emitted run_succeeded and the Results endpoint returned zero rows. The new regression runs preview, create, the compatibility Run Now route, the real consumer, and the Results API. It verifies the full answer, matching IDs, bounded summary, unread state, and one result across review and redelivery. A forced result-write interruption rolls back completion and lets the same job retry. The consumer tests cover empty and failed answers, approval, and visibility exclusions.
+
+Verification against origin/dev 1d8589b7c4 included 234 scheduled-task tests, followed by 40 consumer and Run Now tests on the final visibility policy. Local FastAPI and the Jobs worker used a deterministic model response. Playwright saw the generated result under Unreviewed, opened the answer, and confirmed Mark reviewed persisted read state through the API. Bandit and Ruff reported no new findings.
+PR #3637 opened against dev after all 235 affected scheduled-task tests passed on a560526fe7.
+<!-- SECTION:IMPLEMENTATION_NOTES:END -->
+
+## Final Summary
+
+<!-- SECTION:FINAL_SUMMARY:BEGIN -->
+Saved the optional-generation answer and completed run in one transaction. The worker records one Results finding across retries, and the WebUI can display and review it. The guide describes no-match run history.
+<!-- SECTION:FINAL_SUMMARY:END -->

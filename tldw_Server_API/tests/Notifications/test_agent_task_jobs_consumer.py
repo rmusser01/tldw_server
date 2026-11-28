@@ -20,6 +20,7 @@ from tldw_Server_API.app.core.DB_Management.Collections_DB import CollectionsDat
 from tldw_Server_API.app.core.DB_Management.Scheduled_Tasks_DB import (
     DefinitionRow,
     ScheduledTasksDatabase,
+    ScheduledTasksTransaction,
 )
 from tldw_Server_API.app.core.Scheduled_Tasks import agent_task_jobs
 from tldw_Server_API.app.core.Scheduled_Tasks.agent_task_jobs import (
@@ -78,6 +79,8 @@ def _create_definition(
     input_config: dict[str, Any] | None = None,
     lifecycle: str = "configured",
     family: str = "recurring_question",
+    generation_mode: str | None = None,
+    visibility_policy: str = "owner",
     notification_policy: dict[str, Any] | None = None,
 ) -> DefinitionRow:
     db = ScheduledTasksDatabase.for_user(user_id=user_id)
@@ -90,7 +93,7 @@ def _create_definition(
         definition_version=None,
         status="valid",
         payload_hash=f"hash-{datetime.now(timezone.utc).timestamp()}",
-        normalized_config={},
+        normalized_config={"config": {"generation_mode": generation_mode}} if generation_mode else {},
         validation_errors=[],
         warnings=[],
         risk_class=None,
@@ -109,7 +112,7 @@ def _create_definition(
         health="ready",
         schedule={"kind": "daily", "at": "09:00"},
         input=input_config or {"question": "What changed today?"},
-        visibility_policy="owner",
+        visibility_policy=visibility_policy,
         notification_policy=notification_policy or {},
         approval_policy={},
         preview_id=preview.id,
@@ -846,6 +849,78 @@ async def test_terminal_persistence_failure_fails_job_before_notification(consum
     monkeypatch.setattr(sdb, "update_scheduled_task_run_status", original)
     result = await handle_agent_task_job(_job(definition, user_id), scheduled_db=sdb)
     assert result["status"] == "succeeded"
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    ("generation_mode", "visibility_policy", "execution_outcome"),
+    [
+        ("optional", "findings_only", "blank"),
+        ("optional", "findings_only", "failed"),
+        ("optional", "findings_only", "approval_required"),
+        ("optional", "task_history_only", "answered"),
+        ("optional", "failures_only", "answered"),
+        ("optional", "failures_and_approvals", "answered"),
+        ("optional", "metadata_only", "answered"),
+        ("required", "findings_only", "answered"),
+        ("disabled", "findings_only", "answered"),
+    ],
+)
+async def test_worker_only_surfaces_optional_findings_with_an_allowed_answer(
+    consumer_env, generation_mode, visibility_policy, execution_outcome
+):
+    user_id = 1036
+    definition = _create_definition(
+        user_id, generation_mode=generation_mode, visibility_policy=visibility_policy
+    )
+    executor = AsyncMock(return_value="A useful answer.")
+    expected_status = "succeeded"
+    if execution_outcome == "blank":
+        executor.return_value = "  "
+    elif execution_outcome == "failed":
+        executor.side_effect = RuntimeError("generation failed")
+        expected_status = "failed"
+    elif execution_outcome == "approval_required":
+        executor.side_effect = RuntimeError("approval_required: requires user approval")
+        expected_status = "approval_required"
+    register_executor("recurring_question", executor)
+
+    result = await handle_agent_task_job(_job(definition, user_id))
+    sdb = ScheduledTasksDatabase.for_user(user_id=user_id)
+    assert result["status"] == expected_status  # nosec B101
+    assert sdb.list_results(user_id, run_id=result["run_id"], limit=10, offset=0) == ([], 0)  # nosec B101
+
+
+@pytest.mark.asyncio
+async def test_interrupted_finding_write_rolls_back_completion(consumer_env, monkeypatch):
+    user_id = 1035
+    definition = _create_definition(user_id)
+    sdb = ScheduledTasksDatabase.for_user(user_id=user_id)
+    register_executor("recurring_question", AsyncMock(return_value="A useful answer."))
+    create_result = ScheduledTasksTransaction.create_result
+    visible_states: list[str | None] = []
+
+    def interrupt_before_commit(tx, **kwargs):
+        create_result(tx, **kwargs)
+        visible = sdb.get_run(user_id, kwargs["run_id"])
+        visible_states.append(visible.status if visible is not None else None)
+        raise OSError("result write interrupted")
+
+    job = _job(definition, user_id)
+    with monkeypatch.context() as patch:
+        patch.setattr(ScheduledTasksTransaction, "create_result", interrupt_before_commit)
+        with pytest.raises(agent_task_jobs.ScheduledTaskPersistenceError, match="terminal run persistence failed"):
+            await handle_agent_task_job(job, scheduled_db=sdb)
+
+    run = sdb.get_scheduled_task_run_by_slot(definition_id=definition.id, run_slot_key=SLOT)
+    assert visible_states == ["running"]  # nosec B101
+    assert run is not None and run["status"] == "running"  # nosec B101
+    assert _latest_notification(user_id) is None  # nosec B101
+    assert sdb.list_results(user_id, run_id=run["id"], limit=10, offset=0) == ([], 0)  # nosec B101
+
+    retried = await handle_agent_task_job(job, scheduled_db=sdb)
+    assert retried["run_id"] == run["id"] and retried["status"] == "succeeded"  # nosec B101
+    assert sdb.list_results(user_id, run_id=run["id"], limit=10, offset=0)[1] == 1  # nosec B101
 
 
 @pytest.mark.asyncio
