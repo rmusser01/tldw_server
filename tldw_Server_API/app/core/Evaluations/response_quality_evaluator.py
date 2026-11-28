@@ -65,7 +65,7 @@ def _parse_quality_rating(text: str) -> tuple[float, Optional[str]]:
 async def _run_bounded_quality_analyze(*args: Any, **kwargs: Any) -> Any:
     """Run a sync quality adapter inside the breaker's single deadline."""
     return await await_bounded_sync_call(
-        partial(analyze, *args, **kwargs),
+        partial(analyze, *args, **{**kwargs, "llm_surface": "internal.eval_judge"}),  # judge: exempt (owner 2026-11-26)
         pool=SYNC_ADAPTER_CALL_POOL,
         exhaustion_message="Response quality provider capacity is exhausted",
     )

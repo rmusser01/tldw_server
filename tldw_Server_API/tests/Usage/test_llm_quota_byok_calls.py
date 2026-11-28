@@ -15,10 +15,12 @@ from tldw_Server_API.app.core.AuthNZ.provider_credential_runtime import (
     ProviderCredentialRuntime,
 )
 from tldw_Server_API.app.core.exceptions import ChatConfigurationError, LLMQuotaExceededError
+from tldw_Server_API.app.core.LLM_Calls import adapter_utils
 from tldw_Server_API.app.core.LLM_Calls.providers.base import ChatProvider
 from tldw_Server_API.app.core.Usage import llm_accounting, llm_quota_gate, quota_resolver
 from tldw_Server_API.app.core.Usage.llm_call_context import llm_call_context
 from tldw_Server_API.app.core.Usage.quota_checks import LLMQuotaRefusal
+from tldw_Server_API.tests.helpers.gateway_routing import route_gateway_adapters
 
 pytestmark = pytest.mark.unit
 
@@ -665,7 +667,7 @@ def test_openrouter_fallback_models_are_checked_against_the_allowlist() -> None:
 
 
 def _judge_modules() -> Any:
-    """The two evaluation judges that call the adapter directly."""
+    """The two evaluation judges, which call the LLM gateway (TASK-13950.27 PR J)."""
     from tldw_Server_API.app.core.Evaluations import eval_runner, ms_g_eval
 
     return pytest.mark.parametrize("module", [eval_runner, ms_g_eval], ids=["eval_runner", "ms_g_eval"])
@@ -681,8 +683,8 @@ async def test_an_evaluation_judge_refuses_a_disallowed_model_by_key(monkeypatch
     """TASK-15581, TASK-15582: on the run's own key a denied DEFAULT_MODEL_<PROVIDER> is refused (the allowlist no
     longer binds that key); on the server's key, which takes the server config's model, a model off the allowlist is.
     Both with ChatConfigurationError, which G-Eval does not retry."""
-    monkeypatch.setattr(module, "get_adapter_or_raise", lambda _provider: _Provider())
-    monkeypatch.setattr(module, "resolve_provider_api_key_from_config", lambda *_args, **_kwargs: "sk-server")
+    route_gateway_adapters(monkeypatch, lambda _provider: _Provider())
+    monkeypatch.setattr(adapter_utils, "resolve_provider_api_key_from_config", lambda *_args, **_kwargs: "sk-server")
     monkeypatch.setenv("DEFAULT_MODEL_OPENAI", "gpt-denied")
     _admin_override(**override)
     handle = await _handle("user") if own_key else None
@@ -703,7 +705,7 @@ async def test_prompt_studio_refuses_a_denied_default_model_on_the_users_key(mon
     resolution never sees; the provider base class refuses it when the override does not allow it."""
     from tldw_Server_API.app.core.Prompt_Management.prompt_studio import test_runner
 
-    monkeypatch.setattr(test_runner, "get_adapter_or_raise", lambda _provider: _Provider())
+    route_gateway_adapters(monkeypatch, lambda _provider: _Provider())
     monkeypatch.setenv("DEFAULT_MODEL_OPENAI", "gpt-denied")
     _admin_override(denied_models=["gpt-denied"])
     handle = await _handle("user")

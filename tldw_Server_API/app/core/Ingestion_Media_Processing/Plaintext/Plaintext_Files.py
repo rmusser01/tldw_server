@@ -28,6 +28,7 @@ except ImportError:  # pragma: no cover - defusedxml optional dependency
 # Local Imports
 import contextlib
 
+from tldw_Server_API.app.core.exceptions import LLMPolicyRefusal
 from tldw_Server_API.app.core.Chunking import improved_chunking_process
 from tldw_Server_API.app.core.Ingestion_Media_Processing.path_utils import (
     open_safe_local_path,
@@ -55,6 +56,7 @@ _PLAINTEXT_NONCRITICAL_EXCEPTIONS: tuple[type[BaseException], ...] = (
     UnicodeError,
     ValueError,
     json.JSONDecodeError,
+    LLMPolicyRefusal,  # a blocked analysis is recorded on the item like any failed analysis, never retried
 )
 
 

@@ -10,7 +10,9 @@ from datetime import datetime
 from typing import TYPE_CHECKING, Literal
 
 from tldw_Server_API.app.core.config import settings as core_settings
-from tldw_Server_API.app.core.LLM_Calls.adapter_registry import get_registry
+from tldw_Server_API.app.core.exceptions import LLMPolicyRefusal
+from tldw_Server_API.app.core.LLM_Calls.gateway import perform_chat_api_call
+from tldw_Server_API.app.core.LLM_Calls.provider_results import raise_if_content_filtered
 
 if TYPE_CHECKING:
     from tldw_Server_API.app.core.Prompt_Management.service_prompts import ResolvedServicePrompt
@@ -148,11 +150,6 @@ def _try_generate_title_llm(
 
     Keeps synchronous control path; relies on local/adapter-backed sync helpers.
     """
-    registry = get_registry()
-    adapter = registry.get_adapter("openai")
-    if adapter is None:
-        return None
-
     try:
         content_snippet = (content or "").strip()
         if len(content_snippet) > 2000:
@@ -163,15 +160,16 @@ def _try_generate_title_llm(
         )
         messages = [{"role": "user", "content": user_msg}]
         # Avoid streaming for simplicity; small token budget
-        result = adapter.chat(
-            {
-                "messages": messages,
-                "system_message": system_message,
-                "model": None,
-                "temperature": 0.2,
-                "max_tokens": 128,
-            }
+        # The gateway runs the moderation hooks, quota and model validation (surface writing.note_title).
+        result = perform_chat_api_call(
+            api_provider="openai",
+            messages=messages,
+            system_message=system_message,
+            temperature=0.2,
+            max_tokens=128,
+            llm_surface="writing.note_title",
         )
+        raise_if_content_filtered(result)  # a refused answer is no title
         # Adapter may return dict or provider-specific object.
         # Normalize common dict-like responses.
         if isinstance(result, dict):
@@ -187,6 +185,8 @@ def _try_generate_title_llm(
         title = re.sub(r"\s+", " ", title)
         if title:
             return title
+    except LLMPolicyRefusal:
+        raise  # a refusal is the caller's refusal, not a reason to fall back to the heuristic
     except Exception:
         # Silent failure; caller falls back to heuristic
         return None

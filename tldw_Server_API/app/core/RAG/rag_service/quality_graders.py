@@ -188,7 +188,7 @@ class FastGroundednessGrader:
                         api_key,
                         system_message,
                         temp,
-                        **kwargs
+                        **{**kwargs, "llm_surface": "rag.auxiliary"}
                     )
 
                 self._analyze = _default_analyze
@@ -499,7 +499,7 @@ class UtilityGrader:
                         api_key,
                         system_message,
                         temp,
-                        **kwargs
+                        **{**kwargs, "llm_surface": "rag.auxiliary"}
                     )
 
                 self._analyze = _default_analyze

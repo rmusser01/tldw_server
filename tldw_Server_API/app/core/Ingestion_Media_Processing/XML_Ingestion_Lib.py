@@ -14,6 +14,7 @@ except Exception:  # pragma: no cover - defusedxml is an optional dependency
 # External Imports
 #
 # Local Imports
+from tldw_Server_API.app.core.exceptions import LLMPolicyRefusal
 from tldw_Server_API.app.core.Chunking import improved_chunking_process
 from tldw_Server_API.app.core.DB_Management.media_db.api import (
     get_media_repository,
@@ -149,10 +150,17 @@ def import_xml_handler(import_file, title, author, keywords, system_prompt,
         keyword_list = [kw.strip() for kw in keywords.split(',') if kw.strip()] if keywords else []
 
         # Handle summarization
+        summary_note = ""
         if auto_summarize and api_name and api_key:
             # Combine all chunks for summarization
             full_text = '\n'.join(chunk['text'] for chunk in chunks)
-            summary = analyze(api_name, full_text, custom_prompt, api_key)
+            try:
+                summary = analyze(api_name, full_text, custom_prompt, api_key)
+            except LLMPolicyRefusal as refusal:
+                # Recorded on the item, which is still imported; never retried.
+                logging.warning("XML import: summary refused by moderation policy")
+                summary = "No summary provided"  # no summary is stored; the refusal is recorded in the result message
+                summary_note = f" Summary skipped: refused by moderation policy ({refusal.failure_code})."
         else:
             summary = "No summary provided"
 
@@ -181,7 +189,7 @@ def import_xml_handler(import_file, title, author, keywords, system_prompt,
         logging.error(f"Error processing XML file: {str(e)}")
         return "Error processing XML file"
     else:
-        return f"XML file '{display_name}' import complete. Database result: {result}"
+        return f"XML file '{display_name}' import complete. Database result: {result}{summary_note}"
 
 #
 # End of XML_Ingestion_Lib.py

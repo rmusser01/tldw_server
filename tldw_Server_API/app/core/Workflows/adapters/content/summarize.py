@@ -11,7 +11,7 @@ from typing import Any
 from loguru import logger
 
 from tldw_Server_API.app.core.Utils.template_render import apply_template_to_string
-from tldw_Server_API.app.core.exceptions import LLMQuotaExceededError
+from tldw_Server_API.app.core.exceptions import LLMPolicyRefusal, LLMQuotaExceededError
 from tldw_Server_API.app.core.testing import is_test_mode
 from tldw_Server_API.app.core.Workflows.adapters._registry import registry
 from tldw_Server_API.app.core.Workflows.adapters.content._config import SummarizeConfig
@@ -109,6 +109,7 @@ async def run_summarize_adapter(config: dict[str, Any], context: dict[str, Any])
             recursive_summarization=recursive_summarization,
             chunked_summarization=chunked_summarization,
             chunk_options=chunk_options,
+            llm_surface="workflows.step",
         )
 
         # Check for error
@@ -124,8 +125,8 @@ async def run_summarize_adapter(config: dict[str, Any], context: dict[str, Any])
             "output_length": len(summary),
         }
 
-    except LLMQuotaExceededError:
-        raise
+    except (LLMQuotaExceededError, LLMPolicyRefusal):
+        raise  # the limit or a moderation refusal fails the step (the engine does not retry a 400)
     except Exception:
         logger.exception("Summarize adapter error")
         return {"error": "summarize_error"}

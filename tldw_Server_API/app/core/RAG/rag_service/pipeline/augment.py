@@ -187,6 +187,7 @@ async def run_gap_analysis(rcfg: RagRunConfig, state: "PipelineState") -> None:
                         credentials_resolved=gap_handle is not None,
                         provider_credentials=gap_handle,
                         raise_on_error=gap_handle is not None,
+                        llm_surface="rag.auxiliary",
                     )
                     return up._consume_bound_sgl_response(
                         response,

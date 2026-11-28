@@ -818,16 +818,11 @@ async def test_shared_cloud_callers_reach_real_adapter_with_isolated_runtime_sna
         lambda *, timeout=None: RecordingClient(timeout),
     )
     adapter = openai_adapter.OpenAIAdapter()
-    route_gateway_adapters(monkeypatch, lambda provider: adapter if provider == "openai" else None)
+    route_gateway_adapters(monkeypatch, lambda provider: adapter if provider == "openai" else None)  # G-Eval calls the gateway too
     monkeypatch.setattr(
         prompt_evaluation_manager,
         "is_test_mode",
         lambda: False,
-    )
-    monkeypatch.setattr(
-        ms_g_eval,
-        "get_adapter_or_raise",
-        lambda provider: adapter if provider == "openai" else None,
     )
 
     def invoke(handle: ProviderCallCredentials, timeout: float) -> Any:

@@ -1,19 +1,7 @@
 {
-  "api/v1/endpoints/media/document_insights.py": {"references": 1, "reason": null},
-  "core/Data_Tables/jobs_worker.py": {"references": 1, "reason": null},
-  "core/Evaluations/cli/evals_cli.py": {"references": 1, "reason": null},
-  "core/Evaluations/cli/evals_cli_enhanced.py": {"references": 1, "reason": null},
-  "core/Evaluations/eval_runner.py": {"references": 1, "reason": null},
-  "core/Evaluations/ms_g_eval.py": {"references": 1, "reason": null},
-  "core/Evaluations/wordbench_runner.py": {"references": 2, "reason": null},
-  "core/Explainer/jobs.py": {"references": 1, "reason": null},
-  "core/Ingestion_Media_Processing/Audio/Audio_Streaming_Insights.py": {"references": 1, "reason": null},
-  "core/LLM_Calls/Summarization_General_Lib.py": {"references": 2, "reason": null},
+  "core/LLM_Calls/Summarization_General_Lib.py": {"references": 2, "reason": "direct by design (R6: error taxonomy); moderated via gateway.run_policy_*_hooks"},
   "core/Moderation/classification.py": {"references": 1, "reason": null},
   "core/Moderation/semantic_matcher.py": {"references": 1, "reason": null},
   "core/Provider_Credentials/byok_testing.py": {"references": 2, "reason": null},
-  "core/Setup/first_chat_verifier.py": {"references": 1, "reason": null},
-  "core/WebSearch/Web_Search.py": {"references": 1, "reason": null},
-  "core/Web_Scraping/WebSearch_APIs.py": {"references": 3, "reason": null},
-  "core/Writing/note_title.py": {"references": 1, "reason": null}
+  "core/Setup/first_chat_verifier.py": {"references": 1, "reason": null}
 }

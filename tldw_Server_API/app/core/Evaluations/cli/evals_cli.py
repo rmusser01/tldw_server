@@ -31,13 +31,11 @@ from tldw_Server_API.app.core.Evaluations.cli.api_utils import (
 )
 from tldw_Server_API.app.core.Evaluations.evaluation_manager import EvaluationManager
 from tldw_Server_API.app.core.LLM_Calls.adapter_utils import (
-    ensure_app_config,
-    get_adapter_or_raise,
     normalize_provider,
-    resolve_provider_api_key_from_config,
-    resolve_provider_model,
     split_system_message,
 )
+from tldw_Server_API.app.core.LLM_Calls.gateway import perform_chat_api_call
+from tldw_Server_API.app.core.LLM_Calls.provider_results import raise_if_content_filtered
 from tldw_Server_API.cli.utils.llm_store import LLMStoreGroup
 
 DEPRECATION_MSG = (
@@ -60,6 +58,7 @@ def _call_adapter_text(
     *,
     api_endpoint: str,
     messages_payload: list[dict[str, Any]],
+    llm_surface: str,
     temperature: Optional[float] = None,
     api_key: Optional[str] = None,
     model: Optional[str] = None,
@@ -68,25 +67,29 @@ def _call_adapter_text(
     timeout: Optional[float] = None,
     **extra_kwargs: Any,
 ) -> str:
+    """Call a provider through the gateway; ``llm_surface`` is a literal at every caller (R10: never from a mapping).
+
+    The CLIs are operator tools and register no moderation hooks (the app lifespan does), so the surface is the
+    classification: ``internal.eval_judge`` for the judge, ``evaluations`` for the evaluated model.
+    """
     provider = normalize_provider(api_endpoint)
     if not provider:
         raise ChatConfigurationError(provider=api_endpoint, message="LLM provider is required.")
-    cfg = ensure_app_config(app_config)
-    resolved_model = model or resolve_provider_model(provider, cfg)
-    if not resolved_model:
-        raise ChatConfigurationError(provider=provider, message="Model is required for provider.")
     system_message, cleaned_messages = split_system_message(messages_payload or [])
-    request: dict[str, Any] = {
-        "messages": cleaned_messages,
-        "system_message": system_message,
-        "model": resolved_model,
-        "api_key": api_key or resolve_provider_api_key_from_config(provider, cfg),
-        "temperature": temperature,
-        "max_tokens": max_tokens,
-        "app_config": cfg,
-    }
-    request.update(extra_kwargs)
-    response = get_adapter_or_raise(provider).chat(request, timeout=timeout)
+    response = perform_chat_api_call(
+        api_provider=provider,
+        messages=cleaned_messages,
+        system_message=system_message,
+        model=model,
+        api_key=api_key,
+        temperature=temperature,
+        max_tokens=max_tokens,
+        app_config=app_config,
+        timeout=timeout,
+        **extra_kwargs,
+        llm_surface=llm_surface,
+    )
+    raise_if_content_filtered(response)
     return extract_response_content(response) or str(response)
 
 
@@ -305,6 +308,7 @@ def run(ctx, benchmark, limit, api, model, system_prompt, output, parallel, dry_
                     model=model_to_use,
                     temperature=0.7,
                     max_tokens=100,  # We only need a short response with the score
+                    llm_surface="internal.eval_judge",
                 )
 
                 # Handle response (could be a generator even with streaming=False for some providers)
@@ -515,6 +519,7 @@ def test_api(api_name, test_prompt, model, system_prompt):
             api_key=api_key,
             model=model_to_use,
             max_tokens=200,
+            llm_surface="evaluations",
         )
 
         # Handle response

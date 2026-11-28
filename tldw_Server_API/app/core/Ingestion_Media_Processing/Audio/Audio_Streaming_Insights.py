@@ -25,14 +25,14 @@ from loguru import logger
 from tldw_Server_API.app.core.Chat.Chat_Deps import ChatConfigurationError
 from tldw_Server_API.app.core.Chat.chat_helpers import extract_response_content
 from tldw_Server_API.app.core.config import load_comprehensive_config
+from tldw_Server_API.app.core.exceptions import LLMPolicyRefusal
 from tldw_Server_API.app.core.LLM_Calls.adapter_utils import (
     ensure_app_config,
-    get_adapter_or_raise,
     normalize_provider,
-    resolve_provider_api_key_from_config,
-    resolve_provider_model,
     split_system_message,
 )
+from tldw_Server_API.app.core.LLM_Calls.gateway import perform_chat_api_call
+from tldw_Server_API.app.core.LLM_Calls.provider_results import raise_if_content_filtered
 
 LIVE_INSIGHTS_RUNTIME_EXCEPTIONS = (
     OSError,
@@ -210,23 +210,21 @@ class LiveMeetingInsights:
         provider_name = normalize_provider(api_endpoint)
         if not provider_name:
             raise ChatConfigurationError(provider=api_endpoint, message="LLM provider is required.")
-        cfg = ensure_app_config(app_config)
-        resolved_model = model or resolve_provider_model(provider_name, cfg)
-        if not resolved_model:
-            raise ChatConfigurationError(provider=provider_name, message="Model is required for provider.")
         system_message, cleaned_messages = split_system_message(messages_payload or [])
-        request: dict[str, Any] = {
-            "messages": cleaned_messages,
-            "system_message": system_message,
-            "model": resolved_model,
-            "api_key": resolve_provider_api_key_from_config(provider_name, cfg),
-            "temperature": temp,
-            "max_tokens": max_tokens,
-            "response_format": response_format,
-            "app_config": cfg,
-        }
-        request.update(extra_kwargs)
-        return get_adapter_or_raise(provider_name).chat(request)
+        extra_kwargs.pop("llm_surface", None)  # R10
+        # The gateway runs the moderation hooks, quota and model validation (surface audio.insights).
+        return perform_chat_api_call(
+            api_provider=provider_name,
+            messages=cleaned_messages,
+            system_message=system_message,
+            model=model,
+            temperature=temp,
+            max_tokens=max_tokens,
+            response_format=response_format,
+            app_config=app_config,
+            **extra_kwargs,
+            llm_surface="audio.insights",
+        )
 
     # --------------------------------------------------------------------- #
     # Public API
@@ -424,6 +422,18 @@ class LiveMeetingInsights:
 
         try:
             response_payload = await self._call_llm(transcript, stage=stage)
+        except LLMPolicyRefusal as refusal:
+            # Moderation refused the transcript or the summary: its own error frame, never a provider failure.
+            logger.warning(f"LiveMeetingInsights: LLM request refused by policy ({stage})")
+            await self._safe_send(
+                {
+                    "type": "insight_error",
+                    "stage": stage,
+                    "message": str(refusal.detail),
+                    "code": "llm_policy_refused",
+                }
+            )
+            return
         except (ChatConfigurationError, *LIVE_INSIGHTS_RUNTIME_EXCEPTIONS) as exc:
             logger.error(f"LiveMeetingInsights: LLM request failed ({stage}): {exc}")
             await self._safe_send(
@@ -467,7 +477,9 @@ class LiveMeetingInsights:
                 app_config=self._app_config,
             )
 
-        raw_response = await self._loop.run_in_executor(None, _invoke)
+        # asyncio.to_thread carries the session's LLM user into the worker thread (run_in_executor does not).
+        raw_response = await asyncio.to_thread(_invoke)
+        raise_if_content_filtered(raw_response)
         content = extract_response_content(raw_response)
         if content is None:
             content = json.dumps(raw_response) if isinstance(raw_response, dict) else str(raw_response)

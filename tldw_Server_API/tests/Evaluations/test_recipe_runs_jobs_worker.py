@@ -447,7 +447,9 @@ def test_handle_recipe_run_job_executes_rag_answer_quality_fixed_context_and_per
         system_message=None,
         temp=None,
         model_override=None,
+        llm_surface=None,
     ) -> str:
+        assert llm_surface == "evaluations"  # the candidate's output is generation, not a judge
         del prompt, user_prompt, api_key, system_message, temp
         if provider == "openai" and model_override == "gpt-4.1-mini":
             return "Paris is the capital of France. [1]"
@@ -593,7 +595,9 @@ def test_handle_recipe_run_job_executes_rag_answer_quality_live_mode_with_frozen
         system_message=None,
         temp=None,
         model_override=None,
+        llm_surface=None,
     ) -> str:
+        assert llm_surface == "evaluations"  # the candidate's output is generation, not a judge
         del prompt, user_prompt, api_key, system_message, temp
         if provider == "openai":
             assert model_override == "gpt-4.1-mini"
@@ -747,7 +751,9 @@ def test_handle_recipe_run_job_executes_rag_answer_quality_fixed_mode_with_run_l
         system_message=None,
         temp=None,
         model_override=None,
+        llm_surface=None,
     ) -> str:
+        assert llm_surface == "evaluations"  # the candidate's output is generation, not a judge
         del prompt, user_prompt, api_key, system_message, temp
         if provider == "openai":
             assert model_override == "gpt-4.1-mini"

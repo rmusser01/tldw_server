@@ -29,13 +29,11 @@ from tldw_Server_API.app.core.config import load_and_log_configs
 from tldw_Server_API.app.core.exceptions import NetworkError, RetryExhaustedError
 from tldw_Server_API.app.core.http_client import fetch
 from tldw_Server_API.app.core.LLM_Calls.adapter_utils import (
-    ensure_app_config,
-    get_adapter_or_raise,
     normalize_provider,
-    resolve_provider_api_key_from_config,
-    resolve_provider_model,
     split_system_message,
 )
+from tldw_Server_API.app.core.LLM_Calls.gateway import perform_chat_api_call
+from tldw_Server_API.app.core.LLM_Calls.provider_results import raise_if_content_filtered
 from tldw_Server_API.app.core.Security.egress import ConfiguredEndpointScope
 from tldw_Server_API.app.core.Utils.Utils import logging
 from tldw_Server_API.app.core.Web_Scraping.orchestration import scrape_article
@@ -404,6 +402,7 @@ def summarize(
 
     All parameters map directly onto :func:`analyze`.
     """
+    extra_kwargs.pop("llm_surface", None)  # R10: no caller-supplied mapping names its surface
     return analyze(
         input_data=input_data,
         custom_prompt_arg=custom_prompt_arg,
@@ -413,6 +412,7 @@ def summarize(
         system_message=system_message,
         streaming=streaming,
         **extra_kwargs,
+        llm_surface="web.search",
     )
 
 
@@ -433,6 +433,7 @@ def _call_adapter_text(
     *,
     api_endpoint: str,
     messages_payload: list[dict[str, Any]],
+    llm_surface: str,
     temperature: float | None = None,
     api_key: str | None = None,
     model: str | None = None,
@@ -440,24 +441,24 @@ def _call_adapter_text(
     timeout: float | None = None,
     **extra_kwargs: Any,
 ) -> str:
+    """Call the provider through the gateway; ``llm_surface`` is a literal at every caller (R10: never a mapping)."""
     provider = normalize_provider(api_endpoint)
     if not provider:
         raise ChatConfigurationError(provider=api_endpoint, message="LLM provider is required.")
-    cfg = ensure_app_config(app_config or get_loaded_config())
-    resolved_model = model or resolve_provider_model(provider, cfg)
-    if not resolved_model:
-        raise ChatConfigurationError(provider=provider, message="Model is required for provider.")
     system_message, cleaned_messages = split_system_message(messages_payload or [])
-    request: dict[str, Any] = {
-        "messages": cleaned_messages,
-        "system_message": system_message,
-        "model": resolved_model,
-        "api_key": api_key or resolve_provider_api_key_from_config(provider, cfg),
-        "temperature": temperature,
-        "app_config": cfg,
-    }
-    request.update(extra_kwargs)
-    response = get_adapter_or_raise(provider).chat(request, timeout=timeout)
+    response = perform_chat_api_call(
+        api_provider=provider,
+        messages=cleaned_messages,
+        system_message=system_message,
+        model=model,
+        api_key=api_key,
+        temperature=temperature,
+        app_config=app_config or get_loaded_config(),
+        timeout=timeout,
+        **extra_kwargs,
+        llm_surface=llm_surface,
+    )
+    raise_if_content_filtered(response)  # a refused answer is no search aggregation, relevance verdict or sub-question
     return extract_response_content(response) or str(response)
 
 
@@ -465,6 +466,7 @@ def chat_api_call(
     *,
     api_endpoint: str,
     messages_payload: list[dict[str, Any]],
+    llm_surface: str,
     temperature: float | None = None,
     api_key: str | None = None,
     model: str | None = None,
@@ -472,10 +474,11 @@ def chat_api_call(
     timeout: float | None = None,
     **extra_kwargs: Any,
 ) -> str:
-    """Compatibility wrapper for tests and legacy call sites."""
+    """Compatibility wrapper for tests and legacy call sites; forwards the caller's literal surface."""
     return _call_adapter_text(
         api_endpoint=api_endpoint,
         messages_payload=messages_payload,
+        llm_surface=llm_surface,
         temperature=temperature,
         api_key=api_key,
         model=model,
@@ -802,6 +805,7 @@ def analyze_question(question: str, api_endpoint) -> dict:
             )
             response = _call_adapter_text(
                 api_endpoint=api_endpoint,
+                llm_surface="web.search",
                 messages_payload=messages_payload,
                 temperature=0.7,
                 app_config=get_loaded_config(),
@@ -943,6 +947,7 @@ async def search_result_relevance(
                 return await asyncio.to_thread(
                     lambda _mp=_messages_payload: chat_api_call(
                         api_endpoint=api_endpoint,
+                        llm_surface="web.search",
                         messages_payload=_mp,
                         temperature=0.7,
                         app_config=get_loaded_config(),
@@ -1385,6 +1390,7 @@ def aggregate_results(
         logging.info("Generating the report")
         returned_response = chat_api_call(
             api_endpoint=api_endpoint,
+            llm_surface="web.search",
             messages_payload=messages_payload,
             temperature=0.7,
             app_config=get_loaded_config(),

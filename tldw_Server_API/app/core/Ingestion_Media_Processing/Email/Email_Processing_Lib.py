@@ -27,6 +27,7 @@ from email.utils import getaddresses
 from pathlib import PurePosixPath
 from typing import Any
 
+from tldw_Server_API.app.core.exceptions import LLMPolicyRefusal
 from tldw_Server_API.app.core.Chunking import improved_chunking_process
 from tldw_Server_API.app.core.config import loaded_config_data
 from tldw_Server_API.app.core.Ingestion_Media_Processing.Email.attachment_policy import (
@@ -60,6 +61,7 @@ _EMAIL_NONCRITICAL_EXCEPTIONS = (
     UnicodeDecodeError,
     mailbox.Error,
     zipfile.BadZipFile,
+    LLMPolicyRefusal,  # a blocked analysis is recorded on the item like any failed analysis, never retried
 )
 
 try:

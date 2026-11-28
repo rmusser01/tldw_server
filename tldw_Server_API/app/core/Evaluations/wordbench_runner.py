@@ -15,11 +15,12 @@ from tldw_Server_API.app.core.Chat.Chat_Deps import ChatConfigurationError
 from tldw_Server_API.app.core.Evaluations.benchmark_utils import NextTokenCapture
 from tldw_Server_API.app.core.LLM_Calls.adapter_utils import (
     ensure_app_config,
-    get_adapter_or_raise,
     normalize_provider,
     resolve_provider_api_key_from_config,
     resolve_provider_model,
 )
+from tldw_Server_API.app.core.LLM_Calls.gateway import perform_chat_api_call_async
+from tldw_Server_API.app.core.LLM_Calls.provider_results import raise_if_content_filtered
 
 logger = logger
 
@@ -90,7 +91,6 @@ class WordBenchRunner:
 
     async def _call_provider(self, provider: str, request: dict[str, Any]) -> dict[str, Any]:
         """Call an adapter-backed provider with logprob capture enabled."""
-        adapter = get_adapter_or_raise(provider)
         app_config = ensure_app_config()
         model = self.model or resolve_provider_model(provider, app_config)
         if not model and provider == "openai":
@@ -107,23 +107,23 @@ class WordBenchRunner:
         elif isinstance(logprobs_val, bool):
             logprobs_flag = logprobs_val
 
-        payload = {
-            "messages": [{"role": "user", "content": request["prompt"]}],
-            "model": model,
-            "api_key": self.api_key or resolve_provider_api_key_from_config(provider, app_config),
-            "temperature": request.get("temperature"),
-            "max_tokens": request.get("max_tokens"),
-            "logprobs": logprobs_flag,
-            "top_logprobs": top_logprobs,
-            "stop": request.get("stop"),
-            "stream": False,
-            "app_config": app_config,
-        }
-
-        try:
-            return await adapter.achat(payload)
-        except NotImplementedError:
-            return await asyncio.to_thread(adapter.chat, payload)
+        # The evaluated model's generation (surface "evaluations"); the request dict only feeds the keys read below.
+        response = await perform_chat_api_call_async(
+            api_provider=provider,
+            messages=[{"role": "user", "content": request["prompt"]}],
+            model=model,
+            api_key=self.api_key or resolve_provider_api_key_from_config(provider, app_config),
+            temperature=request.get("temperature"),
+            max_tokens=request.get("max_tokens"),
+            logprobs=logprobs_flag,
+            top_logprobs=top_logprobs,
+            stop=request.get("stop"),
+            stream=False,
+            app_config=app_config,
+            llm_surface="evaluations",
+        )
+        raise_if_content_filtered(response)  # a refused answer is a sample error, not a distribution to analyze
+        return response
 
     async def run_benchmark(self, prompts: list[str],
                            output_file: Optional[str] = None) -> list[dict[str, Any]]:

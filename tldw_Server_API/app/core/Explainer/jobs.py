@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import asyncio
 import hashlib
 import inspect
 import json
@@ -12,6 +11,7 @@ from dataclasses import dataclass
 from datetime import UTC, datetime
 from typing import Any
 
+from tldw_Server_API.app.core.Usage.llm_roots import llm_call_root
 from tldw_Server_API.app.core.Explainer.grounding import GroundedExplainerChild, resolve_grounded_children
 from tldw_Server_API.app.core.Explainer.models import (
     ExplainerEvidenceState,
@@ -123,27 +123,26 @@ def make_configured_explainer_generator() -> ExplainerGenerator:
 
     async def _generator(prompt: ExplainerPrompt) -> dict[str, Any]:
         from tldw_Server_API.app.core.LLM_Calls import adapter_utils
+        from tldw_Server_API.app.core.LLM_Calls.gateway import perform_chat_api_call_async
+        from tldw_Server_API.app.core.LLM_Calls.provider_results import raise_if_content_filtered
 
-        app_config = adapter_utils.ensure_app_config()
-        adapter = adapter_utils.get_adapter_or_raise(provider)
         messages = prompt.as_messages()
         system_message = None
         if hasattr(adapter_utils, "split_system_message"):
             system_message, messages = adapter_utils.split_system_message(messages)
-        request: dict[str, Any] = {
-            "messages": messages,
-            "system_message": system_message,
-            "model": model,
-            "api_key": adapter_utils.resolve_provider_api_key_from_config(provider, app_config),
-            "temperature": temperature,
-            "max_tokens": max_tokens,
-            "stream": False,
-            "app_config": app_config,
-        }
-        # Off the event loop: a sync provider call blocks the server and cannot be quota-checked there (spec §4b).
-        response = await asyncio.to_thread(adapter.chat, request, timeout=timeout)
-        if inspect.isawaitable(response):
-            response = await response
+        # The gateway runs the moderation hooks, quota and model validation; the surface is a literal, never config.
+        response = await perform_chat_api_call_async(
+            api_provider=provider,
+            messages=messages,
+            system_message=system_message,
+            model=model,
+            temperature=temperature,
+            max_tokens=max_tokens,
+            stream=False,
+            timeout=timeout,
+            llm_surface="explainer",
+        )
+        raise_if_content_filtered(response)  # a refused answer is never parsed into children
         parsed = _parse_generation_response(response)
         metadata = parsed.get("generation_metadata") or parsed.get("generationMetadata") or {}
         parsed["generation_metadata"] = dict(metadata) if isinstance(metadata, dict) else {}
@@ -233,7 +232,8 @@ async def handle_explainer_node_expansion_job(
         )
         generation: dict[str, Any] | None = None
         if not _source_only_without_evidence(session=session, source_context=source_context):
-            generation = await _call_generator(generator, prompt)
+            with llm_call_root(owner_user_id):  # the job owner is the LLM user: their policy overlay and quota apply
+                generation = await _call_generator(generator, prompt)
         children = resolve_grounded_children(
             generation=generation,
             grounding=session.grounding,

@@ -53,6 +53,7 @@ import html2text
 from bs4 import BeautifulSoup
 from ebooklib import epub
 
+from tldw_Server_API.app.core.exceptions import LLMPolicyRefusal
 from tldw_Server_API.app.core.Chunking import ChunkingError, InvalidChunkingMethodError, improved_chunking_process
 
 #
@@ -99,6 +100,7 @@ _BOOK_PROCESSING_NONCRITICAL_EXCEPTIONS = (
     ValueError,
     zipfile.BadZipFile,
     zipfile.LargeZipFile,
+    LLMPolicyRefusal,  # a blocked analysis is recorded on the item like any failed analysis, never retried
 )
 
 def extract_epub_metadata_from_text(content: str) -> tuple[Optional[str], Optional[str]]:

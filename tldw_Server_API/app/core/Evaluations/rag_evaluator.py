@@ -97,6 +97,7 @@ def analyze(api_name: str, input_data: Any, custom_prompt_arg: Optional[str] = N
     """
     kwargs.pop("response_format", None)
     kwargs.setdefault("raise_on_error", True)
+    kwargs["llm_surface"] = "internal.eval_judge"  # judge calls are exempt (owner 2026-11-26); never caller-chosen
     return sgl.analyze(api_name, input_data, custom_prompt_arg, api_key, system_message, temp, **kwargs)
 
 

@@ -23,6 +23,7 @@ from typing import Any, Optional
 
 from loguru import logger
 
+from tldw_Server_API.app.core.exceptions import LLMPolicyRefusal
 from tldw_Server_API.app.core.Provider_Credentials.provider_credential_runtime import (
     ProviderCallCredentials,
 )
@@ -1186,7 +1187,7 @@ class UnifiedEvaluationService:
         def call_llm(prompt: str) -> str:
             try:
                 # use analyze(api_name, input_data, custom_prompt_arg, api_key, system_message, temp, streaming=False, recursive_summarization=False, chunked_summarization=False)
-                result = sgl.analyze(api_name, prompt, None, api_key, "You output one token only.", temperature, False, False, False, None)
+                result = sgl.analyze(api_name, prompt, None, api_key, "You output one token only.", temperature, False, False, False, None, llm_surface="evaluations")
                 if isinstance(result, tuple) and result:
                     return str(result[0])
                 return str(result)
@@ -1194,7 +1195,7 @@ class UnifiedEvaluationService:
                 logger.error(f"LLM call failed in QA3: {e}")
                 return ""
 
-        async def call_llm_async(prompt: str) -> str:
+        async def call_llm_async(prompt: str) -> str | None:
             try:
                 return await asyncio.wait_for(
                     asyncio.to_thread(call_llm, prompt),
@@ -1203,6 +1204,8 @@ class UnifiedEvaluationService:
             except asyncio.TimeoutError:
                 logger.error(f"LLM call timed out in QA3 after {qa3_timeout}s")
                 return ""
+            except LLMPolicyRefusal:
+                return None  # a refused prediction is a sample error below, never a label
 
         # Compute predictions
         results = []
@@ -1213,6 +1216,9 @@ class UnifiedEvaluationService:
             if generate_predictions or not pred:
                 prompt = build_prompt(q, ", ".join(allowed), it.get("context"))
                 raw = await call_llm_async(prompt)
+                if raw is None:
+                    results.append({"id": it.get("id"), "question": q, "gold": gold, "error": "llm_policy_refused"})
+                    continue  # unscored: in no metric
                 parsed = parse_prediction(raw) or "NEI"
                 pred = parsed
                 results.append({"id": it.get("id"), "question": q, "gold": gold, "pred": pred, "raw": raw})
@@ -1224,6 +1230,8 @@ class UnifiedEvaluationService:
         total = 0
         correct = 0
         for r in results:
+            if r.get("error"):
+                continue  # a sample error is in no matrix, accuracy or F1
             g = r.get("gold") or "NEI"
             p = r.get("pred") or "NEI"
             if g not in cm:

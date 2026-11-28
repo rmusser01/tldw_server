@@ -57,7 +57,7 @@ from tldw_Server_API.app.core.DB_Management.media_db.runtime.email_persisted_con
     read_persisted_email_content,
 )
 from tldw_Server_API.app.core.DB_Management.scope_context import ScopeContext, get_scope, scoped_context
-from tldw_Server_API.app.core.exceptions import LLMQuotaExceededError
+from tldw_Server_API.app.core.exceptions import LLMPolicyRefusal, LLMQuotaExceededError
 from tldw_Server_API.app.core.Ingestion_Media_Processing.chunking_options import (
     async_resolve_chunking_options_and_plan,
     prepare_chunking_options_dict,
@@ -1772,7 +1772,7 @@ def _synthesize_reused_transcript_analysis_sync(
                 None,
                 system_message=system_prompt,
             )
-        except LLMQuotaExceededError:
+        except (LLMQuotaExceededError, LLMPolicyRefusal):
             raise  # stop at the first refusal; the caller records it and keeps the transcript
         except _PERSISTENCE_NONCRITICAL_EXCEPTIONS as exc:
             warnings.append(f"Chunk summarization failed during dedupe reuse for chunk {index}: {exc}")
@@ -1805,7 +1805,9 @@ def _synthesize_reused_transcript_analysis_sync(
     return "\n\n---\n\n".join(chunk_summaries), warnings, chunked_texts_list
 
 
-def _record_reused_summary_refusal(process_result: dict[str, Any], refusal: LLMQuotaExceededError) -> None:
+def _record_reused_summary_refusal(
+    process_result: dict[str, Any], refusal: LLMQuotaExceededError | LLMPolicyRefusal
+) -> None:
     """Keep the reused transcript; record why there is no summary (TASK-13638 Decision 3)."""
     _ensure_warnings_list(process_result).append(f"Summary generation failed during dedupe reuse: {refusal}")
     process_result["video_lite_summary_status"] = "failed"
@@ -1859,7 +1861,7 @@ async def _populate_reused_transcript_summary(
             process_result["video_lite_summary_status"] = "ready"
         else:
             process_result["video_lite_summary_status"] = "failed"
-    except LLMQuotaExceededError as refusal:
+    except (LLMQuotaExceededError, LLMPolicyRefusal) as refusal:
         _record_reused_summary_refusal(process_result, refusal)
     except _PERSISTENCE_NONCRITICAL_EXCEPTIONS as exc:
         _ensure_warnings_list(process_result).append(f"Summary generation failed during dedupe reuse: {exc}")

@@ -69,15 +69,17 @@ from tldw_Server_API.app.core.DB_Management.media_db.api import (
     get_media_by_id,
 )
 from tldw_Server_API.app.core.DB_Management.scope_context import scoped_context
-from tldw_Server_API.app.core.exceptions import DataTablesJobError
+from tldw_Server_API.app.core.exceptions import DataTablesJobError, LLMPolicyRefusal
 from tldw_Server_API.app.core.Jobs.manager import JobManager
 from tldw_Server_API.app.core.Jobs.worker_sdk import WorkerConfig, WorkerSDK
 from tldw_Server_API.app.core.Jobs.worker_utils import coerce_int as _coerce_int, jobs_manager_from_env as _jobs_manager
-from tldw_Server_API.app.core.LLM_Calls.adapter_registry import get_registry
 from tldw_Server_API.app.core.LLM_Calls.adapter_utils import resolve_provider_model
 from tldw_Server_API.app.core.LLM_Calls.bounded_daemon import await_owned_worker
+from tldw_Server_API.app.core.LLM_Calls.gateway import perform_chat_api_call
 from tldw_Server_API.app.core.LLM_Calls.provider_identity import canonical_provider_name
 from tldw_Server_API.app.core.LLM_Calls.provider_metadata import provider_requires_api_key
+from tldw_Server_API.app.core.LLM_Calls.provider_results import raise_if_content_filtered
+from tldw_Server_API.app.core.Usage.llm_roots import llm_call_root
 from tldw_Server_API.app.core.LLM_Calls.structured_output import (
     StructuredOutputNoPayloadError,
     StructuredOutputOptions,
@@ -269,14 +271,6 @@ def _resolve_model(provider: str, model: str | None, app_config: dict[str, Any])
     if model:
         return model
     return resolve_provider_model(canonical_provider_name(provider), app_config)
-
-
-def _get_adapter(provider: str) -> Any:
-    registry = get_registry()
-    adapter = registry.get_adapter(provider)
-    if adapter is None:
-        raise ChatConfigurationError(provider=provider, message="LLM adapter unavailable.")
-    return adapter
 
 
 def _truncate_text(text: str, limit: int) -> str:
@@ -933,19 +927,21 @@ async def _generate_table_payload(jm: JobManager, job_id: int, model: str | None
             raise DataTablesJobError(code, retryable=code == "credential_store_unavailable") from None
         if model_to_use is None:
             raise ChatConfigurationError(provider=provider, message="Model is required for provider.")
-        adapter = _get_adapter(provider)
-        return adapter.chat(
-            {
-                "messages": messages_payload,
-                "api_key": api_key,
-                "model": model_to_use,
-                "temperature": _LLM_TEMPERATURE,
-                "max_tokens": _LLM_MAX_TOKENS,
-                "response_format": response_format,
-                "app_config": app_config,
-            },
+        # The gateway runs the moderation hooks, quota and model validation (surface data_tables.generation).
+        response = perform_chat_api_call(
+            api_provider=provider,
+            messages=messages_payload,
+            api_key=api_key,
+            model=model_to_use,
+            temperature=_LLM_TEMPERATURE,
+            max_tokens=_LLM_MAX_TOKENS,
+            response_format=response_format,
+            app_config=app_config,
             timeout=timeout,
+            llm_surface="data_tables.generation",
         )
+        raise_if_content_filtered(response)  # a refused answer is never parsed into a table
+        return response
 
     start = time.time()
     loop = asyncio.get_running_loop()
@@ -958,6 +954,9 @@ async def _generate_table_payload(jm: JobManager, job_id: int, model: str | None
     except asyncio.TimeoutError as exc:
         jm.update_job_progress(job_id, progress_percent=55.0, progress_message="llm_timeout")
         raise DataTablesJobError("llm_timeout", retryable=True) from exc
+    except LLMPolicyRefusal:
+        # The same prompt is refused again: the table fails, never re-queued.
+        raise DataTablesJobError("llm_policy_refused", retryable=False) from None
     logger.info(
         "data_tables worker: LLM call completed in {:.1f}ms",
         (time.time() - start) * 1000.0,
@@ -1189,7 +1188,9 @@ async def _handle_job(job: dict[str, Any], jm: JobManager) -> dict[str, Any]:
             db.update_data_table(table_id, status="cancelled", last_error=None, owner_user_id=user_id, expected_generation_job=generation_job, expected_version=expected_version)
             return {"cancelled": True, "table_id": table_id}
 
-        payload_obj = await _generate_table_payload(jm, job_id, model, llm_prompt)
+        # The job owner is the LLM user: their moderation overlay and quota apply (the default executor carries it).
+        with llm_call_root(user_id):
+            payload_obj = await _generate_table_payload(jm, job_id, model, llm_prompt)
 
         raw_columns = payload_obj.get("columns") or payload_obj.get("schema")
         raw_rows = payload_obj.get("rows") or payload_obj.get("data") or payload_obj.get("records")

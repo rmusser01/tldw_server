@@ -27,6 +27,7 @@ import pymupdf4llm
 
 #
 # Import Local
+from tldw_Server_API.app.core.exceptions import LLMPolicyRefusal
 from tldw_Server_API.app.core.config import loaded_config_data
 from tldw_Server_API.app.core.Ingestion_Media_Processing.OCR.registry import get_backend as _get_ocr_backend
 from tldw_Server_API.app.core.Ingestion_Media_Processing.OCR.runtime_support import (
@@ -53,6 +54,7 @@ _PDF_NONCRITICAL_EXCEPTIONS = (
     TypeError,
     UnicodeDecodeError,
     ValueError,
+    LLMPolicyRefusal,  # a blocked analysis is recorded on the item like any failed analysis, never retried
 )
 
 try:

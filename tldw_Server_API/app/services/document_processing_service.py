@@ -15,6 +15,7 @@ from docx2txt import docx2txt
 from fastapi import HTTPException
 from pypandoc import convert_file
 
+from tldw_Server_API.app.core.exceptions import LLMPolicyRefusal
 from tldw_Server_API.app.core.Chunking import improved_chunking_process
 from tldw_Server_API.app.core.Chunking.chunker import Chunker
 from tldw_Server_API.app.core.Context_Integrity.prompt_loader import load_prompt
@@ -37,6 +38,7 @@ _DOC_PROCESSING_NONCRITICAL_EXCEPTIONS = (
     TimeoutError,
     TypeError,
     ValueError,
+    LLMPolicyRefusal,  # a blocked analysis is recorded on the item like any failed analysis, never retried
 )
 
 

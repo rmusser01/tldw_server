@@ -45,6 +45,7 @@ import yt_dlp
 from loguru import logger
 
 # Import Local
+from tldw_Server_API.app.core.exceptions import LLMPolicyRefusal
 from tldw_Server_API.app.core.Evaluations.ms_g_eval import run_geval
 
 
@@ -168,6 +169,7 @@ _VIDEO_NONCRITICAL_EXCEPTIONS = (
     TypeError,
     UnicodeDecodeError,
     ValueError,
+    LLMPolicyRefusal,  # a blocked analysis is recorded on the item like any failed analysis, never retried
 )
 
 

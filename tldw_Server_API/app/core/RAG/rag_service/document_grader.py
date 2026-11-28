@@ -19,6 +19,7 @@ from tldw_Server_API.app.core.Chat.bounded_daemon import (
     await_bounded_sync_call,
     await_owned_worker,
 )
+from tldw_Server_API.app.core.exceptions import LLMPolicyRefusal
 from tldw_Server_API.app.core.LLM_Calls.structured_output import (
     StructuredOutputOptions,
     StructuredOutputParseError,
@@ -94,6 +95,7 @@ _CREDENTIAL_FAILURE_CODES = frozenset(
         "credential_store_unavailable",
         "credential_scope_revoked",
         "provider_unavailable",
+        "llm_policy_refused",  # moderation refused the call: no grade, the retrieval score stands
     }
 )
 
@@ -187,7 +189,7 @@ class DocumentGrader:
                         api_key,
                         system_message,
                         temp,
-                        **kwargs
+                        **{**kwargs, "llm_surface": "rag.auxiliary"}
                     )
 
                 self._analyze = _default_analyze
@@ -316,6 +318,10 @@ class DocumentGrader:
         except ByokResolutionError as exc:
             logger.warning("Document grading credentials unavailable for doc {}", doc_id)
             return self._fallback_to_score(doc_id, doc_score, start_time, error=exc.code)
+
+        except LLMPolicyRefusal:
+            logger.warning("Document grading refused by moderation policy for doc {}", doc_id)
+            return self._fallback_to_score(doc_id, doc_score, start_time, error="llm_policy_refused")
 
         except SummaryProviderError:
             logger.warning("Document grading provider unavailable for doc {}", doc_id)

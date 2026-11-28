@@ -120,6 +120,24 @@ def raise_if_content_filtered(response: Any) -> None:
         raise LLMPolicyRefusal("Output violates moderation policy")
 
 
+def sse_line_is_content_filtered(line: str) -> bool:
+    """Whether a provider SSE item carries the ``content_filter`` finish that moderation puts on a blocked stream."""
+    for part in str(line).splitlines():
+        part = part.strip()
+        if not part.startswith("data:") or "content_filter" not in part and "refusal" not in part:
+            continue
+        try:
+            frame = json.loads(part[5:].strip())
+        except ValueError:
+            continue
+        choices = frame.get("choices") if isinstance(frame, dict) else None
+        if isinstance(choices, list) and any(
+            isinstance(c, dict) and c.get("finish_reason") == "content_filter" for c in choices
+        ):
+            return True
+    return False
+
+
 def _provider_stream_code(value: Any) -> Optional[str]:
     if not isinstance(value, str):
         return None

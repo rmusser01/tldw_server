@@ -13,6 +13,7 @@ from typing import Any, Callable, Optional
 
 from loguru import logger
 
+from tldw_Server_API.app.core.exceptions import LLMPolicyRefusal
 from tldw_Server_API.app.core.Chat.bounded_daemon import (
     SYNC_ADAPTER_CALL_POOL,
     await_bounded_sync_call,
@@ -86,6 +87,7 @@ def _generate_with_llm(prompt: str, provider: Optional[str], model: Optional[str
                         system_message=None,
                         temp=None,
                         model_override=self.model,
+                        llm_surface="rag.auxiliary",
                     )
                     # sgl.analyze returns string content
                     if isinstance(resp, str):
@@ -94,6 +96,8 @@ def _generate_with_llm(prompt: str, provider: Optional[str], model: Optional[str
                     if isinstance(resp, dict):
                         return resp.get("text") or resp.get("content") or str(resp)
                     return str(resp)
+                except LLMPolicyRefusal:
+                    raise  # a refusal is not a reason to fall back to the heuristic answer
                 except Exception:  # pragma: no cover - defensive
                     logger.warning("HyDE LLM generation failed")
                     return ""
@@ -101,6 +105,8 @@ def _generate_with_llm(prompt: str, provider: Optional[str], model: Optional[str
         client = _LLMClient(provider, model)
         out = client.generate(prompt)
         return out.strip() if isinstance(out, str) else None
+    except LLMPolicyRefusal:
+        raise
     except Exception:
         logger.debug("HyDE LLM utility unavailable")
         return None

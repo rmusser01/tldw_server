@@ -41,7 +41,7 @@ import yt_dlp
 #
 # Local Imports
 from tldw_Server_API.app.core.config import MAX_STANDARD_MEDIA_UPLOAD_MIB, loaded_config_data
-from tldw_Server_API.app.core.exceptions import TranscriptionCancelled
+from tldw_Server_API.app.core.exceptions import TranscriptionCancelled, LLMPolicyRefusal
 from tldw_Server_API.app.core.http_client import RetryPolicy
 from tldw_Server_API.app.core.http_client import download as http_download
 
@@ -123,6 +123,7 @@ class AudioConversionError(AudioProcessingError):
 
 
 _AUDIO_FILES_NONCRITICAL_EXCEPTIONS = (
+    LLMPolicyRefusal,  # a blocked analysis is recorded on the item like any failed analysis, never retried
     OSError,
     ValueError,
     TypeError,

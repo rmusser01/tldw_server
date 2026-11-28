@@ -6,7 +6,6 @@
 #
 # Scripts taken from https://github.com/microsoft/promptflow/tree/main/examples/flows/evaluation/eval-summarization and modified.
 #
-import copy
 import inspect
 import json
 import logging
@@ -36,13 +35,12 @@ from tldw_Server_API.app.core.custom_openai_providers import custom_openai_provi
 from tldw_Server_API.app.core.exceptions import LLMQuotaExceededError, raise_detached_error
 from tldw_Server_API.app.core.LLM_Calls.adapter_utils import (
     ensure_app_config,
-    get_adapter_or_raise,
     normalize_provider,
     provider_auth_is_resolved,
-    resolve_provider_api_key_from_config,
     resolve_provider_model,
     split_system_message,
 )
+from tldw_Server_API.app.core.LLM_Calls.gateway import perform_chat_api_call
 from tldw_Server_API.app.core.LLM_Calls.provider_metadata import (
     list_registered_providers,
     provider_requires_api_key,
@@ -103,34 +101,35 @@ def _call_adapter_text(
         provider,
         provider_credentials,
     )
-    if provider_credentials is not None:
-        cfg = copy.deepcopy(provider_credentials.app_config or {})
-        api_key = provider_credentials.api_key
-        credentials_resolved = True
-    else:
-        cfg = ensure_app_config(app_config)
-    resolved_model = model or resolve_provider_model(provider, cfg)
-    if not resolved_model:
-        raise ChatConfigurationError(provider=provider, message="Model is required for provider.")
+    if (
+        credentials_resolved
+        and provider_credentials is None
+        and provider_requires_api_key(provider)
+        and not provider_auth_is_resolved(provider, api_key=api_key, app_config=app_config, credentials_resolved=True)
+    ):
+        # "Resolved" with no handle and no key must not fall back to the server's key (the gateway would resolve one).
+        raise ChatConfigurationError(provider=provider, message="API key is required for provider.")
+    extra_kwargs.pop("llm_surface", None)  # R10
     system_message, cleaned_messages = split_system_message(messages_payload or [])
-    request: dict[str, Any] = {
-        "messages": cleaned_messages,
-        "system_message": system_message,
-        "model": resolved_model,
-        "api_key": (
-            api_key
-            if credentials_resolved
-            else api_key or resolve_provider_api_key_from_config(provider, cfg)
-        ),
-        "temperature": temperature,
-        "user": user,
-        "app_config": cfg,
-        "credentials_resolved": credentials_resolved,
-    }
-    request.update(extra_kwargs)
     if provider_credentials is not None:
-        request[PROVIDER_CALL_CREDENTIALS_CONTEXT_KEY] = provider_credentials
-    response = get_adapter_or_raise(provider).chat(request, timeout=timeout)
+        extra_kwargs[PROVIDER_CALL_CREDENTIALS_CONTEXT_KEY] = provider_credentials
+        # The gateway reads an own key's model only from its config section; keep DEFAULT_MODEL_<PROVIDER> (R6).
+        model = model or resolve_provider_model(provider, provider_credentials.app_config or {})
+    # The judge scores the evaluated output: exempt as ``internal.eval_judge`` (owner 2026-11-26), since moderating
+    # the judge's input or output would change the scores.
+    response = perform_chat_api_call(
+        api_provider=provider,
+        messages=cleaned_messages,
+        system_message=system_message,
+        model=model,
+        api_key=api_key,
+        temperature=temperature,
+        user=user,
+        app_config=app_config,
+        timeout=timeout,
+        **extra_kwargs,
+        llm_surface="internal.eval_judge",
+    )
     return extract_response_content(response) or str(response)
 
 

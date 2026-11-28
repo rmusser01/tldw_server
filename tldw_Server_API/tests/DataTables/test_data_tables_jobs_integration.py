@@ -4,6 +4,8 @@ from contextlib import contextmanager
 from pathlib import Path
 
 import pytest
+
+from tldw_Server_API.tests.helpers.gateway_routing import route_gateway_adapters
 from fastapi.testclient import TestClient
 
 from tldw_Server_API.app.core.Data_Tables import jobs_worker, publication
@@ -34,7 +36,7 @@ def _configure_worker_paths(tmp_path: Path, monkeypatch) -> Path:
 
 
 def _stub_llm(monkeypatch, payload):
-    monkeypatch.setattr(jobs_worker, "_get_adapter", lambda _provider: _StubAdapter(payload))
+    route_gateway_adapters(monkeypatch, lambda _provider: _StubAdapter(payload))
     monkeypatch.setattr(jobs_worker, "_resolve_model", lambda *_args, **_kwargs: "test-model")
     monkeypatch.setattr(jobs_worker, "provider_requires_api_key", lambda _p: False)
     monkeypatch.setattr(jobs_worker, "resolve_provider_api_key", lambda *_a, **_k: ("", {}))
@@ -830,7 +832,7 @@ async def test_local_provider_alias_without_key_completes_generation(monkeypatch
                 ]
             }
 
-    monkeypatch.setattr(jobs_worker, "_get_adapter", lambda _provider: LocalAdapter())
+    route_gateway_adapters(monkeypatch, lambda _provider: LocalAdapter())
     monkeypatch.setattr(jobs_worker, "load_and_log_configs", lambda: {"llama_api": {"model": "local-test-model"}})
     try:
         with TestClient(app) as client:
@@ -876,7 +878,7 @@ async def test_local_provider_alias_without_key_completes_generation(monkeypatch
         await asyncio.wait_for(sdk.run(handler=handle, on_completed=completed), timeout=2)
         job = manager.get_job(receipt["job_id"])
         assert job["status"] == "completed", job.get("error_message")  # nosec B101 -- real SDK completion.
-        assert len(calls) == 1 and calls[0]["api_key"] == "" and calls[0]["model"] == "local-test-model"  # nosec B101 -- actual keyless configured model.
+        assert len(calls) == 1 and calls[0]["api_key"] is None and calls[0]["model"] == "local-test-model"  # nosec B101 -- actual keyless configured model.
         db = MediaDatabase(db_path=str(media_path), client_id="test_client")
         try:
             table = db.get_data_table_by_uuid(receipt["table"]["uuid"])
@@ -938,7 +940,7 @@ async def test_regeneration_enforces_real_provider_policy_before_dispatch(
                     ]
                 }
 
-        monkeypatch.setattr(jobs_worker, "_get_adapter", lambda _provider: Adapter())
+        route_gateway_adapters(monkeypatch, lambda _provider: Adapter())
         monkeypatch.setattr(jobs_worker, "load_and_log_configs", lambda: {"llama_api": {"model": configured}})
         overrides.set_llm_provider_overrides_cache_for_tests(
             {
@@ -981,6 +983,6 @@ async def test_regeneration_enforces_real_provider_policy_before_dispatch(
             assert _s03_content(db, table_id) == original and db.list_data_table_sources(table_id) == sources  # nosec B101 -- all saved identities/content survive denial.
             assert db.get_data_table(table_id)["status"] == ("queued" if policy == "unhealthy" else "failed")  # nosec B101 -- ordinary failed/retry table state.
         else:
-            assert calls == [("allowed-model", "")]  # nosec B101 -- exact allowed default/explicit keyless dispatch.
+            assert calls == [("allowed-model", None)]  # nosec B101 -- exact allowed default/explicit keyless dispatch.
             assert db.get_data_table(table_id)["status"] == "ready"  # nosec B101 -- actual callback publication.
             assert list(json.loads(db.list_data_table_rows(table_id)[0]["row_json"]).values()) == ["Replacement"]  # nosec B101 -- real saved replacement.

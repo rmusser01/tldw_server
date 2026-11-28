@@ -387,6 +387,7 @@ def _generate_answer_for_candidate(
         system_message=system_message,
         temp=(run_config.get("execution_policy") or {}).get("temperature"),
         model_override=model,
+        llm_surface="evaluations",  # the evaluated candidate's output, not a judge
     )
     if not isinstance(summary, str) or not summary.strip() or summary.startswith("Error:"):
         raise ValueError(

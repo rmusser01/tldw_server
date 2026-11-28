@@ -21,6 +21,8 @@ from typing import Any, Protocol
 
 from loguru import logger
 
+from tldw_Server_API.app.core.exceptions import LLMPolicyRefusal
+
 from tldw_Server_API.app.core.LLM_Calls.structured_output import (
     StructuredOutputOptions,
     StructuredOutputParseError,
@@ -71,12 +73,15 @@ class FaithfulnessResult:
         reasoning: Overall reasoning for the score.
     """
 
-    score: float
+    score: float | None
     claims: list[ClaimVerification]
     reasoning: str
+    # A moderation refusal leaves the response unverified: no score (never 0.0), out of every average.
+    failure_code: str | None = None
+    verification_available: bool = True
 
     def to_dict(self) -> dict[str, Any]:
-        return {
+        out: dict[str, Any] = {
             "faithfulness_score": self.score,
             "total_claims": len(self.claims),
             "supported_claims": sum(1 for c in self.claims if c.supported),
@@ -84,6 +89,19 @@ class FaithfulnessResult:
             "reasoning": self.reasoning,
             "claim_verifications": [c.to_dict() for c in self.claims],
         }
+        if self.failure_code is not None:
+            out.update(failure_code=self.failure_code, verification_available=self.verification_available)
+        return out
+
+
+def _unverified_by_policy() -> FaithfulnessResult:
+    return FaithfulnessResult(
+        score=None,
+        claims=[],
+        reasoning="Verification skipped: the request was refused by moderation policy.",
+        failure_code="llm_policy_refused",
+        verification_available=False,
+    )
 
 
 # ---------------------------------------------------------------------------
@@ -153,8 +171,8 @@ class FaithfulnessEvaluator:
         response: str,
         context: str,
         query: str | None = None,
-    ) -> float:
-        """Evaluate faithfulness, returning a single score.
+    ) -> float | None:
+        """Evaluate faithfulness, returning a single score (None when moderation refused the verification).
 
         Args:
             response: The generated response to evaluate.
@@ -200,6 +218,8 @@ class FaithfulnessEvaluator:
         # Extract claims from response
         try:
             claims = await self._extract_claims(response)
+        except LLMPolicyRefusal:
+            return _unverified_by_policy()
         except Exception:
             if self.propagate_errors:
                 raise
@@ -226,6 +246,8 @@ class FaithfulnessEvaluator:
             try:
                 verification = await self._verify_claim(claim, context)
                 verifications.append(verification)
+            except LLMPolicyRefusal:
+                return _unverified_by_policy()  # one refused claim leaves the response unverified, not unsupported
             except Exception:
                 if self.propagate_errors:
                     raise

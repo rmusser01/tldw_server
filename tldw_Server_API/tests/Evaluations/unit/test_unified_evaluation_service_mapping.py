@@ -10,6 +10,7 @@ from unittest.mock import AsyncMock
 import pytest
 from loguru import logger
 
+from tldw_Server_API.tests.helpers.gateway_routing import route_gateway_adapters
 from tldw_Server_API.app.core.AuthNZ.byok_runtime import (
     ByokResolutionStatus,
     ResolvedByokCredentials,
@@ -101,7 +102,7 @@ async def test_specialized_evaluation_keeps_one_snapshot_at_llm_boundary(
             captured_requests.append({"boundary": "adapter", **request})
             return {"choices": [{"message": {"content": "4"}}]}
 
-    monkeypatch.setattr(ms_g_eval, "get_adapter_or_raise", lambda _provider: RecordingAdapter())
+    route_gateway_adapters(monkeypatch, lambda _provider: RecordingAdapter())
 
     async def call_with_breaker(_provider: str, function, *args: Any, **kwargs: Any):
         result = function(*args, **kwargs)
@@ -402,6 +403,7 @@ def test_rag_analyze_drops_unsupported_claims_response_format_at_sgl_boundary(
         app_config: dict[str, Any] | None = None,
         credentials_resolved: bool = False,
         raise_on_error: bool = False,
+        llm_surface: str | None = None,
     ) -> str:
         captured.update(
             {

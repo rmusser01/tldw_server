@@ -5,6 +5,7 @@ import contextlib
 import time
 from typing import TYPE_CHECKING, Any
 
+from tldw_Server_API.app.core.exceptions import LLMPolicyRefusal
 from tldw_Server_API.app.core.RAG.rag_service import unified_pipeline as up
 
 from .run_config import RagRunConfig
@@ -94,6 +95,7 @@ async def select_reranker(rcfg: RagRunConfig, state: "PipelineState") -> None:
                             credentials_resolved=self.handle is not None,
                             provider_credentials=self.handle,
                             raise_on_error=self.handle is not None,
+                            llm_surface="rag.auxiliary",
                         )
                         response = up._consume_bound_sgl_response(
                             response,
@@ -183,6 +185,15 @@ async def apply_rerank(rcfg: RagRunConfig, state: "PipelineState") -> None:
                 await rcfg.runtime.credential_runtime.mark_used(
                     state.reranker_credential_handle
                 )
+    except LLMPolicyRefusal:
+        # Moderation refused the reranker's call: the stage is skipped and the retrieval order stands.
+        state.record_profile_degradation(
+            component="reranking_strategy",
+            from_value=state.reranking_strategy,
+            to_value="skipped",
+            reason="llm_policy_refused",
+        )
+        reranked = state.result.documents
     except Exception as rerank_exc:  # noqa: BLE001 - moved from unified_pipeline.py (TASK-13950.24)
         if state.reranking_strategy != "two_tier":
             raise

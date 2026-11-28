@@ -2,6 +2,7 @@
 #
 from __future__ import annotations
 
+from types import SimpleNamespace
 from typing import Any
 from unittest.mock import MagicMock, patch
 
@@ -13,7 +14,16 @@ from tldw_Server_API.app.api.v1.API_Deps.DB_Deps import get_media_db_for_user
 from tldw_Server_API.app.api.v1.endpoints.media import document_insights as insights_mod
 from tldw_Server_API.app.api.v1.schemas.document_insights import GenerateInsightsRequest
 from tldw_Server_API.app.core.AuthNZ.User_DB_Handling import User, get_request_user
+from tldw_Server_API.app.core.LLM_Calls import gateway
 from tldw_Server_API.app.core.Utils.fastapi_routes import iter_served_routes
+
+
+def _llm(adapter: Any):
+    """Route the gateway's adapter lookup (where the endpoint now calls the provider) to ``adapter``."""
+    registry = SimpleNamespace(
+        get_adapter=lambda _provider: adapter, get_audited_call_policy_transport=lambda _provider: None, capabilities=dict
+    )
+    return patch.object(gateway, "_get_llm_registry", return_value=registry)
 
 
 async def _allow_non_authz_dep() -> None:
@@ -107,7 +117,7 @@ async def test_generate_document_insights_success(mock_user, mock_db):
     }
 
     with (
-        patch.object(insights_mod, "_get_adapter", return_value=_StubAdapter()),
+        _llm(_StubAdapter()),
         patch("tldw_Server_API.app.core.Chat.chat_service.resolve_provider_api_key", return_value=("key", None)),
         patch("tldw_Server_API.app.core.LLM_Calls.provider_metadata.provider_requires_api_key", return_value=False),
         patch.object(insights_mod, "_resolve_model", return_value="test-model"),
@@ -146,7 +156,7 @@ async def test_generate_document_insights_cached(mock_user, mock_db):
 
     with (
         patch("tldw_Server_API.app.api.v1.utils.cache.get_cached_response", return_value=("etag", cached_payload)),
-        patch.object(insights_mod, "_get_adapter", side_effect=AssertionError("LLM should not be called")),
+        patch.object(gateway, "_get_llm_registry", side_effect=AssertionError("LLM should not be called")),
     ):
         async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client:
             response = await client.post("/api/v1/media/1/insights")
@@ -185,7 +195,7 @@ async def test_generate_document_insights_parses_fenced_json_with_think(mock_use
     )
 
     with (
-        patch.object(insights_mod, "_get_adapter", return_value=_StubAdapter()),
+        _llm(_StubAdapter()),
         patch("tldw_Server_API.app.core.Chat.chat_service.resolve_provider_api_key", return_value=("key", None)),
         patch("tldw_Server_API.app.core.LLM_Calls.provider_metadata.provider_requires_api_key", return_value=False),
         patch.object(insights_mod, "_resolve_model", return_value="test-model"),
@@ -216,7 +226,7 @@ async def test_generate_document_insights_sanitizes_missing_insights_list_warnin
     monkeypatch.setattr(insights_mod, "logger", logger_stub, raising=True)
 
     with (
-        patch.object(insights_mod, "_get_adapter", return_value=_StubAdapter()),
+        _llm(_StubAdapter()),
         patch("tldw_Server_API.app.core.Chat.chat_service.resolve_provider_api_key", return_value=("key", None)),
         patch("tldw_Server_API.app.core.LLM_Calls.provider_metadata.provider_requires_api_key", return_value=False),
         patch.object(insights_mod, "_resolve_model", return_value="test-model"),
@@ -252,7 +262,7 @@ async def test_generate_document_insights_sanitizes_llm_service_error_log(
     monkeypatch.setattr(insights_mod, "logger", logger_stub, raising=True)
 
     with (
-        patch.object(insights_mod, "_get_adapter", return_value=_ExplodingAdapter()),
+        _llm(_ExplodingAdapter()),
         patch("tldw_Server_API.app.core.Chat.chat_service.resolve_provider_api_key", return_value=("key", None)),
         patch("tldw_Server_API.app.core.LLM_Calls.provider_metadata.provider_requires_api_key", return_value=False),
         patch.object(insights_mod, "_resolve_model", return_value="test-model"),
@@ -309,7 +319,7 @@ async def test_generate_document_insights_invalid_json_returns_500(mock_user, mo
     monkeypatch.setattr(insights_mod, "logger", logger_stub, raising=True)
 
     with (
-        patch.object(insights_mod, "_get_adapter", return_value=_StubAdapter()),
+        _llm(_StubAdapter()),
         patch("tldw_Server_API.app.core.Chat.chat_service.resolve_provider_api_key", return_value=("key", None)),
         patch("tldw_Server_API.app.core.LLM_Calls.provider_metadata.provider_requires_api_key", return_value=False),
         patch.object(insights_mod, "_resolve_model", return_value="test-model"),
@@ -340,7 +350,7 @@ async def test_generate_document_insights_sanitizes_configuration_errors(mock_us
     monkeypatch.setattr(insights_mod, "logger", logger_stub, raising=True)
 
     with (
-        patch.object(insights_mod, "_get_adapter", return_value=_StubAdapter()),
+        _llm(_StubAdapter()),
         patch("tldw_Server_API.app.core.Chat.chat_service.resolve_provider_api_key", return_value=("key", None)),
         patch("tldw_Server_API.app.core.LLM_Calls.provider_metadata.provider_requires_api_key", return_value=False),
         patch.object(insights_mod, "_resolve_model", return_value=None),
@@ -404,7 +414,7 @@ async def test_generate_document_insights_passes_an_llm_quota_refusal_through(mo
     app.dependency_overrides[get_request_user] = lambda: mock_user
     app.dependency_overrides[get_media_db_for_user] = lambda: mock_db
     with (
-        patch.object(insights_mod, "_get_adapter", return_value=_RefusingAdapter()),
+        _llm(_RefusingAdapter()),
         patch("tldw_Server_API.app.core.Chat.chat_service.resolve_provider_api_key", return_value=("key", None)),
         patch("tldw_Server_API.app.core.LLM_Calls.provider_metadata.provider_requires_api_key", return_value=False),
         patch.object(insights_mod, "_resolve_model", return_value="test-model"),
