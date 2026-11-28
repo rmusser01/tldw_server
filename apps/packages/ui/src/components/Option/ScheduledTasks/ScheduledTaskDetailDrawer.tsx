@@ -1,6 +1,7 @@
 import React from "react"
 import { Button, Descriptions, Drawer, Space, Typography } from "antd"
 import { Badge as DesignSystemBadge } from "@/components/ui/primitives"
+import { UNAVAILABLE_STATE_LABEL } from "@/design-system"
 import type {
   ScheduledTask,
   ScheduledTaskAuditEventResponse,
@@ -235,7 +236,7 @@ const stringifyCompact = (value: unknown): string => {
   try {
     return JSON.stringify(value)
   } catch {
-    return "Unavailable"
+    return UNAVAILABLE_STATE_LABEL
   }
 }
 

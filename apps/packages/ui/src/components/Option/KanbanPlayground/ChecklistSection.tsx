@@ -1,7 +1,6 @@
 import { useState } from "react"
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query"
 import {
-  Alert,
   Button,
   Input,
   Checkbox,
@@ -12,6 +11,7 @@ import {
 } from "antd"
 import { Plus, Trash2 } from "lucide-react"
 
+import { Alert } from "@/components/ui/primitives"
 import type { ChecklistWithItems, ChecklistItem } from "@/types/kanban"
 import { generateClientId } from "@/services/kanban"
 import { useKanbanScope } from "./KanbanScope"
@@ -66,7 +66,10 @@ export const ChecklistSection = ({ cardId }: ChecklistSectionProps) => {
       </div>
 
       {isError && (
-        <Alert type="error" showIcon title="Unable to load checklists." />
+        <Alert
+          variant="error"
+          title={<span className="text-text">Unable to load checklists.</span>}
+        />
       )}
 
       {checklists.map((cl) => (

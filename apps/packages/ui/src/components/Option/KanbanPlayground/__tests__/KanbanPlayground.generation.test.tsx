@@ -358,6 +358,8 @@ describe("generated Kanban drafts", () => {
     );
     await waitFor(() => expect(chats()).toHaveLength(1));
     expect(within(dialog).queryByText("Fixture model picker")).not.toBeInTheDocument();
+    const status = within(dialog).getByRole("status");
+    expect(status).toHaveTextContent("Generating draft");
     fireEvent.click(
       within(dialog).getByRole("button", { name: "Stop" }),
     );
@@ -365,6 +367,10 @@ describe("generated Kanban drafts", () => {
     await act(async () => {
       pending.resolve(completion());
     });
+    expect(within(dialog).getByRole("status")).toBe(status);
+    expect(status).toHaveTextContent(
+      "Generation stopped. Generate a new draft when ready.",
+    );
     expect(
       within(dialog).queryByRole("region", { name: "Generated board preview" }),
     ).not.toBeInTheDocument();
