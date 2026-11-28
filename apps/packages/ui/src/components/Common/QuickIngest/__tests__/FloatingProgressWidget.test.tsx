@@ -1,7 +1,7 @@
 // @vitest-environment jsdom
 import React from "react"
 import { afterEach, describe, expect, it, vi } from "vitest"
-import { cleanup, render, screen } from "@testing-library/react"
+import { act, cleanup, render, screen } from "@testing-library/react"
 
 import { FloatingProgressWidget } from "../FloatingProgressWidget"
 import { IngestWizardProvider } from "../IngestWizardContext"
@@ -62,7 +62,7 @@ const renderWidget = ({
   progressPercent = 100,
 }: {
   processingStatus: ProcessingStatus
-  itemStatus: ItemProgressStatus
+  itemStatus: ItemProgressStatus | ItemProgressStatus[]
   progressPercent?: number
   lifecycle?: "processing" | "completed" | "partial_failure" | "cancelled" | "interrupted"
 }) => {
@@ -80,15 +80,9 @@ const renderWidget = ({
         isMinimized: true,
         processingState: {
           status: processingStatus,
-          perItemProgress: [
-            {
-              id: "item-1",
-              status: itemStatus,
-              progressPercent,
-              currentStage: itemStatus,
-              estimatedRemaining: 0,
-            },
-          ],
+          perItemProgress: [itemStatus].flat().map((status, index) => ({
+            id: `item-${index}`, status, progressPercent, currentStage: status, estimatedRemaining: 0,
+          })),
           elapsed: 10,
           estimatedRemaining: 0,
         },
@@ -106,6 +100,16 @@ describe("FloatingProgressWidget", () => {
     expect(screen.getByRole("status")).toHaveTextContent("Ingesting 0/1")
     expect(screen.queryByText(/\d+%/)).not.toBeInTheDocument()
     expect(screen.getByText(/Waiting for server results/)).toBeInTheDocument()
+  })
+
+  it("keeps active and failed sources visible past the terminal dismissal delay", () => {
+    vi.useFakeTimers()
+    renderWidget({ processingStatus: "running", itemStatus: ["failed", "processing", "complete"], lifecycle: "processing" })
+    expect(screen.getByRole("status")).toHaveTextContent("1 active")
+    expect(screen.getByRole("status")).toHaveTextContent("1 failed")
+    act(() => vi.advanceTimersByTime(11_000))
+    expect(screen.getByRole("progressbar")).toHaveAttribute("aria-valuenow", "2")
+    expect(screen.getByRole("button", { name: "Open ingest wizard" })).toBeVisible()
   })
 
   it("shows Done for complete minimized sessions", () => {

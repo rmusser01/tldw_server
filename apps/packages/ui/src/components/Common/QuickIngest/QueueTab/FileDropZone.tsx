@@ -8,6 +8,7 @@ import {
 } from "../constants"
 
 interface FileDropZoneProps {
+  singleBrowseControl?: boolean
   /** Callback when valid files are dropped or selected */
   onFilesAdded: (files: File[]) => void
   /** Callback when files are rejected (size/type) */
@@ -31,6 +32,7 @@ interface FileDropZoneProps {
  * - Disabled states for processing and server offline
  */
 export const FileDropZone: React.FC<FileDropZoneProps> = ({
+  singleBrowseControl = false,
   onFilesAdded,
   onFilesRejected,
   running = false,
@@ -287,7 +289,7 @@ export const FileDropZone: React.FC<FileDropZoneProps> = ({
       className={`mt-3 w-full rounded-md border border-dashed px-4 py-4 text-center transition-colors ${getStateStyles()} ${className || ""}`}
       data-testid="qi-file-dropzone"
       role="button"
-      aria-label={qi(
+      aria-label={singleBrowseControl ? qi("addFiles", "Browse files") : qi(
         "dropzoneAriaLabel",
         "File upload zone. Drag and drop files or press Enter to browse."
       )}
@@ -353,11 +355,15 @@ export const FileDropZone: React.FC<FileDropZoneProps> = ({
         )}
 
         {/* Browse button - only show when not dragging */}
-        {!isDragging && (
+        {!isDragging && (singleBrowseControl ? (
+          <span className="rounded-md border border-border bg-surface px-3 py-1.5 text-sm font-medium">
+            {qi("addFiles", "Browse files")}
+          </span>
+        ) : (
           <Button onClick={handleBrowseClick} disabled={disabled}>
             {qi("addFiles", "Browse files")}
           </Button>
-        )}
+        ))}
       </div>
       <span className="sr-only" aria-live="polite" aria-atomic="true">
         {ariaStatus}

@@ -23,6 +23,7 @@ type PresetSelectorProps = {
    * Whether the selector is disabled.
    */
   disabled?: boolean
+  compact?: boolean
   /**
    * Current queue (accepted for compatibility with existing wizard callers).
    */
@@ -113,6 +114,7 @@ export const PresetSelector: React.FC<PresetSelectorProps> = ({
   onChange,
   onReset,
   disabled = false,
+  compact = false,
 }) => {
   const handleCardClick = React.useCallback(
     (preset: Exclude<IngestPreset, "custom">) => {
@@ -122,6 +124,27 @@ export const PresetSelector: React.FC<PresetSelectorProps> = ({
     },
     [onChange, disabled]
   )
+
+  if (compact) {
+    return (
+      <label className="flex flex-col gap-1 text-sm font-medium text-text">
+        {qi("oneScreen.preset", "Processing preset")}
+        <select
+          value={value}
+          disabled={disabled}
+          className="w-full rounded-md border border-border bg-surface px-3 py-2 text-sm text-text"
+          onChange={event => onChange(event.target.value as IngestPreset)}
+        >
+          {value === "custom" && <option value="custom" disabled>{qi("preset.custom", "Custom")}</option>}
+          {CARD_PRESETS.map(preset => (
+            <option key={preset} value={preset}>
+              {qi(PRESET_META[preset].labelKey, preset.charAt(0).toUpperCase() + preset.slice(1))}
+            </option>
+          ))}
+        </select>
+      </label>
+    )
+  }
 
   return (
     <div className="flex flex-col gap-3">
