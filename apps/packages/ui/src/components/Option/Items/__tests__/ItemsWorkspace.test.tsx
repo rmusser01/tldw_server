@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest"
-import { fireEvent, render, screen, waitFor, within } from "@testing-library/react"
+import { act, fireEvent, render, screen, waitFor, within } from "@testing-library/react"
 import { message, Modal } from "antd"
 import { ItemsWorkspace } from "../ItemsWorkspace"
 
@@ -131,6 +131,93 @@ describe("ItemsWorkspace", () => {
       expect(apiMock.getItems).toHaveBeenCalled()
     })
     expect(await screen.findByText("Shared Item")).toBeTruthy()
+  })
+
+  it("announces an empty list after the initial request resolves", async () => {
+    let finishLoad!: () => void
+    apiMock.getItems.mockReturnValueOnce(new Promise((resolve) => {
+      finishLoad = () => resolve({ items: [], total: 0 })
+    }))
+    render(<ItemsWorkspace />)
+
+    const results = screen.getByRole("status", { name: /^Items$/ })
+    expect(results.textContent).toBe("")
+    expect(screen.queryByRole("heading", { name: "No items available" })).toBeNull()
+
+    finishLoad()
+
+    expect(await screen.findByRole("heading", { name: "No items available" })).toBeTruthy()
+    expect(results.textContent).toBe("No items available")
+  })
+
+  it("announces when filters have no matches and reloads after clearing them", async () => {
+    render(<ItemsWorkspace />)
+    expect(await screen.findByText("Shared Item")).toBeTruthy()
+    const results = screen.getByRole("status", { name: /^Items$/ })
+    apiMock.getItems.mockResolvedValueOnce({ items: [], total: 0 })
+
+    fireEvent.change(screen.getByPlaceholderText("Search items..."), {
+      target: { value: "missing item" }
+    })
+
+    expect(await screen.findByRole("heading", { name: "No items match your filters" })).toBeTruthy()
+    expect(results.textContent).toBe("No items match your filters")
+    expect(apiMock.getItems).toHaveBeenLastCalledWith(expect.objectContaining({ q: "missing item" }))
+
+    fireEvent.click(screen.getByRole("button", { name: "Clear filters" }))
+
+    expect(await screen.findByText("Shared Item")).toBeTruthy()
+    expect(results.textContent).toBe("")
+  })
+
+  it.each(["empty response", "load failure"])(
+    "ignores an earlier search's %s while the latest search is pending",
+    async (earlierOutcome) => {
+      render(<ItemsWorkspace />)
+      expect(await screen.findByText("Shared Item")).toBeTruthy()
+      const results = screen.getByRole("status", { name: /^Items$/ })
+      let finishEarlier!: () => void
+      let finishLatest!: () => void
+      apiMock.getItems
+        .mockReturnValueOnce(new Promise((resolve, reject) => {
+          finishEarlier = earlierOutcome === "empty response"
+            ? () => resolve({ items: [], total: 0 })
+            : () => reject(new Error("Earlier search failed"))
+        }))
+        .mockReturnValueOnce(new Promise((resolve) => {
+          finishLatest = () => resolve({ items: [], total: 0 })
+        }))
+      const search = screen.getByPlaceholderText("Search items...")
+      fireEvent.change(search, { target: { value: "first search" } })
+      fireEvent.change(search, { target: { value: "latest search" } })
+
+      await act(async () => { finishEarlier() })
+
+      expect(results.textContent).toBe("")
+      expect(screen.queryByRole("heading", { name: "No items match your filters" })).toBeNull()
+      expect(screen.queryByRole("heading", { name: "Failed to load items" })).toBeNull()
+      expect(screen.queryByText("Earlier search failed")).toBeNull()
+
+      await act(async () => { finishLatest() })
+
+      expect(results.textContent).toBe("No items match your filters")
+    }
+  )
+
+  it("keeps the load error detail and recovers through Retry", async () => {
+    apiMock.getItems.mockRejectedValueOnce(new Error("Items service is temporarily unavailable"))
+    render(<ItemsWorkspace />)
+
+    const heading = await screen.findByRole("heading", { name: "Failed to load items" })
+    const errorPanel = within(heading.closest("section")!)
+    expect(errorPanel.getByText("Items service is temporarily unavailable")).toBeTruthy()
+    expect(screen.queryByRole("heading", { name: "No items available" })).toBeNull()
+
+    fireEvent.click(errorPanel.getByRole("button", { name: "Retry" }))
+
+    expect(await screen.findByText("Shared Item")).toBeTruthy()
+    expect(screen.queryByRole("heading", { name: "Failed to load items" })).toBeNull()
+    expect(apiMock.getItems).toHaveBeenCalledTimes(2)
   })
 
   it("applies native date range filters with local day boundaries", async () => {
@@ -277,7 +364,15 @@ describe("ItemsWorkspace", () => {
       undoNotificationMock.showUndoNotification.mock.calls[
         undoNotificationMock.showUndoNotification.mock.calls.length - 1
       ]?.[0]
-    await undoOptions.onUndo()
+    fireEvent.change(screen.getByPlaceholderText("Search items..."), {
+      target: { value: "shared" }
+    })
+    await waitFor(() => {
+      expect(apiMock.getItems).toHaveBeenLastCalledWith(expect.objectContaining({ q: "shared" }))
+    })
+    const fetchCount = apiMock.getItems.mock.calls.length
+
+    await act(async () => { await undoOptions.onUndo() })
 
     await waitFor(() => {
       expect(apiMock.bulkUpdateItems).toHaveBeenCalledWith({
@@ -286,6 +381,8 @@ describe("ItemsWorkspace", () => {
         status: "reading"
       })
     })
+    expect(apiMock.getItems).toHaveBeenCalledTimes(fetchCount + 1)
+    expect(apiMock.getItems).toHaveBeenLastCalledWith(expect.objectContaining({ q: "shared" }))
   }, 15000)
 
   it("supports deliberate hard delete as a secondary action", async () => {
