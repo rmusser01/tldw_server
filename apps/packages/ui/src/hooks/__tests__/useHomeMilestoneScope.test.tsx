@@ -3,7 +3,8 @@ import { beforeEach, expect, it, vi } from "vitest"
 import { useHomeMilestoneScope } from "../useHomeMilestoneScope"
 
 const config = vi.hoisted(() => ({
-  current: null as Record<string, unknown> | null
+  current: null as Record<string, unknown> | null,
+  resolveScope: vi.fn()
 }))
 vi.mock("@/services/tldw/TldwApiClient", () => ({
   tldwClient: {
@@ -11,9 +12,13 @@ vi.mock("@/services/tldw/TldwApiClient", () => ({
     getConfig: async () => config.current
   }
 }))
+vi.mock("@/services/service-prompts", () => ({
+  resolveServicePromptScope: config.resolveScope
+}))
 const token = (sub: string) =>
   `header.${btoa(JSON.stringify({ sub }))}.signature`
 beforeEach(() => {
+  config.resolveScope.mockReset()
   config.current = {
     serverUrl: "http://server-a",
     authMode: "multi-user",
@@ -72,4 +77,16 @@ it("invalidates logout and refreshes account ownership on another tab's config u
   })
   await waitFor(() => expect(result.current).not.toBeNull())
   expect(result.current).not.toBe(alice)
+})
+
+it("uses the verified cookie-session identity for the Knowledge handoff owner", async () => {
+  config.current = {
+    serverUrl: "http://server-a",
+    authMode: "multi-user",
+    authSource: "cookie-session",
+    hostedUserId: "stale-user"
+  }
+  config.resolveScope.mockResolvedValue({ scopeKey: "verified-user-scope" })
+  const { result } = renderHook(() => useHomeMilestoneScope({ verifyCookieSession: true }))
+  await waitFor(() => expect(result.current).toBe("verified-user-scope"))
 })

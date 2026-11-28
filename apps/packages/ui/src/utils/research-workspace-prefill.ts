@@ -244,8 +244,14 @@ export const getResearchWorkspaceOwner = async (
 ): Promise<string> => {
   // Project a verified request into the existing public recovery namespace;
   // its credential-bound authority and lease remain on the request snapshot.
-  const config = requestScope?.config ?? (await tldwClient.getConfig())
-  const userId = requestScope?.userId
+  const connection = requestScope?.config ?? (await tldwClient.getConfig())
+  let scope = requestScope
+  if (!scope && connection?.authMode === "multi-user" && connection.authSource === "cookie-session") {
+    const { resolveServicePromptScope } = await import("@/services/service-prompts")
+    scope = await resolveServicePromptScope()
+  }
+  const config = scope?.config ?? connection
+  const userId = scope?.userId
   if (
     !config?.serverUrl ||
     deriveScopedUserId({ ...config, userId }) === "user:anonymous"

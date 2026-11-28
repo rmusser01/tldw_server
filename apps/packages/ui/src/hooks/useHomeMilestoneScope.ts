@@ -4,7 +4,7 @@ import { buildChatSurfaceScopeKeyFromConfig } from "@/services/chat-surface-scop
 import { deriveScopedUserId } from "@/utils/media-navigation-scope"
 
 /** Current account/server identity for Home progress and source ownership. */
-export function useHomeMilestoneScope(): string | null {
+export function useHomeMilestoneScope({ verifyCookieSession = false } = {}): string | null {
   const [scope, setScope] = useState<string | null>(null)
   useEffect(() => {
     let generation = 0
@@ -16,13 +16,16 @@ export function useHomeMilestoneScope(): string | null {
           ? tldwClient.initialize().then(() => tldwClient.getConfig())
           : tldwClient.getConfig()
       )
-        .then((config) => {
-          if (request !== generation) return
-          if (
-            !config?.serverUrl ||
-            deriveScopedUserId(config) === "user:anonymous"
-          )
+        .then(async (config) => {
+          if (request !== generation || !config?.serverUrl) return
+          if (verifyCookieSession && config.authMode === "multi-user" && config.authSource === "cookie-session") {
+            const { resolveServicePromptScope } = await import("@/services/service-prompts")
+            if (request !== generation) return
+            const { scopeKey } = await resolveServicePromptScope()
+            if (request === generation) setScope(scopeKey)
             return
+          }
+          if (deriveScopedUserId(config) === "user:anonymous") return
           // Single-user keys authenticate the same server account; manual-key
           // recovery must not change the account's setup progress identity.
           setScope(
@@ -68,6 +71,6 @@ export function useHomeMilestoneScope(): string | null {
       )
       window.removeEventListener("storage", storageChanged)
     }
-  }, [])
+  }, [verifyCookieSession])
   return scope
 }

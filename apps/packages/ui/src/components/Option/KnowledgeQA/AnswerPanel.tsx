@@ -223,7 +223,7 @@ export function AnswerPanel({ className }: AnswerPanelProps) {
   const activeAnswerSessionKeyRef = useRef("")
   const messageApi = useAntdMessage()
   const navigate = useNavigate()
-  const ownerScope = useHomeMilestoneScope()
+  const ownerScope = useHomeMilestoneScope({ verifyCookieSession: true })
 
   // Get cited indices for highlighting
   const citedIndices = useMemo(() => citations.map((c) => c.index), [citations])
