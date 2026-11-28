@@ -1382,7 +1382,9 @@ describe("StandaloneHtmlWorkspace", () => {
       .mockReturnValueOnce(new Promise((resolve) => { resolveFresh = resolve }))
 
     render(<StandaloneHtmlWorkspace presentationId="html-1" />)
-    const editor = await screen.findByLabelText("HTML source")
+    const editor = await screen.findByLabelText("HTML source", {
+      selector: "textarea[data-workspace-monaco]"
+    })
     fireEvent.change(editor, { target: { value: EDITED } })
     await waitFor(() => expect(screen.getByText("Not saved")).toBeVisible())
     fireEvent.click(screen.getByRole("button", { name: "Save" }))
@@ -1392,7 +1394,11 @@ describe("StandaloneHtmlWorkspace", () => {
     expect(screen.queryByRole("button", { name: "Confirm overwrite" })).not.toBeInTheDocument()
 
     fireEvent.change(editor, { target: { value: SECOND_EDIT } })
-    await waitFor(() => expect(editor).toHaveValue(SECOND_EDIT))
+    // The editor displays the candidate before the workspace accepts its digest.
+    await waitFor(() => {
+      expect(editor).toHaveValue(SECOND_EDIT)
+      expect(screen.getByRole("button", { name: "Overwrite server with my draft" })).toBeEnabled()
+    })
     resolveFresh?.({ ...detail({ version: 8 }), etag: '"v8"' })
     fireEvent.click(await screen.findByRole("button", { name: "Confirm overwrite" }))
 

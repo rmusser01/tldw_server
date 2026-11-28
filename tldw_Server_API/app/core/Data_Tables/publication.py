@@ -18,7 +18,7 @@ from tldw_Server_API.app.core.exceptions import DataTablesJobError
 
 PROTOCOL_KEY = "data_table_publication_version"
 RECEIPT_KEY = "_data_table_publication"
-_PUBLIC_KEYS = ("table_id", "table_uuid", "row_count", "columns")
+_PUBLIC_KEYS = ("table_id", "table_uuid", "table_version", "row_count", "columns")
 
 
 def check_result_size(result: dict[str, Any]) -> None:

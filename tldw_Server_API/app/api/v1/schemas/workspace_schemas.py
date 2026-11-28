@@ -863,6 +863,7 @@ class WorkspaceSourceStatusResponse(BaseModel):
     id: str
     workspace_id: str
     media_id: int | None = None
+    catalog_item_version: int | None = Field(default=None, ge=1)
     title: str
     source_type: str
     url: str | None = None

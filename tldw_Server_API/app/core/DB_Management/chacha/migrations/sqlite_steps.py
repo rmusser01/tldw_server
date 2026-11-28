@@ -2419,6 +2419,29 @@ def _migrate_from_v85_to_v86_sqlite(ctx, conn: sqlite3.Connection) -> None:
     )
 
 
+def _migrate_from_v86_to_v87_sqlite(ctx, conn: sqlite3.Connection) -> None:
+    """Converge the two v86 schemas before recording Study publication."""
+    from tldw_Server_API.app.core.DB_Management.chacha.research_study_schema import RESEARCH_STUDY_SCHEMA
+
+    existing = {
+        row[0]
+        for row in conn.execute(
+            "SELECT name FROM sqlite_master WHERE type = 'table' "
+            "AND name IN ('document_chat_links', 'research_study_outputs')"
+        )
+    }
+    if "document_chat_links" not in existing:
+        for statement in schema_sql.DOCUMENT_CHAT_LINK_SCHEMA:
+            conn.execute(statement)
+    if "research_study_outputs" not in existing:
+        for statement in RESEARCH_STUDY_SCHEMA:
+            conn.execute(statement)
+    conn.execute(
+        "UPDATE db_schema_version SET version = 87 WHERE schema_name = ? AND version = 86",
+        (ctx.schema_name,),
+    )
+
+
 # Source schema version -> step name, in upgrade order (R3, R12). Names are resolved on this module at call time, so one module
 # patch serves the class's step map and the legacy ladder's direct calls. Pinned by test_chacha_structure_pins.py (FROZEN_SQLITE).
 # To add a migration: write `_migrate_from_v<N>_to_v<N+1>(ctx, conn)` here, add its key below, raise `_CURRENT_SCHEMA_VERSION`
@@ -2506,4 +2529,5 @@ SQLITE_STEPS: dict[int, str] = {
     83: "_migrate_from_v83_to_v84_sqlite",
     84: "migrate_sqlite_transcripts",
     85: "_migrate_from_v85_to_v86_sqlite",
+    86: "_migrate_from_v86_to_v87_sqlite",
 }

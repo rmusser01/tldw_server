@@ -842,6 +842,22 @@ def list_decks(
         raise map_db_error_to_http(exc, default_detail="Failed to list decks") from exc
 
 
+@router.get(
+    "/decks/{deck_id:int}",
+    response_model=Deck,
+    dependencies=[Depends(require_expected_user_if_present)],
+)
+def get_deck(deck_id: int, db: CharactersRAGDB = Depends(get_chacha_db_for_user)):
+    """Return the exact active deck for the authenticated owner."""
+    try:
+        deck = db.flashcard_store.get_deck(deck_id)
+    except CharactersRAGDBError as exc:
+        raise map_db_error_to_http(exc, default_detail="Failed to fetch deck") from exc
+    if not deck or deck.get("deleted"):
+        raise HTTPException(status_code=404, detail="Deck not found")
+    return deck
+
+
 @router.patch("/decks/{deck_id}", response_model=Deck, dependencies=[Depends(require_expected_user_if_present)])
 def update_deck(
     deck_id: int,

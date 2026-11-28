@@ -1150,7 +1150,7 @@ def _raise_inventory_failure(provider: str, status: str, *, refreshable_oauth: b
     raise ChatConfigurationError(provider=provider, message="Provider model inventory is not supported.")
 
 
-def _validate_provider_model_selection(
+def validate_provider_model_selection(
     provider: str, request: dict[str, Any], *, refreshable_oauth: bool | None = None,
 ) -> None:
     """Authorize current IDs, confirmed aliases and explicit router fallback IDs."""
@@ -1210,6 +1210,9 @@ def _validate_provider_model_selection(
     request["base_url"] = base_url
     if fallback_models is not None:
         request["extra_body"] = {**(extra_body or {}), "models": fallback_models}
+
+
+_validate_provider_model_selection = validate_provider_model_selection
 
 
 def _call_policy_after_model_discovery(

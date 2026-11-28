@@ -1,8 +1,8 @@
 from __future__ import annotations
 
 import os
+from collections.abc import Mapping
 from dataclasses import dataclass
-from typing import Mapping
 
 from .precedence import resolve
 from .types import ConfigParserLike
@@ -76,6 +76,11 @@ def _parse_csv(raw: object) -> list[str]:
     if not text:
         return []
     return [item.strip() for item in text.split(",") if item.strip()]
+
+
+def data_tables_jobs_queue() -> str:
+    """Resolve the queue shared by Data Tables admission and the worker."""
+    return (resolve(("DATA_TABLES_JOBS_QUEUE",)).value or "default").strip()
 
 
 def load_jobs_config(

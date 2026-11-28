@@ -2,20 +2,18 @@
 
 from __future__ import annotations
 
+import hashlib
 import json
 import sqlite3
+from collections.abc import Callable
 from dataclasses import replace
 from pathlib import Path
 from typing import Any
 
 from loguru import logger
 
-from tldw_Server_API.app.core.Research.research_runs_schemas import (
-    ResearchArtifactManifestEntry,
-    ResearchCheckpointSummary,
-    ResearchRunResponse,
-    ResearchRunSnapshotResponse,
-)
+from tldw_Server_API.app.core.config import settings
+from tldw_Server_API.app.core.DB_Management.db_path_utils import DatabasePaths
 from tldw_Server_API.app.core.DB_Management.ResearchSessionsDB import (
     ResearchArtifactRow,
     ResearchChatLinkedRunRow,
@@ -24,9 +22,14 @@ from tldw_Server_API.app.core.DB_Management.ResearchSessionsDB import (
     ResearchSessionRow,
     ResearchSessionsDB,
 )
-from tldw_Server_API.app.core.DB_Management.db_path_utils import DatabasePaths
 from tldw_Server_API.app.core.Jobs.worker_utils import jobs_manager_from_env
-from tldw_Server_API.app.core.config import settings
+from tldw_Server_API.app.core.Research.research_runs_schemas import (
+    ResearchArtifactManifestEntry,
+    ResearchCheckpointSummary,
+    ResearchRunResponse,
+    ResearchRunSnapshotResponse,
+)
+from tldw_Server_API.app.core.Research_Workspace.run_origin import WorkspaceRunOrigin
 
 from .artifact_store import ResearchArtifactStore
 from .checkpoint_service import apply_checkpoint_patch
@@ -336,6 +339,31 @@ class ResearchService:
         # Keep the durable intent if admission acknowledgement is lost; recovery uses this same key.
         return dispatch_pending_phase(self._job_manager_for_session(), db, pending)
 
+    def create_workspace_session(
+        self, origin: WorkspaceRunOrigin, *, validate_workspace: Callable[[], None]
+    ) -> ResearchSessionRow:
+        """Admit one native run for the exact workspace launch."""
+        context_json = origin.model_dump_json()
+        if len(context_json.encode("utf-8")) > 65536:
+            raise ValueError("Workspace launch exceeds the allowed size")
+        digest = hashlib.sha256(context_json.encode("utf-8")).hexdigest()
+        owner_user_id = origin.owner_user_id
+        launch = origin.launch
+        db = self._db_for_user(owner_user_id)
+        session = db.find_workspace_launch(owner_user_id, launch.launch_id, digest)
+        if session is None:
+            validate_workspace()
+            session = db.create_workspace_session(
+                owner_user_id=owner_user_id,
+                launch_id=launch.launch_id,
+                query=launch.query,
+                request_digest=digest,
+                workspace_context_json=context_json,
+                phase_dispatch=new_phase_dispatch("drafting_plan"),
+            )
+        session = dispatch_pending_phase(self._job_manager_for_session(), db, session)
+        return replace(session, workspace_launch=origin.model_dump(mode="json"))
+
     def record_run_event(
         self,
         *,
@@ -609,6 +637,8 @@ class ResearchService:
             )
         if session.chat_id != chat_id:
             session = replace(session, chat_id=chat_id)
+        if origin := db.get_workspace_launch(owner_user_id, session_id):
+            session = replace(session, workspace_launch=origin)
         numeric_job_id = self._numeric_job_id(session.active_job_id)
         if numeric_job_id is None:
             return session
@@ -813,6 +843,9 @@ class ResearchService:
         content = artifact["content"]
         if not isinstance(content, dict):
             raise KeyError("bundle.json")
+        db = self._db_for_user(owner_user_id)
+        if origin := db.get_workspace_launch(owner_user_id, session_id):
+            return {**content, "run_id": session_id, "workspace_launch": origin}
         return content
 
     def get_artifact(

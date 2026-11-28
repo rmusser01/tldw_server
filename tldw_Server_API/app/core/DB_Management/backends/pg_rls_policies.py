@@ -551,6 +551,23 @@ def build_notes_provenance_rls_sql() -> list[str]:
         END $notes_provenance_rls$;"""]
 
 
+def build_research_study_rls_sql() -> list[str]:
+    """Restrict Study publication receipts to their authenticated owner."""
+    return ["""
+        DO $research_study_rls$
+        BEGIN
+          IF to_regclass('research_study_outputs') IS NULL THEN RETURN; END IF;
+          ALTER TABLE research_study_outputs ENABLE ROW LEVEL SECURITY;
+          ALTER TABLE research_study_outputs FORCE ROW LEVEL SECURITY;
+          DROP POLICY IF EXISTS research_study_owner ON research_study_outputs;
+          CREATE POLICY research_study_owner ON research_study_outputs
+            USING (owner_user_id = current_setting('app.current_user_id', true))
+            WITH CHECK (owner_user_id = current_setting('app.current_user_id', true));
+        END
+        $research_study_rls$;
+    """]
+
+
 def build_workspace_chat_startup_rls_sql() -> list[str]:
     """Keep orphan receipts owner-visible while denying absent or foreign scope."""
     return ["""
@@ -1050,6 +1067,7 @@ def build_chacha_rls_sql() -> list[str]:
     stmts.extend(build_workspace_source_saved_view_rls_sql())
     stmts.extend(build_shared_workspace_chat_rls_sql())
     stmts.extend(build_workspace_chat_startup_rls_sql())
+    stmts.extend(build_research_study_rls_sql())
     stmts.extend(build_notes_provenance_rls_sql())
     stmts.extend(build_notes_provenance_receipts_rls_sql())
     stmts.extend(build_dictionary_rls_sql())

@@ -348,3 +348,27 @@ def test_document_generation_does_not_borrow_ambient_admin_access(publication_st
                 db, backend, tmp_path, monkeypatch, modern=True, document_source=True, source_owner=402
             )
         assert get_scope() is parent  # nosec B101 -- failed source reads restore the caller's exact content context.
+
+
+def test_workspace_table_reservation_commits_sources_once(publication_store):
+    db, _, _ = publication_store
+    table_uuid = str(uuid4())
+
+    def reserve():
+        with scoped_context(user_id=401, is_admin=False), db.transaction():
+            created = db.create_data_table(
+                table_uuid=table_uuid, name="Concurrent generation", prompt="Extract facts",
+                owner_user_id=401, if_absent=True,
+            )
+            if created:
+                assert db.insert_data_table_sources(
+                    created["id"], [{"source_type": "document", "source_id": "11"}], owner_user_id=401,
+                ) == 1
+            return created
+
+    with ThreadPoolExecutor(2) as pool:
+        results = list(pool.map(lambda _: reserve(), range(2)))
+    [created] = [row for row in results if row]
+    with scoped_context(user_id=401, is_admin=False):
+        assert db.get_data_table_by_uuid(table_uuid, owner_user_id=401)["id"] == created["id"]
+        assert len(db.list_data_table_sources(created["id"], owner_user_id=401)) == 1

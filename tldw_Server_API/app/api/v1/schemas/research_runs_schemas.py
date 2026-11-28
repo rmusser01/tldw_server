@@ -13,6 +13,14 @@ from tldw_Server_API.app.core.Research.research_runs_schemas import (  # noqa: F
     ResearchRunResponse,
     ResearchRunSnapshotResponse,
 )
+from tldw_Server_API.app.core.Research_Workspace.run_origin import WorkspaceRunOrigin
+
+
+class ResearchWorkspaceRunResponse(ResearchRunResponse):
+    """Native run detail with its authenticated workspace launch, when present."""
+
+    workspace_launch: WorkspaceRunOrigin | None = None
+
 
 MAX_RESEARCH_FOLLOW_UP_QUESTION_LENGTH = 4000
 MAX_RESEARCH_FOLLOW_UP_OUTLINE_ITEMS = 7

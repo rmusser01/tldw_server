@@ -1,6 +1,5 @@
 import pytest
 
-
 pytestmark = pytest.mark.unit
 
 
@@ -119,8 +118,8 @@ def test_create_session_enqueues_planning_job(tmp_path):
 
 
 def test_create_session_persists_chat_handoff_linkage(tmp_path, monkeypatch):
-    from tldw_Server_API.app.core.DB_Management.ResearchSessionsDB import ResearchSessionsDB
     from tldw_Server_API.app.core.DB_Management.db_path_utils import DatabasePaths
+    from tldw_Server_API.app.core.DB_Management.ResearchSessionsDB import ResearchSessionsDB
     from tldw_Server_API.app.core.Research.service import ResearchService
 
     previous_user_db_base = _set_user_db_base(monkeypatch, tmp_path / "user_dbs")
@@ -204,8 +203,8 @@ def test_get_session_returns_validated_chat_id_for_linked_run(tmp_path, monkeypa
 
 
 def test_create_session_retains_pending_authority_when_enqueue_ack_fails(tmp_path, monkeypatch):
-    from tldw_Server_API.app.core.DB_Management.ResearchSessionsDB import ResearchSessionsDB
     from tldw_Server_API.app.core.DB_Management.db_path_utils import DatabasePaths
+    from tldw_Server_API.app.core.DB_Management.ResearchSessionsDB import ResearchSessionsDB
     from tldw_Server_API.app.core.Research.service import ResearchService
 
     previous_user_db_base = _set_user_db_base(monkeypatch, tmp_path / "user_dbs")
@@ -1798,8 +1797,10 @@ def test_get_session_uses_session_progress_as_primary_and_job_progress_as_fallba
     assert jobs.job_reads == [77, 78]
 
 
-def test_research_sessions_db_migrates_provider_overrides_and_run_control_columns(tmp_path):
+def test_research_sessions_db_migrates_legacy_columns_concurrently(tmp_path, monkeypatch):
     import sqlite3
+    from concurrent.futures import ThreadPoolExecutor
+    from threading import Barrier
 
     from tldw_Server_API.app.core.DB_Management.ResearchSessionsDB import ResearchSessionsDB
 
@@ -1825,15 +1826,55 @@ def test_research_sessions_db_migrates_provider_overrides_and_run_control_column
             """
         )
 
-    ResearchSessionsDB(db_path)
+        conn.execute(
+            "INSERT INTO research_sessions (id, owner_user_id, status, phase, query, source_policy, "
+            "autonomy_mode, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)",
+            ("rs_legacy", "1", "queued", "drafting_plan", "Legacy evidence", "balanced", "checkpointed", "now", "now"),
+        )
+
+    schema_reads = Barrier(2)
+
+    class MigrationCursor(sqlite3.Cursor):
+        def fetchall(self):
+            rows = super().fetchall()
+            # Both optimistic reads must observe the original schema before either ALTER can start.
+            if not self.connection.in_transaction:
+                schema_reads.wait(timeout=5)
+            return rows
+
+    class MigrationConnection(sqlite3.Connection):
+        def execute(self, sql, parameters=()):
+            if sql == "PRAGMA table_info('research_sessions')":
+                return self.cursor(factory=MigrationCursor).execute(sql, parameters)
+            return super().execute(sql, parameters)
+
+    connect = sqlite3.connect
+
+    def connect_for_migration(database, *args, **kwargs):
+        if database == db_path:
+            kwargs["factory"] = MigrationConnection
+        return connect(database, *args, **kwargs)
+
+    with monkeypatch.context() as patch:
+        patch.setattr(sqlite3, "connect", connect_for_migration)
+        with ThreadPoolExecutor(max_workers=2) as pool:
+            first, second = list(pool.map(ResearchSessionsDB, (db_path, db_path)))
 
     with sqlite3.connect(db_path) as conn:
-        cols = {row[1] for row in conn.execute("PRAGMA table_info('research_sessions')").fetchall()}
+        columns = {row[1] for row in conn.execute("PRAGMA table_info('research_sessions')").fetchall()}
+    assert {
+        "phase_dispatch_json", "provider_overrides_json", "follow_up_json",
+        "control_state", "progress_percent", "progress_message",
+    } <= columns
 
-    assert "provider_overrides_json" in cols
-    assert "control_state" in cols
-    assert "progress_percent" in cols
-    assert "progress_message" in cols
+    for database in (first, second):
+        session = database.get_session("rs_legacy")
+        assert session is not None and session.query == "Legacy evidence"
+        assert session.phase_dispatch_json == {}
+        assert session.provider_overrides_json == {}
+        assert session.follow_up_json == {}
+        assert session.control_state == "running"
+        assert session.progress_percent is None and session.progress_message is None
 
 
 def test_get_artifact_rejects_disallowed_name(tmp_path):

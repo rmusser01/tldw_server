@@ -3,7 +3,7 @@ Data Tables Jobs worker.
 
 - Consumes core Jobs entries for data table generation/regeneration.
 - domain = "data_tables"
-- queue = os.getenv("DATA_TABLES_JOBS_QUEUE", "default")
+- DATA_TABLES_JOBS_QUEUE selects the queue (default: "default")
 - job_type = "data_table_generate"
 
 Payload fields:
@@ -37,17 +37,13 @@ from typing import Any, Callable
 from cachetools import LRUCache
 from loguru import logger
 
-from tldw_Server_API.app.core.Provider_Credentials.byok_runtime import ByokResolutionError
-from tldw_Server_API.app.core.Provider_Credentials.llm_provider_overrides import (
-    ProviderOverridePolicyError,
-    capture_provider_override_call_snapshot,
-)
 from tldw_Server_API.app.core.AuthNZ.User_DB_Handling import resolve_user_id_value
 from tldw_Server_API.app.core.Chat.Chat_Deps import ChatConfigurationError
 from tldw_Server_API.app.core.Chat.chat_helpers import extract_response_content
 from tldw_Server_API.app.core.Chat.chat_service import resolve_provider_api_key
-from tldw_Server_API.app.core.config import load_and_log_configs
+from tldw_Server_API.app.core.config import load_and_log_configs, usage_quotas_enabled
 from tldw_Server_API.app.core.config_llm_providers import get_default_provider
+from tldw_Server_API.app.core.config_sections.jobs import data_tables_jobs_queue
 from tldw_Server_API.app.core.Data_Tables.publication import (
     PROTOCOL_KEY,
     RECEIPT_KEY,
@@ -67,22 +63,31 @@ from tldw_Server_API.app.core.DB_Management.media_db.api import (
     get_document_version,
     get_latest_transcription,
     get_media_by_id,
+    get_media_source_projection,
 )
 from tldw_Server_API.app.core.DB_Management.scope_context import scoped_context
-from tldw_Server_API.app.core.exceptions import DataTablesJobError
+from tldw_Server_API.app.core.exceptions import ChatAPIError, ChatModelNotAvailableError, DataTablesJobError
 from tldw_Server_API.app.core.Jobs.manager import JobManager
 from tldw_Server_API.app.core.Jobs.worker_sdk import WorkerConfig, WorkerSDK
-from tldw_Server_API.app.core.Jobs.worker_utils import coerce_int as _coerce_int, jobs_manager_from_env as _jobs_manager
+from tldw_Server_API.app.core.Jobs.worker_utils import coerce_int as _coerce_int
+from tldw_Server_API.app.core.Jobs.worker_utils import jobs_manager_from_env as _jobs_manager
 from tldw_Server_API.app.core.LLM_Calls.adapter_registry import get_registry
 from tldw_Server_API.app.core.LLM_Calls.adapter_utils import resolve_provider_model
 from tldw_Server_API.app.core.LLM_Calls.bounded_daemon import await_owned_worker
+from tldw_Server_API.app.core.LLM_Calls.gateway import validate_provider_model_selection
 from tldw_Server_API.app.core.LLM_Calls.provider_identity import canonical_provider_name
 from tldw_Server_API.app.core.LLM_Calls.provider_metadata import provider_requires_api_key
+from tldw_Server_API.app.core.LLM_Calls.provider_model_inventory import has_model_listing
 from tldw_Server_API.app.core.LLM_Calls.structured_output import (
     StructuredOutputNoPayloadError,
     StructuredOutputOptions,
     StructuredOutputParseError,
     parse_structured_output,
+)
+from tldw_Server_API.app.core.Provider_Credentials.byok_runtime import ByokResolutionError
+from tldw_Server_API.app.core.Provider_Credentials.llm_provider_overrides import (
+    ProviderOverridePolicyError,
+    capture_provider_override_call_snapshot,
 )
 from tldw_Server_API.app.core.RAG.rag_service.unified_pipeline import RagRunConfig, run_rag_pipeline
 
@@ -277,6 +282,59 @@ def _get_adapter(provider: str) -> Any:
     if adapter is None:
         raise ChatConfigurationError(provider=provider, message="LLM adapter unavailable.")
     return adapter
+
+
+def workspace_table_route(provider: str, model: str) -> tuple[Any, dict[str, Any]]:
+    """Qualify the exact server-managed route used by Workspace Table jobs."""
+    if usage_quotas_enabled():
+        raise DataTablesJobError("metered_workspace_table_route_unavailable", retryable=False)
+    provider = canonical_provider_name(provider)
+    try:
+        override = capture_provider_override_call_snapshot(provider)
+        override.enforce(model, require_model=True)
+        adapter = _get_adapter(provider)
+        api_key, _ = resolve_provider_api_key(provider)
+        if provider_requires_api_key(provider) and not api_key:
+            raise DataTablesJobError("server_provider_credentials_required", retryable=False)
+        app_config = load_and_log_configs() or {}
+        request = {"api_key": api_key, "model": model, "app_config": app_config}
+        if has_model_listing(provider):
+            validate_provider_model_selection(provider, request)
+        elif model not in (resolve_provider_model(provider, app_config), override.test_model()):
+            raise DataTablesJobError("workspace_table_model_unavailable", retryable=False)
+    except ByokResolutionError as exc:
+        code = exc.policy_code if isinstance(exc, ProviderOverridePolicyError) else exc.code
+        raise DataTablesJobError(code, retryable=code == "credential_store_unavailable") from None
+    except ChatModelNotAvailableError:
+        raise DataTablesJobError("workspace_table_model_unavailable", retryable=False) from None
+    except ChatAPIError:
+        raise DataTablesJobError("workspace_table_provider_unavailable", retryable=False) from None
+    return adapter, request
+
+
+def read_workspace_table_media(db: Any, media_id: int, version: int, owner: str) -> tuple[str, str]:
+    """Read bounded owner text and fingerprint the effective evidence in that read."""
+    source = get_media_source_projection(db, media_id, max_chars=max(1, _MAX_SOURCE_CHARS), owner_user_id=owner)
+    if not source or source["version"] != version:
+        raise DataTablesJobError("workspace_table_source_changed", retryable=False)
+    text = source.get("source_text")
+    if source["source_invalid"] or not isinstance(text, str) or not text.strip():
+        raise DataTablesJobError("workspace_table_source_has_no_text", retryable=False)
+    return text, hashlib.sha256(text.encode()).hexdigest()
+
+
+def _read_admitted_workspace_source(
+    db: Any, source: dict[str, Any], *, source_type: str, source_id: str, owner: str,
+) -> tuple[str, dict[str, Any]]:
+    """Read and verify the Media evidence admitted for Workspace generation."""
+    revision = source.get("media_version")
+    if source_type != "document" or type(revision) is not int or revision < 1:
+        raise DataTablesJobError("workspace_table_source_changed", retryable=False)
+    text, fingerprint = read_workspace_table_media(db, int(source_id), revision, owner)
+    retrieval_params = source.get("retrieval_params_json")
+    if not isinstance(retrieval_params, dict) or retrieval_params.get("workspace_source_sha256") != fingerprint:
+        raise DataTablesJobError("workspace_table_source_changed", retryable=False)
+    return text, retrieval_params
 
 
 def _truncate_text(text: str, limit: int) -> str:
@@ -627,28 +685,35 @@ def _build_rag_snapshot(
     }
 
 
-def _build_sources_text(resolved: list[dict[str, Any]]) -> str:
-    parts: list[str] = []
-    total_chars = 0
+def _build_sources_text(resolved: list[dict[str, Any]], *, workspace_budget: int | None = None) -> str:
+    available = _MAX_TOTAL_SOURCE_CHARS if workspace_budget is None else min(_MAX_TOTAL_SOURCE_CHARS, workspace_budget)
+    blocks = []
     for idx, src in enumerate(resolved, start=1):
-        text = str(src.get("text") or "")
-        if not text.strip():
+        text = str(src.get("text") or "").strip()
+        if not text:
             continue
-        text = _truncate_text(text.strip(), _MAX_SOURCE_CHARS)
         header = f"[Source {idx}] type={src.get('source_type')} id={src.get('source_id')}"
         title = src.get("title")
         if title:
             header += f" title={title}"
-        block = f"{header}\n{text}"
-        total_chars += len(block)
-        if total_chars > _MAX_TOTAL_SOURCE_CHARS:
-            remaining = _MAX_TOTAL_SOURCE_CHARS - (total_chars - len(block))
-            if remaining <= 0:
-                break
-            block = _truncate_text(block, remaining)
-            parts.append(block)
+        blocks.append((header, text))
+    if workspace_budget is not None and blocks:
+        # Reserve space for each captured source before legacy prompt truncation can drop a source.
+        overhead = sum(len(header) + 3 for header, _ in blocks)
+        text_limit = min((available - overhead) // len(blocks), _MAX_SOURCE_CHARS)
+        if text_limit < 4:
+            raise DataTablesJobError("workspace_table_sources_exceed_prompt_budget", retryable=False)
+        return "\n\n".join(f"{header}\n{_truncate_text(text, text_limit)}" for header, text in blocks)
+
+    parts = []
+    for header, text in blocks:
+        block = f"{header}\n{_truncate_text(text, _MAX_SOURCE_CHARS)}"
+        if len(block) > available:
+            if available > 0:
+                parts.append(_truncate_text(block, available))
             break
         parts.append(block)
+        available -= len(block)
     return "\n\n".join(parts)
 
 
@@ -680,11 +745,16 @@ def _build_prompt(
     sources: list[dict[str, Any]],
     column_hints: Sequence[dict[str, Any]],
     max_rows: int,
+    balance_sources: bool = False,
 ) -> str:
-    sources_text = _build_sources_text(sources)
+    rendered_hints = _render_column_hints(column_hints)
+    workspace_budget = None
+    if balance_sources:
+        empty_prompt = _PROMPT_TEMPLATE.format(prompt=prompt, column_hints=rendered_hints, sources="", max_rows=max_rows)
+        workspace_budget = _MAX_PROMPT_CHARS - len(empty_prompt)
+    sources_text = _build_sources_text(sources, workspace_budget=workspace_budget)
     if not sources_text:
         raise DataTablesJobError("sources_empty", retryable=False)
-    rendered_hints = _render_column_hints(column_hints)
     filled = _PROMPT_TEMPLATE.format(
         prompt=prompt,
         column_hints=rendered_hints,
@@ -912,37 +982,45 @@ def _is_job_cancelled(jm: JobManager, job_id: int) -> bool:
     return status == "cancelled"
 
 
-async def _generate_table_payload(jm: JobManager, job_id: int, model: str | None, llm_prompt: str) -> dict[str, Any]:
-    provider = (get_default_provider() or "openai").strip().lower()
-    api_key, _debug = resolve_provider_api_key(provider, prefer_module_keys_in_tests=True)
-    if provider_requires_api_key(provider) and not api_key:
-        raise DataTablesJobError(f"missing_api_key:{provider}", retryable=False)
+async def _generate_table_payload(
+    jm: JobManager, job_id: int, model: str | None, llm_prompt: str, *, workspace_provider: str | None = None,
+) -> dict[str, Any]:
+    provider = workspace_provider or (get_default_provider() or "openai").strip().lower()
+    api_key = None
+    if workspace_provider is None:
+        api_key, _debug = resolve_provider_api_key(provider, prefer_module_keys_in_tests=True)
+        if provider_requires_api_key(provider) and not api_key:
+            raise DataTablesJobError(f"missing_api_key:{provider}", retryable=False)
 
     messages_payload = [{"role": "user", "content": llm_prompt}]
     response_format = {"type": "json_object"}
     timeout = _LLM_TIMEOUT_SECONDS if _LLM_TIMEOUT_SECONDS > 0 else None
 
     def _call_llm():
-        app_config = load_and_log_configs() or {}
-        try:
-            override = capture_provider_override_call_snapshot(provider)
-            model_to_use = _resolve_model(override.provider, model, app_config)
-            override.enforce(model_to_use, require_model=True)
-        except ByokResolutionError as exc:
-            code = exc.policy_code if isinstance(exc, ProviderOverridePolicyError) else exc.code
-            raise DataTablesJobError(code, retryable=code == "credential_store_unavailable") from None
-        if model_to_use is None:
-            raise ChatConfigurationError(provider=provider, message="Model is required for provider.")
-        adapter = _get_adapter(provider)
+        if workspace_provider is not None:
+            if model is None:
+                raise DataTablesJobError("workspace_table_model_unavailable", retryable=False)
+            adapter, route = workspace_table_route(workspace_provider, model)
+        else:
+            app_config = load_and_log_configs() or {}
+            try:
+                override = capture_provider_override_call_snapshot(provider)
+                model_to_use = _resolve_model(override.provider, model, app_config)
+                override.enforce(model_to_use, require_model=True)
+            except ByokResolutionError as exc:
+                code = exc.policy_code if isinstance(exc, ProviderOverridePolicyError) else exc.code
+                raise DataTablesJobError(code, retryable=code == "credential_store_unavailable") from None
+            if model_to_use is None:
+                raise ChatConfigurationError(provider=provider, message="Model is required for provider.")
+            adapter = _get_adapter(provider)
+            route = {"api_key": api_key, "model": model_to_use, "app_config": app_config}
         return adapter.chat(
             {
                 "messages": messages_payload,
-                "api_key": api_key,
-                "model": model_to_use,
+                **route,
                 "temperature": _LLM_TEMPERATURE,
                 "max_tokens": _LLM_MAX_TOKENS,
                 "response_format": response_format,
-                "app_config": app_config,
             },
             timeout=timeout,
         )
@@ -990,6 +1068,7 @@ async def _handle_job(job: dict[str, Any], jm: JobManager) -> dict[str, Any]:
             raise DataTablesJobError("missing_table_id", retryable=False)
         prompt = str(payload.get("prompt") or "").strip()
         model = str(payload.get("model") or "").strip() or None
+        workspace_provider = payload.get("workspace_provider")
 
         job_id = _coerce_int(job.get("id"), 0)
         if not jm.should_enforce_leases() or not job.get("uuid") or not job.get("lease_id"):
@@ -1127,7 +1206,12 @@ async def _handle_job(job: dict[str, Any], jm: JobManager) -> dict[str, Any]:
             text = _extract_text_from_snapshot(snapshot)
             updated_snapshot = snapshot
 
-            if source_type == "chat":
+            if workspace_provider is not None:
+                text, retrieval_params = _read_admitted_workspace_source(
+                    db, source, source_type=source_type, source_id=source_id, owner=user_id,
+                )
+                updated_snapshot = None
+            elif source_type == "chat":
                 if not text:
                     text = _extract_chat_text(_ensure_chacha_db(), source_id)
             elif source_type == "document":
@@ -1182,6 +1266,7 @@ async def _handle_job(job: dict[str, Any], jm: JobManager) -> dict[str, Any]:
             sources=resolved_sources,
             column_hints=column_hints,
             max_rows=max_rows,
+            balance_sources=workspace_provider is not None,
         )
 
         jm.update_job_progress(job_id, progress_percent=55.0, progress_message="llm_generate")
@@ -1189,7 +1274,10 @@ async def _handle_job(job: dict[str, Any], jm: JobManager) -> dict[str, Any]:
             db.update_data_table(table_id, status="cancelled", last_error=None, owner_user_id=user_id, expected_generation_job=generation_job, expected_version=expected_version)
             return {"cancelled": True, "table_id": table_id}
 
-        payload_obj = await _generate_table_payload(jm, job_id, model, llm_prompt)
+        if workspace_provider is None:
+            payload_obj = await _generate_table_payload(jm, job_id, model, llm_prompt)
+        else:
+            payload_obj = await _generate_table_payload(jm, job_id, model, llm_prompt, workspace_provider=workspace_provider)
 
         raw_columns = payload_obj.get("columns") or payload_obj.get("schema")
         raw_rows = payload_obj.get("rows") or payload_obj.get("data") or payload_obj.get("records")
@@ -1253,6 +1341,8 @@ async def _handle_job(job: dict[str, Any], jm: JobManager) -> dict[str, Any]:
                 "sources": sources_db_payload, "model": model or table_row.get("generation_model"),
             },
         }
+        if workspace_provider is not None:
+            result["table_version"] = expected_version + 1
         check_result_size(result)
         jm.update_job_progress(job_id, progress_percent=100.0, progress_message="finalize")
         return result
@@ -1283,7 +1373,7 @@ async def _handle_job(job: dict[str, Any], jm: JobManager) -> dict[str, Any]:
 async def run_data_tables_jobs_worker(stop_event: asyncio.Event | None = None) -> None:
     """Run the data tables jobs worker loop until stopped."""
     worker_id = (os.getenv("DATA_TABLES_JOBS_WORKER_ID") or f"data-tables-jobs-{os.getpid()}").strip()
-    queue = (os.getenv("DATA_TABLES_JOBS_QUEUE") or "default").strip() or "default"
+    queue = data_tables_jobs_queue()
     cfg = WorkerConfig(
         domain=DATA_TABLES_DOMAIN,
         queue=queue,
