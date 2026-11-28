@@ -6,7 +6,6 @@ import pytest
 
 from tldw_Server_API.app.services import enhanced_web_scraping_service as enhanced_ws_service
 
-
 pytestmark = pytest.mark.unit
 
 
@@ -78,10 +77,6 @@ def test_ingest_web_content_auto_chunking_adds_plan_metadata(
     client_user_only,
     monkeypatch,
 ):
-    from tldw_Server_API.app.api.v1.endpoints.media import (
-        ingest_web_content as endpoint_mod,
-    )
-
     async def _fake_orchestrate(**_kwargs):
         return [
             {

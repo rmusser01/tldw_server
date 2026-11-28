@@ -3,11 +3,12 @@
 from __future__ import annotations
 
 import asyncio
+import base64
 import inspect
 import math
 from collections.abc import Awaitable, Callable
 from contextlib import asynccontextmanager
-from dataclasses import replace
+from dataclasses import dataclass, replace
 from typing import Any
 from urllib.parse import urlsplit, urlunsplit
 
@@ -35,16 +36,175 @@ from tldw_Server_API.app.core.Web_Scraping.runtime.browser import (
     RuntimeBrowserRoute,
     RuntimeWebSocketRoute,
 )
+from tldw_Server_API.app.core.Web_Scraping.runtime.controls import ParentStop
 from tldw_Server_API.app.core.Web_Scraping.runtime.policy import ProbeEgressGuard
 from tldw_Server_API.app.core.Web_Scraping.runtime.requests import (
     RuntimeRequestContext,
 )
+
+from ...runtime.browser_accounting import RequestTransfers, non_negative_integer
+from ...runtime.browser_dispatch import TransferSessions
+from ...runtime.browser_document import DEFAULT_MAX_ARTICLE_BYTES, serialize_document
+from ...runtime.controls import observe_physical
 
 _HTTP_ROUTE_PATTERN = "**/*"
 _HTTP_SCHEMES = frozenset({"http", "https"})
 _WEBSOCKET_POLICY_SCHEMES = {"ws": "http", "wss": "https"}
 _INTERNAL_BLANK_PAGE = "about:blank"
 _BROWSER_CLEANUP_GRACE_S = 2.0
+_FETCH_CALLBACK_CAPACITY = 64
+
+
+@dataclass(frozen=True)
+class _FetchRequest:
+    """Only the existing route policy's bounded request attributes."""
+
+    url: str
+    resource_type: str
+
+
+class _FetchRoute:
+    """Adapt public browser-scope Fetch to the existing preflight route port."""
+
+    def __init__(self, guard: _FetchGuard, event: dict[str, Any]) -> None:
+        identifier = event["requestId"]
+        if not isinstance(identifier, str) or len(identifier) > 1024:
+            raise ProbeError("probe_error", "Probe failed.")
+        self._guard, self._identifier = guard, identifier
+        self.request = _FetchRequest(event["request"]["url"], str(event.get("resourceType", "Other")).lower())
+
+    async def abort(self) -> None:
+        await self._guard.send("Fetch.failRequest", {"requestId": self._identifier, "errorReason": "BlockedByClient"})
+
+    async def continue_(self) -> None:
+        await self._guard.send("Fetch.continueRequest", {"requestId": self._identifier})
+
+
+class _FetchGuard:
+    """One cleanup resource owns the same-connection guard through native exit."""
+
+    def __init__(self, browser: Any, probe: GuardedPlaywrightBrowserProbe, options: BrowserProbeOptions) -> None:
+        self.browser, self.probe = browser, probe
+        self.session: Any = None
+        self._route = probe._http_handler(options)
+        self._callbacks: set[asyncio.Task] = set()
+        self._commands: set[asyncio.Task] = set()
+        self._exited = asyncio.Event()
+        self._retired = False
+        self._transfers = None
+        self._callback_capacity = _FETCH_CALLBACK_CAPACITY
+        browser.on("disconnected", self._disconnected)
+
+    def _disconnected(self, *_args: Any) -> None:
+        if self.browser.is_connected() is False:
+            self._exited.set()
+
+    async def install(self) -> None:
+        if not callable(getattr(self.browser, "new_browser_cdp_session", None)):
+            raise ProbeUnavailable()
+        self.session = await self.browser.new_browser_cdp_session()
+        self.session.on("Fetch.requestPaused", self._paused)
+        if self.probe._controls.parent is not None:
+            self._transfers = TransferSessions(self.session, self, self.probe, self._fail, self._failure)
+            self.session.on("Target.targetCreated", self._created)
+            await self.send("Target.setDiscoverTargets", {"discover": True})
+        await self.send("Fetch.enable", {"patterns": [{"urlPattern": "*", "requestStage": "Request"}]})
+
+    @staticmethod
+    def _failure(_code: str, _stage: str) -> ProbeError:
+        return ProbeError("probe_error", "Probe failed.")
+
+    def _fail(self) -> None:
+        self.probe._stop_from_callback(self._failure("", ""))
+
+    def _created(self, event: dict) -> None:
+        if self._retired or len(self._callbacks) >= _FETCH_CALLBACK_CAPACITY:
+            if not self._retired:
+                self._fail()
+            return
+
+        async def observe() -> None:
+            try:
+                await self._transfers.created(event)
+            except (ParentStop, asyncio.CancelledError) as error:
+                self.probe._stop_from_callback(error)
+            except Exception:  # noqa: BLE001 - native target setup fails closed
+                self._fail()
+
+        self._own(observe(), self._callbacks, "preflight-browser-target")
+
+    def start_cleanup(self, operation, *, name):
+        if self._retired or len(self._commands) >= _FETCH_CALLBACK_CAPACITY:
+            operation.close()
+            return None, "unobserved"
+        return self._own(operation, self._commands, name), "owned"
+
+    def _own(self, operation: Awaitable[Any], tasks: set[asyncio.Task], name: str) -> asyncio.Task:
+        try:
+            task = asyncio.create_task(operation, name=name)
+        except BaseException:
+            if inspect.iscoroutine(operation):
+                operation.close()
+            raise
+        tasks.add(task)
+        observe_physical(task)
+
+        def completed(done: asyncio.Task) -> None:
+            tasks.discard(done)
+            if not done.cancelled():
+                done.exception()
+
+        task.add_done_callback(completed)
+        return task
+
+    def _paused(self, event: dict[str, Any]) -> None:
+        if self._retired:
+            return
+        if len(self._callbacks) >= _FETCH_CALLBACK_CAPACITY:
+            self.probe._stop_from_callback(ProbeError("probe_error", "Probe failed."))
+            return
+
+        async def dispatch() -> None:
+            try:
+                if self._transfers is not None and self.probe._admission_open:
+                    await self._transfers.track()
+                await self._route(_FetchRoute(self, event))
+            except (asyncio.CancelledError, ParentStop, PreflightDeadlineExceeded, ProbeError) as error:
+                self.probe._stop_from_callback(error)
+            except Exception:  # noqa: BLE001 - malformed native events fail closed without payloads
+                self.probe._stop_from_callback(ProbeError("probe_error", "Probe failed."))
+
+        try:
+            self._own(dispatch(), self._callbacks, "preflight-browser-fetch-callback")
+        except Exception:  # noqa: BLE001 - scheduling failure cannot leave admission open
+            self.probe._stop_from_callback(ProbeError("probe_error", "Probe failed."))
+
+    async def send(self, method: str, params: dict[str, Any]) -> Any:
+        if len(self._commands) >= _FETCH_CALLBACK_CAPACITY:
+            raise ProbeError("probe_error", "Probe failed.")
+        task = self._own(self.session.send(method, params), self._commands, "preflight-browser-fetch-command")
+        return await asyncio.shield(task)
+
+    async def close(self) -> None:
+        # Reverse cleanup/force cleanup may arrive before close is acknowledged.
+        # Neither a rejected close nor logical cancellation retires this guard.
+        await self._exited.wait()
+        self._retired = True
+        if self._transfers is not None:
+            self._transfers.retire(native_browser_disconnected=True)
+        if self._callbacks:
+            await asyncio.gather(*tuple(self._callbacks), return_exceptions=True)
+        if self._commands:
+            await asyncio.gather(*tuple(self._commands), return_exceptions=True)
+        if self.session is not None:
+            from playwright._impl._errors import TargetClosedError
+
+            try:
+                await self.session.detach()
+            except TargetClosedError:
+                pass
+            self.session.remove_listener("Fetch.requestPaused", self._paused)
+        self.browser.remove_listener("disconnected", self._disconnected)
 
 
 class _DefaultPlaywrightLauncher:
@@ -148,12 +308,13 @@ class _BrowserCleanupHandle:
         self._operation_task: asyncio.Task[None] | None = None
         self._terminal = False
         self._force_started = False
+        self.before_close: Callable[[], Awaitable[None]] | None = None
 
     @staticmethod
     def _consume_operation(task: asyncio.Task[None]) -> None:
         try:
             task.exception()
-        except asyncio.CancelledError:
+        except (asyncio.CancelledError, ParentStop):
             pass
 
     async def _operation(self) -> tuple[asyncio.Task[None] | None, bool]:
@@ -161,11 +322,18 @@ class _BrowserCleanupHandle:
             if self._terminal:
                 return None, False
             if self._operation_task is None:
+
+                async def close_owned() -> None:
+                    if self.before_close is not None:
+                        await self.before_close()
+                    await _invoke_first(self._resource, self._close_methods)
+
                 self._operation_task = asyncio.create_task(
-                    _invoke_first(self._resource, self._close_methods),
+                    close_owned(),
                     name=f"preflight-browser-close-{self._kind}",
                 )
                 self._operation_task.add_done_callback(self._consume_operation)
+                observe_physical(self._operation_task)
                 return self._operation_task, True
             return self._operation_task, False
 
@@ -175,10 +343,16 @@ class _BrowserCleanupHandle:
             return
         try:
             await asyncio.shield(operation)
-        except asyncio.CancelledError:
+        except (asyncio.CancelledError, ParentStop):
             current = asyncio.current_task()
             if current is not None and current.cancelling():
                 raise
+
+    async def wait_closed(self) -> None:
+        """Await native completion even after force cleanup closed admission."""
+        await self.close()
+        if self._operation_task is not None:
+            await asyncio.shield(self._operation_task)
 
     async def force_close(self) -> None:
         async with self._force_lock:
@@ -197,6 +371,8 @@ class _BrowserCleanupHandle:
                         and operation.exception() is None
                     ):
                         return
+                if self.before_close is not None:
+                    await self.before_close()
                 result = force_method()
                 if inspect.isawaitable(result):
                     await result
@@ -207,10 +383,12 @@ class _BrowserCleanupHandle:
                 return
             async with self._operation_lock:
                 self._terminal = True
-            await operation
+            await asyncio.shield(operation)
 
 
 def _cleanup_handle(resource: Any, *, kind: str) -> _BrowserCleanupHandle:
+    if kind == "cdp":
+        return _BrowserCleanupHandle(resource, close_methods=("detach",), force_methods=("detach",), kind=kind)
     if kind == "playwright":
         return _BrowserCleanupHandle(
             resource,
@@ -255,11 +433,13 @@ class _GuardedPlaywrightPage:
         page_handle: _BrowserCleanupHandle,
         controls: PreflightRuntimeControls,
         captured_urls: list[str],
+        session: Any = None,
     ) -> None:
         self._page = page
         self._page_handle = page_handle
         self._controls = controls
         self._captured_urls = captured_urls
+        self._session = session
 
     @staticmethod
     def _normalize_timeout_ms(requested_ms: float) -> float:
@@ -296,11 +476,12 @@ class _GuardedPlaywrightPage:
                 operation,
                 check_after=True,
             )
-        except asyncio.CancelledError:
+        except (asyncio.CancelledError, ParentStop):
             raise
         except (ProbeError, PreflightDeadlineExceeded):
             raise
         except Exception as exc:  # noqa: BLE001 - sanitize the Playwright boundary
+            self._controls.cap_timeout(None)
             if _is_playwright_timeout(exc):
                 if self._controls.deadline_exhausted():
                     raise PreflightDeadlineExceeded() from None
@@ -346,6 +527,19 @@ class _GuardedPlaywrightPage:
             raise PreflightDeadlineExceeded()
 
     async def content(self) -> str:
+        if self._controls.parent is not None:
+
+            def failure(code, _stage):
+                if code == "response_too_large":
+                    error = ParentStop("budget_exhausted")
+                    self._controls.latch_callback_error(error)
+                    return error
+                return ProbeError("probe_error", "Probe failed.")
+
+            html, _ = await self._invoke(
+                lambda: serialize_document(self._session, DEFAULT_MAX_ARTICLE_BYTES, failure=failure)
+            )
+            return html
         return str(await self._invoke(self._page.content))
 
     async def evaluate(self, expression: str, argument: Any = None) -> Any:
@@ -386,6 +580,19 @@ class GuardedPlaywrightBrowserProbe:
         self._transport_decision = transport_decision
         self._capability_check = capability_check
         self._no_sandbox = bool(no_sandbox)
+        self._context: Any | None = None
+        self._admission_open = True
+        self._stop_task: asyncio.Task[Any] | None = None
+        self._generation = 0
+        self._transfers = RequestTransfers(_FETCH_CALLBACK_CAPACITY, self._controls.charge_bytes)
+
+    def _stop_from_callback(self, error: BaseException) -> None:
+        self._admission_open = False
+        self._controls.latch_callback_error(error)
+        if self._context is not None and self._stop_task is None:
+            self._stop_task = asyncio.create_task(self._context.close(), name="preflight-parent-browser-stop")
+            observe_physical(self._stop_task)
+            self._stop_task.add_done_callback(lambda done: None if done.cancelled() else done.exception())
 
     def _resolve_transport_decision(self) -> BrowserTransportDecision:
         """Resolve browser admission without exposing provider failures."""
@@ -406,6 +613,8 @@ class GuardedPlaywrightBrowserProbe:
 
     async def _decision_allowed(self, url: str) -> bool:
         try:
+            if self._controls.parent is not None:
+                self._controls.parent.check_url(url)
             decision = await _await_shared_deadline(
                 self._controls,
                 lambda: self._guard.decide(
@@ -415,7 +624,7 @@ class GuardedPlaywrightBrowserProbe:
                 check_after=True,
             )
             return bool(decision.allowed)
-        except asyncio.CancelledError:
+        except (asyncio.CancelledError, ParentStop):
             raise
         except PreflightDeadlineExceeded:
             raise
@@ -430,7 +639,7 @@ class GuardedPlaywrightBrowserProbe:
                 route.abort,
                 check_after=True,
             )
-        except (asyncio.CancelledError, PreflightDeadlineExceeded):
+        except (asyncio.CancelledError, ParentStop, PreflightDeadlineExceeded):
             raise
         except Exception:  # noqa: BLE001 - route failures stay at the boundary
             logger.warning("Browser HTTP route action failed.")
@@ -442,7 +651,7 @@ class GuardedPlaywrightBrowserProbe:
                 route.continue_,
                 check_after=True,
             )
-        except (asyncio.CancelledError, PreflightDeadlineExceeded):
+        except (asyncio.CancelledError, ParentStop, PreflightDeadlineExceeded):
             raise
         except Exception:  # noqa: BLE001 - fail closed after a routing failure
             logger.warning("Browser HTTP route action failed.")
@@ -461,7 +670,7 @@ class GuardedPlaywrightBrowserProbe:
                 lambda: route.close(code=code, reason=reason),
                 check_after=True,
             )
-        except (asyncio.CancelledError, PreflightDeadlineExceeded):
+        except (asyncio.CancelledError, ParentStop, PreflightDeadlineExceeded):
             raise
         except Exception:  # noqa: BLE001 - route failures stay at the boundary
             logger.warning("Browser WebSocket route action failed.")
@@ -469,17 +678,41 @@ class GuardedPlaywrightBrowserProbe:
     def _http_handler(
         self,
         options: BrowserProbeOptions,
+        *,
+        native_dispatch: bool = True,
     ) -> Callable[[RuntimeBrowserRoute], Any]:
+        generation = self._generation
+
         async def _route_http(route: RuntimeBrowserRoute) -> None:
+            task = asyncio.current_task()
+            if task is not None:
+                observe_physical(task)
             try:
+                if not self._admission_open or generation != self._generation:
+                    await route.abort()
+                    return
                 request = route.request
                 if request.resource_type in options.block_resource_types:
                     await self._abort_http(route)
                     return
+                if not native_dispatch:
+                    # Chromium redirects bypass context routing. The same browser's
+                    # Fetch callback is the single authoritative admission point.
+                    await self._continue_http(route)
+                    return
                 if await self._decision_allowed(request.url):
+                    if self._controls.parent is not None:
+                        await self._controls.reserve("request")
                     await self._continue_http(route)
                 else:
                     await self._abort_http(route)
+            except ParentStop as exc:
+                self._stop_from_callback(exc)
+                try:
+                    await route.abort()
+                except Exception:  # noqa: BLE001 - the parent stop remains authoritative
+                    logger.debug("Stopped browser HTTP route cleanup failed.")
+                raise
             except (asyncio.CancelledError, PreflightDeadlineExceeded):
                 raise
             except Exception:  # noqa: BLE001 - route accessors fail closed
@@ -489,8 +722,16 @@ class GuardedPlaywrightBrowserProbe:
         return _route_http
 
     def _websocket_handler(self) -> Callable[[RuntimeWebSocketRoute], Any]:
+        generation = self._generation
+
         async def _route_web_socket(route: RuntimeWebSocketRoute) -> None:
+            task = asyncio.current_task()
+            if task is not None:
+                observe_physical(task)
             try:
+                if not self._admission_open or generation != self._generation:
+                    await route.close(code=1008, reason="Acquisition stopped")
+                    return
                 policy_url = _websocket_policy_url(route.url)
                 if policy_url is None or not await self._decision_allowed(policy_url):
                     await self._close_websocket(
@@ -499,6 +740,13 @@ class GuardedPlaywrightBrowserProbe:
                         reason="Policy denied",
                     )
                     return
+            except ParentStop as exc:
+                self._stop_from_callback(exc)
+                try:
+                    await route.close(code=1008, reason="Acquisition stopped")
+                except Exception:  # noqa: BLE001 - the parent stop remains authoritative
+                    logger.debug("Stopped browser WebSocket route cleanup failed.")
+                raise
             except (asyncio.CancelledError, PreflightDeadlineExceeded):
                 raise
             except Exception:  # noqa: BLE001 - route accessors fail closed
@@ -510,11 +758,20 @@ class GuardedPlaywrightBrowserProbe:
                 )
                 return
             try:
+                if self._controls.parent is not None:
+                    await self._controls.reserve("request")
                 await _await_shared_deadline(
                     self._controls,
                     lambda: _connect_web_socket_to_server(route),
                     check_after=True,
                 )
+            except ParentStop as exc:
+                self._stop_from_callback(exc)
+                try:
+                    await route.close(code=1008, reason="Acquisition stopped")
+                except Exception:  # noqa: BLE001 - the parent stop remains authoritative
+                    logger.debug("Stopped browser WebSocket route cleanup failed.")
+                raise
             except (asyncio.CancelledError, PreflightDeadlineExceeded):
                 raise
             except Exception:  # noqa: BLE001 - fail closed after connect failure
@@ -539,16 +796,74 @@ class GuardedPlaywrightBrowserProbe:
         self._controls.register_cleanup(handle)
         return handle
 
+    def _on_transfer(self, payload: dict[str, Any]) -> None:
+        """Observe raw CDP transfer lengths, not later response-body snapshots."""
+        if "requestId" in payload:
+            self._transfers.data("main", payload)
+        else:
+            amount = non_negative_integer(payload["encodedDataLength"])
+            if not amount:
+                amount = non_negative_integer(payload.get("dataLength"))
+            self._controls.charge_bytes(amount)
+
+    def _observe_transfer(self, callback, payload) -> None:
+        if not self._admission_open:
+            return
+        try:
+            self._controls.cap_timeout(None)
+            callback(payload)
+        except (ParentStop, asyncio.CancelledError) as error:
+            self._stop_from_callback(error)
+        except Exception:  # noqa: BLE001 - malformed native events fail closed
+            self._stop_from_callback(ProbeError("probe_error", "Probe failed."))
+
+    def on_request_data(self, session, payload) -> None:
+        self._observe_transfer(lambda event: self._transfers.data(session, event), payload)
+
+    def on_request_finished(self, session, payload) -> None:
+        self._observe_transfer(lambda event: self._transfers.finished(session, event), payload)
+
+    def on_request_failed(self, session, payload) -> None:
+        self._observe_transfer(lambda event: self._transfers.failed(session, event), payload)
+
+    def on_websocket_frame(self, payload) -> None:
+        self._observe_transfer(self._on_frame, payload)
+
+    def _on_frame(self, payload: dict[str, Any]) -> None:
+        frame = payload["response"]
+        data = frame["payloadData"]
+        if frame["opcode"] == 1:
+            amount = len(data.encode("utf-8"))
+        elif frame["opcode"] == 2:
+            amount = len(base64.b64decode(data, validate=True))
+        else:
+            raise ProbeError("probe_error", "Invalid browser frame event.")
+        self._controls.charge_bytes(amount)
+
+    async def _install_parent_transfer(self, context: Any, page: Any, handles: list[Any]) -> Any:
+        if self._controls.parent is None:
+            return
+        session = await context.new_cdp_session(page)
+        self._register(handles, session, kind="cdp")
+        session.on("Network.dataReceived", lambda payload: self._observe_transfer(self._on_transfer, payload))
+        session.on("Network.loadingFinished", lambda payload: self.on_request_finished("main", payload))
+        session.on("Network.loadingFailed", lambda payload: self.on_request_failed("main", payload))
+        session.on("Network.webSocketFrameReceived", self.on_websocket_frame)
+        session.on("Network.webSocketFrameSent", self.on_websocket_frame)
+        await session.send("Network.enable")
+        return session
+
     async def _cleanup_owned_resources(
         self,
         handles: list[_BrowserCleanupHandle],
     ) -> None:
+        self._admission_open = False
         try:
             await self._controls.cleanup_handles(
                 handles,
                 grace_s=_BROWSER_CLEANUP_GRACE_S,
             )
-        except asyncio.CancelledError:
+        except (asyncio.CancelledError, ParentStop):
             raise
         except Exception:  # noqa: BLE001 - cleanup cannot replace an outcome
             logger.warning("Browser probe cleanup failed.")
@@ -569,6 +884,10 @@ class GuardedPlaywrightBrowserProbe:
             raise ProbeUnavailable()
 
         await self._controls.reserve("browser")
+        self._generation += 1
+        self._admission_open = True
+        self._stop_task = None
+        self._transfers = RequestTransfers(_FETCH_CALLBACK_CAPACITY, self._controls.charge_bytes)
         handles: list[_BrowserCleanupHandle] = []
         startup_stage = "launch"
         try:
@@ -577,7 +896,7 @@ class GuardedPlaywrightBrowserProbe:
                 self._launcher.start,
                 check_after=False,
             )
-            self._register(handles, playwright, kind="playwright")
+            playwright_handle = self._register(handles, playwright, kind="playwright")
 
             launch_options: dict[str, Any] = {"headless": True}
             if self._no_sandbox:
@@ -587,7 +906,13 @@ class GuardedPlaywrightBrowserProbe:
                 lambda: playwright.chromium.launch(**launch_options),
                 check_after=False,
             )
-            self._register(handles, browser, kind="browser")
+            guard = _FetchGuard(browser, self, options)
+            guard_handle = self._register(handles, guard, kind="fetch")
+            # Forced cleanup is concurrent, but connection stop must not destroy
+            # the guard's native retirement evidence or command acknowledgements.
+            playwright_handle.before_close = guard_handle.wait_closed
+            self._context = self._register(handles, browser, kind="browser")
+            await _await_shared_deadline(self._controls, guard.install, check_after=False)
             startup_stage = "context"
 
             context_options: dict[str, Any] = {
@@ -604,12 +929,12 @@ class GuardedPlaywrightBrowserProbe:
                 lambda: browser.new_context(**context_options),
                 check_after=False,
             )
-            self._register(handles, context, kind="context")
+            self._context = self._register(handles, context, kind="context")
             await _await_shared_deadline(
                 self._controls,
                 lambda: context.route(
                     _HTTP_ROUTE_PATTERN,
-                    self._http_handler(options),
+                    self._http_handler(options, native_dispatch=False),
                 ),
                 check_after=False,
             )
@@ -642,14 +967,21 @@ class GuardedPlaywrightBrowserProbe:
                 check_after=False,
             )
             page_handle = self._register(handles, page, kind="page")
+            session = await self._install_parent_transfer(context, page, handles)
+            if session is not None:
+                info = (await session.send("Target.getTargetInfo"))["targetInfo"]
+                guard._transfers.context_id = info["browserContextId"]
+                guard._transfers.main_target = info["targetId"]
+                await guard._transfers.track()
             self._controls.cap_timeout(None)
             wrapped: BrowserProbePage = _GuardedPlaywrightPage(
                 page=page,
                 page_handle=page_handle,
                 controls=self._controls,
                 captured_urls=captured_urls,
+                session=session,
             )
-        except asyncio.CancelledError:
+        except (asyncio.CancelledError, ParentStop):
             await self._cleanup_owned_resources(handles)
             raise
         except (ProbeError, PreflightDeadlineExceeded):
@@ -657,6 +989,7 @@ class GuardedPlaywrightBrowserProbe:
             raise
         except Exception as exc:  # noqa: BLE001 - sanitize startup failures
             await self._cleanup_owned_resources(handles)
+            self._controls.cap_timeout(None)
             if _is_playwright_timeout(exc):
                 if self._controls.deadline_exhausted():
                     raise PreflightDeadlineExceeded() from None
@@ -668,4 +1001,5 @@ class GuardedPlaywrightBrowserProbe:
         try:
             yield wrapped
         finally:
+            self._admission_open = False
             await self._cleanup_owned_resources(handles)
