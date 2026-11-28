@@ -31,6 +31,7 @@ Continue GitHub #1670 with the two canonical-state-label findings in the MCP too
 No ADR is required. This uses the existing shared labels in the setup UI. The Models row is already covered by the pending Kanban and Scheduled Tasks PR #3671.
 Verified against remote dev at 5f9472f9b440fb99e68f67475d2e8219c686c3a0. The #1670 path map went from 26 to 24 blocked findings. The verifier comparison isolated the two MCP tools labels. The repository-wide verifier continues to exit 1 with 95 other blockers and 28 stale entries.
 All 112 focused setup, registry, and guard tests passed. Replacing the registry labels in the test proved the two displayed labels come from the shared definitions. The setup tests also cover the Not configured and Incomplete values. Shared UI type checking and scoped ESLint passed. Bandit found zero Python files in the changed scope.
+Pull request https://github.com/rmusser01/tldw_server/pull/3679
 <!-- SECTION:IMPLEMENTATION_NOTES:END -->
 
 ## Final Summary
