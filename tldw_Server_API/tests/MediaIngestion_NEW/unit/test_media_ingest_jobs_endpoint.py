@@ -851,3 +851,218 @@ def test_submit_media_ingest_routes_provider_analysis(
     assert response.status_code == 200, response.text
     job_id = response.json()["jobs"][0]["id"]
     assert JobManager().get_job(job_id)["queue"] == expected_queue
+
+
+_INGEST = "/api/v1/media/ingest/jobs"
+
+
+@pytest.fixture()
+def staging_client(media_ingest_jobs_client, monkeypatch, tmp_path):
+    """Isolate the real API, Jobs database and multipart staging for each case."""
+    import tempfile
+
+    monkeypatch.setattr(tempfile, "tempdir", str(tmp_path))
+    media_ingest_jobs_client.headers.update({"X-API-KEY": "test-api-key-12345"})
+    return media_ingest_jobs_client
+
+
+def _submit_staged_upload(client):
+    response = client.post(
+        _INGEST,
+        data={"media_type": "document"},
+        files={"files": ("sample.txt", b"queued staging regression", "text/plain")},
+    )
+    assert response.status_code == 200, response.text
+    body = response.json()
+    return body["jobs"][0], body["batch_id"]
+
+
+@pytest.mark.parametrize("route", ["single", "batch"])
+def test_cancel_queued_upload_releases_only_its_staged_file(staging_client, route):
+    job, batch = _submit_staged_upload(staging_client)
+    other, _ = _submit_staged_upload(staging_client)
+    source = Path(job["source"])
+    assert source.is_file()
+    if route == "single":
+        response = staging_client.delete(f"{_INGEST}/{job['id']}")
+    else:
+        response = staging_client.post(f"{_INGEST}/cancel", params={"batch_id": batch})
+    assert response.status_code == 200, response.text
+    assert staging_client.get(f"{_INGEST}/{job['id']}").json()["status"] == "cancelled"
+    assert not source.parent.exists()
+    assert Path(other["source"]).is_file()
+    retried, _ = _submit_staged_upload(staging_client)
+    repeated = staging_client.post(f"{_INGEST}/cancel", params={"batch_id": batch})
+    assert repeated.json()["already_terminal"] == 1
+    assert Path(retried["source"]).is_file()
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("attempt", ["current", "expired", "reassigned_and_preparing"])
+async def test_cancel_after_claim_before_handler_releases_upload(staging_client, monkeypatch, attempt):
+    """Cancel at the real SDK acquire boundary, before the media handler's finally."""
+    import asyncio
+    import time
+
+    from tldw_Server_API.app.services import media_ingest_jobs_worker as worker
+
+    if attempt == "expired":
+        monkeypatch.setenv("JOBS_TEST_NOW_EPOCH", str(time.time() - 3600))
+    job, _ = _submit_staged_upload(staging_client)
+    source = Path(job["source"])
+    manager = worker._jobs_manager()
+    acquire = manager.acquire_next_job
+    stop = asyncio.Event()
+    observed_claims = []
+
+    def acquire_then_cancel(*args, **kwargs):
+        claimed = acquire(*args, **kwargs)
+        if claimed:
+            assert claimed["status"] == "processing"
+            if attempt == "reassigned_and_preparing":
+                assert manager.release_job(
+                    claimed["id"],
+                    worker_id=claimed["worker_id"],
+                    lease_id=claimed["lease_id"],
+                    enforce=True,
+                )
+                successor = acquire(**{**kwargs, "worker_id": "successor"})
+                assert successor is not None
+                assert successor["lease_id"] != claimed["lease_id"]
+                assert manager.update_job_progress(job["id"], progress_percent=5, progress_message="prepare")
+            cancelled = staging_client.delete(f"{_INGEST}/{job['id']}")
+            assert cancelled.status_code == 200, cancelled.text
+            assert source.is_file()
+            observed_claims.append(claimed["uuid"])
+            stop.set()
+        return claimed
+
+    monkeypatch.setattr(manager, "acquire_next_job", acquire_then_cancel)
+    monkeypatch.setattr(worker, "_jobs_manager", lambda: manager)
+    await asyncio.wait_for(worker.run_media_ingest_jobs_worker(stop), timeout=8)
+    assert observed_claims == [job["uuid"]]
+    assert source.is_file() == (attempt == "reassigned_and_preparing")
+
+
+@pytest.mark.parametrize("release_to_queue", [False, True])
+def test_cancel_takes_cleanup_ownership_from_locked_job_state(staging_client, monkeypatch, release_to_queue):
+    """Move a real row between the endpoint lookup and the cancellation transaction."""
+    from tldw_Server_API.app.core.Jobs.manager import JobManager
+
+    job, batch = _submit_staged_upload(staging_client)
+    source = Path(job["source"])
+    manager = JobManager()
+    def claim(jm: JobManager):
+        row = jm.acquire_next_job(domain="media_ingest", queue="default", worker_id="racing", lease_seconds=120)
+        assert row is not None
+        return row
+
+    lease = claim(manager) if release_to_queue else None
+    cancel = JobManager.cancel_job
+
+    def change_claim_before_cancel(jm, job_id, **kwargs):
+        if lease is not None:
+            assert jm.release_job(job_id, worker_id=lease["worker_id"], lease_id=lease["lease_id"], enforce=True)
+        else:
+            assert claim(jm)["uuid"] == job["uuid"]
+        return cancel(jm, job_id, **kwargs)
+
+    monkeypatch.setattr(JobManager, "cancel_job", change_claim_before_cancel)
+    response = staging_client.delete(f"{_INGEST}/{job['id']}")
+    assert response.status_code == 200, response.text
+    assert source.is_file() == (not release_to_queue)
+    repeated = staging_client.post(f"{_INGEST}/cancel", params={"batch_id": batch})
+    assert repeated.json()["already_terminal"] == 1
+    assert source.is_file() == (not release_to_queue)
+
+
+def test_queued_cancel_preserves_unrelated_staging_entries(staging_client):
+    """A generic Jobs payload cannot claim a native upload's directory."""
+    from tldw_Server_API.app.core.Jobs.manager import JobManager
+
+    job, _ = _submit_staged_upload(staging_client)
+    source = Path(job["source"])
+    other = source.parent / "unrelated.txt"
+    other.write_text("other", encoding="utf-8")
+    jm = JobManager()
+    original = jm.get_job(job["id"])
+    assert original is not None
+    copied = jm.create_job(
+        domain="media_ingest",
+        queue="default",
+        job_type="media_ingest_item",
+        payload=original["payload"],
+        owner_user_id="1",
+    )
+    assert staging_client.delete(f"{_INGEST}/{copied['id']}").status_code == 200
+    assert source.is_file()
+    assert staging_client.delete(f"{_INGEST}/{job['id']}").status_code == 200
+    assert not source.exists()
+    assert other.read_text(encoding="utf-8") == "other"
+
+
+@pytest.mark.parametrize("route", ["single", "batch"])
+def test_repeat_cancel_recovers_unclaimed_upload_after_interrupted_cleanup(staging_client, route):
+    """Model a process stopping after the database commit but before the unlink."""
+    from tldw_Server_API.app.core.Jobs.manager import JobManager
+
+    job, batch = _submit_staged_upload(staging_client)
+    assert JobManager().cancel_job(job["id"])
+    assert Path(job["source"]).is_file()
+    if route == "single":
+        assert staging_client.delete(f"{_INGEST}/{job['id']}").status_code == 400
+    else:
+        assert staging_client.post(f"{_INGEST}/cancel", params={"batch_id": batch}).json()["already_terminal"] == 1
+    assert not Path(job["source"]).parent.exists()
+
+
+def test_cancel_does_not_follow_replaced_staging_directory(staging_client):
+    job, _ = _submit_staged_upload(staging_client)
+    source = Path(job["source"])
+    elsewhere = source.parent.with_name("unrelated")
+    source.parent.rename(elsewhere)
+    source.parent.symlink_to(elsewhere, target_is_directory=True)
+    assert staging_client.delete(f"{_INGEST}/{job['id']}").status_code == 200
+    assert (elsewhere / source.name).is_file()
+
+
+def test_upload_admission_rejection_cleans_only_unpublished_file(staging_client, monkeypatch):
+    from tldw_Server_API.app.core.Jobs.manager import JobManager
+
+    create = JobManager.create_job
+    staged = []
+
+    def reject_second(manager, **kwargs):
+        staged.append(Path(kwargs["payload"]["source"]))
+        if len(staged) == 2:
+            raise BadRequestError("concurrent job limit")
+        return create(manager, **kwargs)
+
+    monkeypatch.setattr(JobManager, "create_job", reject_second)
+    response = staging_client.post(
+        _INGEST,
+        data={"media_type": "document"},
+        files=[("files", ("one.txt", b"one", "text/plain")), ("files", ("two.txt", b"two", "text/plain"))],
+    )
+    assert response.status_code == 429
+    assert staged[0].is_file()
+    assert not staged[1].parent.exists()
+
+
+@pytest.mark.parametrize("route", ["single", "batch"])
+def test_cancel_racing_interrupted_queued_cancellation_recovers_upload(staging_client, monkeypatch, route):
+    from tldw_Server_API.app.core.Jobs.manager import JobManager
+
+    job, batch = _submit_staged_upload(staging_client)
+    cancel = JobManager.cancel_job
+
+    def race(manager, job_id, **kwargs):
+        assert cancel(manager, job_id)
+        return cancel(manager, job_id, **kwargs)
+
+    monkeypatch.setattr(JobManager, "cancel_job", race)
+    if route == "single":
+        assert staging_client.delete(f"{_INGEST}/{job['id']}").status_code == 400
+    else:
+        assert staging_client.post(f"{_INGEST}/cancel", params={"batch_id": batch}).json()["already_terminal"] == 1
+    assert not Path(job["source"]).parent.exists()

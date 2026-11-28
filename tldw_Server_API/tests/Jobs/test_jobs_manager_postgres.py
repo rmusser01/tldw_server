@@ -835,3 +835,26 @@ def test_pg_reschedule_persists_updates():
     assert after is None
     acq = jm.acquire_next_job(domain="chatbooks", queue="default", lease_seconds=5, worker_id="w-resched")
     assert acq and int(acq["id"]) == int(job["id"])
+
+
+@pytest.mark.parametrize("acquired", [False, True])
+def test_pg_cancel_calls_queued_cleanup_after_commit(acquired):
+    """A separately connected callback sees only committed pre-claim cancellations."""
+    from uuid import uuid4
+
+    manager = _new_pg_manager()
+    upload_uuid = uuid4()
+    job = manager.create_job(
+        domain="media_ingest", queue="default", job_type="media_ingest_item",
+        payload={"source_kind": "file"}, owner_user_id="1", job_uuid=upload_uuid,
+    )
+    if acquired:
+        manager.acquire_next_job(domain="media_ingest", queue="default", worker_id="ingest", lease_seconds=120)
+    observed = []
+
+    def after_queued_cancel():
+        row = _new_pg_manager().get_job(job["id"])
+        observed.append((row["uuid"], row["status"]))
+
+    assert manager.cancel_job(job["id"], expected_uuid=str(upload_uuid), on_queued_cancel=after_queued_cancel)
+    assert observed == ([] if acquired else [(str(upload_uuid), "cancelled")])

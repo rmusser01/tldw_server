@@ -8,7 +8,7 @@ import re
 import sqlite3
 import time
 import uuid as _uuid
-from collections.abc import Iterator
+from collections.abc import Callable, Iterator
 from contextvars import ContextVar
 from dataclasses import dataclass, replace
 from datetime import datetime, timedelta
@@ -3921,6 +3921,7 @@ class JobManager:
         quarantine_threshold: int | None = None,
         fair_share_exempt: bool = False,
         quota_exempt: bool = False,
+        job_uuid: _uuid.UUID | None = None,
     ) -> AdmissionResult:
         """Run the complete admission pipeline and return its typed outcome.
 
@@ -3936,6 +3937,7 @@ class JobManager:
             max_retries: Maximum automatic retries on failure.
             available_at: Optional schedule time before the job becomes acquirable.
             idempotency_key: If provided, duplicate creates return the same row.
+            job_uuid: Server-generated identity for a producer that stages input before admission.
             owner_scope_admission: Optional transactional owner/job-scope limits.
             expired_lease_policy: Behavior when a processing lease expires.
             quarantine_threshold: Optional consecutive-failure quarantine limit.
@@ -4036,7 +4038,7 @@ class JobManager:
                 pass
             # Use consistent clock
             _now_dt = self._clock.now_utc()
-            uuid_val = str(_uuid.uuid4())
+            uuid_val = str(job_uuid or _uuid.uuid4())
             if not trace_id:
                 try:
                     trace_id = str(_uuid.uuid4())
@@ -4263,6 +4265,7 @@ class JobManager:
         quarantine_threshold: int | None = None,
         fair_share_exempt: bool = False,
         quota_exempt: bool = False,
+        job_uuid: _uuid.UUID | None = None,
     ) -> dict[str, Any]:
         """Create a job using the typed admission pipeline and legacy mapping."""
 
@@ -4285,6 +4288,7 @@ class JobManager:
             quarantine_threshold=quarantine_threshold,
             fair_share_exempt=fair_share_exempt,
             quota_exempt=quota_exempt,
+            job_uuid=job_uuid,
         )
         return self._map_admission_result(result)
 
@@ -8965,6 +8969,7 @@ class JobManager:
         expected_job_type: str | None = None,
         cascade_dependents: bool = True,
         queued_only: bool = False,
+        on_queued_cancel: Callable[[], None] | None = None,
     ) -> bool:
         """Request cancellation or cancel queued jobs immediately.
 
@@ -8974,6 +8979,7 @@ class JobManager:
         so reconciliation remains bounded.
 
         queued_only also compares queued status under the cancellation row lock.
+        on_queued_cancel runs after a committed queued-to-cancelled transition.
         Emits gauge updates on successful cancellation for the job's domain/queue/job_type.
         """
         conn = self._connect()
@@ -9186,6 +9192,8 @@ class JobManager:
                         post_commit_cancel_uuid,
                         reason=reason or "dependency_cancelled",
                     )
+        if cancelled_row and cancelled_row["status"] == "queued" and on_queued_cancel is not None:
+            on_queued_cancel()
         return bool(result)
 
     def release_job(

@@ -1,11 +1,15 @@
 import json
 import os
+import re
 import shutil
 import subprocess  # nosec B404 - exercises the repository-owned CI guard in a scratch directory
+from fnmatch import fnmatchcase
 from pathlib import Path
 
 import pytest
 import yaml
+
+from tldw_Server_API.tests.CI.test_admin_ui_vitest_ratchet_workflow import _evaluate_flat_expression
 
 
 def test_frontend_required_enforces_strict_shared_security_boundaries() -> None:
@@ -175,6 +179,20 @@ def test_frontend_coverage_reports_both_package_owned_suites() -> None:
     report = jobs["shared-ui-coverage-report"]
     assert "shared-ui-coverage" in report["needs"]
     assert "needs.shared-ui-coverage.result == 'success'" in report["if"]
+    download = next(
+        step for step in report["steps"] if step.get("name") == "Download shared UI coverage blobs"
+    )
+    assert upload["if"] == "always() && !cancelled()"  # nosec B101
+    for outcome, expected_name in (
+        ("failure", "failed-shared-ui-coverage-blob-29"),
+        ("success", "shared-ui-coverage-blob-29"),
+    ):
+        context = {f"steps.{run['id']}.outcome": outcome, "matrix.shard": "29"}
+        name = upload["with"]["name"]
+        for expression in re.findall(r"\$\{\{[^}]+\}\}", name):
+            name = name.replace(expression, str(_evaluate_flat_expression(expression, context)))
+        assert name == expected_name  # nosec B101
+        assert fnmatchcase(name, download["with"]["pattern"]) == (outcome == "success")  # nosec B101
     guard = next(
         step
         for step in report["steps"]
