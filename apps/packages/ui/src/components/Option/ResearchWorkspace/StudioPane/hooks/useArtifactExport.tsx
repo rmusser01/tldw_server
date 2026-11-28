@@ -264,7 +264,7 @@ export function useArtifactExport(deps: UseArtifactExportDeps) {
                   messageApi.destroy(undoMessageKey)
                 }}
               >
-                {t("common:undo", "Undo")}
+                {t("common:undo.action", "Undo")}
               </Button>
             )
           }

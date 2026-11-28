@@ -1588,7 +1588,7 @@ export const WorkspaceHeader: React.FC<WorkspaceHeaderProps> = ({
             messageApi.destroy(undoMessageKey)
           }}
         >
-          {t("common:undo", "Undo")}
+          {t("common:undo.action", "Undo")}
         </button>
       )
     }
@@ -1700,7 +1700,7 @@ export const WorkspaceHeader: React.FC<WorkspaceHeaderProps> = ({
                 messageApi.destroy(undoMessageKey)
               }}
             >
-              {t("common:undo", "Undo")}
+              {t("common:undo.action", "Undo")}
             </Button>
           )
         }

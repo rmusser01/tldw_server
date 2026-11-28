@@ -904,7 +904,7 @@ export const SourcesPane: React.FC<SourcesPaneProps> = ({
             size="small"
             onClick={() => undoWorkspaceAction(undoHandle.id)}
           >
-            {t("common:undo", "Undo")}
+            {t("common:undo.action", "Undo")}
           </Button>
         </div>
       )
@@ -1386,7 +1386,7 @@ export const SourcesPane: React.FC<SourcesPaneProps> = ({
               messageApi.destroy(undoMessageKey)
             }}
           >
-            {t("common:undo", "Undo")}
+            {t("common:undo.action", "Undo")}
           </Button>
         )
       }
@@ -1460,7 +1460,7 @@ export const SourcesPane: React.FC<SourcesPaneProps> = ({
               messageApi.destroy(undoMessageKey)
             }}
           >
-            {t("common:undo", "Undo")}
+            {t("common:undo.action", "Undo")}
           </Button>
         )
       }

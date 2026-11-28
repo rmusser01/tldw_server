@@ -1915,7 +1915,7 @@ export const QuickNotesSection: React.FC<QuickNotesSectionProps> = ({ onCollapse
             messageApi.destroy(undoMessageKey)
           }}
         >
-          {t("common:undo", "Undo")}
+          {t("common:undo.action", "Undo")}
         </Button>
       )
     }

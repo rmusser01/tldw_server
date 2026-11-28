@@ -1,5 +1,6 @@
 import { fireEvent, render, screen, within } from "@testing-library/react"
 import { beforeEach, describe, expect, it, vi } from "vitest"
+import commonEn from "@/assets/locale/en/common.json"
 import { SourcesPane } from "../SourcesPane"
 import { SourceFolderTree } from "../SourcesPane/SourceFolderTree"
 
@@ -104,6 +105,8 @@ vi.mock("react-i18next", () => ({
         title?: string
       }
     ) => {
+      if (_key === "common:undo") return commonEn.undo
+      if (_key === "common:undo.action") return commonEn.undo.action
       if (typeof defaultValueOrOptions === "string") {
         return defaultValueOrOptions
           .replace("{{count}}", String(interpolationValues?.count ?? ""))
