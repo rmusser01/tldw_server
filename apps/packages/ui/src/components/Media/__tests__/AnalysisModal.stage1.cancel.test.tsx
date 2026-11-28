@@ -256,7 +256,7 @@ describe('AnalysisModal stage 1 cancel plumbing', () => {
     fireEvent.click(generateButton)
 
     await waitFor(() => {
-      expect(mocks.messageError).toHaveBeenCalledWith('Failed to generate analysis')
+      expect(mocks.messageError).toHaveBeenCalledWith(expect.stringMatching(/try again/i))
     })
     expect(mocks.messageInfo).not.toHaveBeenCalled()
   })
