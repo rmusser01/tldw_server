@@ -6,7 +6,8 @@ from typing import Any
 
 from loguru import logger
 
-from tldw_Server_API.app.core.exceptions import LLMQuotaExceededError
+from tldw_Server_API.app.core.exceptions import LLMPolicyRefusal, LLMQuotaExceededError
+from tldw_Server_API.app.core.LLM_Calls.provider_results import raise_if_content_filtered
 
 
 PACING_PROMPT = """Analyze the pacing of the following text. Return a JSON object with:
@@ -140,15 +141,16 @@ async def _run_structured_analysis(
 
     content: str = ""
     try:
-        response = await perform_chat_api_call_async(**kwargs)
+        response = await perform_chat_api_call_async(**kwargs, llm_surface="writing.manuscript")
+        raise_if_content_filtered(response)  # a refused answer is not stored as an analysis
         content = _extract_content(response)
         content = _strip_markdown_fences(content)
         return json.loads(content)
     except json.JSONDecodeError:
         logger.warning("Failed to parse analysis JSON response")
         return {"error": "Failed to parse LLM response", "raw": content[:500] if content else ""}
-    except LLMQuotaExceededError:
-        raise  # the user's limit: the endpoint answers 402 instead of storing a failed analysis
+    except (LLMQuotaExceededError, LLMPolicyRefusal):
+        raise  # the user's limit (402) or a moderation refusal (400): not stored as a failed analysis
     except Exception:
         logger.exception("Analysis LLM call failed")
         return {

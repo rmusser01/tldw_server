@@ -123,6 +123,7 @@ EXPECTED_ERROR_CODES = {
     "notes_graph_job_contract_invalid",
     "notes_graph_job_missing",
     "notes_graph_job_result_contract_invalid",
+    "notes_graph_provider_policy_refused",
     "notes_graph_provider_retry_policy_unsupported",
     "notes_graph_provider_unavailable",
     "notes_graph_publication_receipt_mismatch",

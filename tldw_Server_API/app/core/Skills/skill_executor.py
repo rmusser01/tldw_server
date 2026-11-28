@@ -20,6 +20,8 @@ from typing import Any, Optional
 
 from loguru import logger
 
+from tldw_Server_API.app.core.LLM_Calls.provider_results import raise_if_content_filtered
+
 
 @dataclass
 class SkillExecutionResult:
@@ -441,7 +443,9 @@ class SkillExecutor:
                 tools=llm_tools or None,
                 api_key=context.api_key if context else None,
                 app_config=context.app_config if context else None,
+                llm_surface="skills.execution",
             )
+            raise_if_content_filtered(response)  # a blocked answer is a refusal, not the skill's output
 
             tool_calls = self._extract_tool_calls(response)
             if not tool_calls:

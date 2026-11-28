@@ -61,6 +61,7 @@ SUGGESTION_ERROR_MESSAGES = {
     "notes_graph_provider_call_policy_unsupported": "The selected provider cannot safely generate suggestions.",
     "notes_graph_provider_disallowed": "The selected provider or model is not allowed.",
     "notes_graph_provider_not_configured": "The selected provider is not configured.",
+    "notes_graph_provider_policy_refused": "The suggestion request was refused by the moderation policy.",
     "notes_graph_provider_retry_policy_unsupported": "The selected provider retry policy is unsupported.",
     "notes_graph_provider_unavailable": "The selected provider is unavailable.",
     "notes_graph_source_too_large": "The selected note is too large for suggestion generation.",

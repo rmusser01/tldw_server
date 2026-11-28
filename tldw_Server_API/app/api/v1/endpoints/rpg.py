@@ -166,6 +166,8 @@ def _rules_service(
 def _map_error(exc: Exception) -> HTTPException:
     """Map domain exceptions to stable RPG HTTP errors."""
 
+    if isinstance(exc, HTTPException):  # e.g. a moderation refusal (400): already the route's answer
+        return exc
     if isinstance(exc, RPGNotFoundError):
         return HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(exc))
     if isinstance(exc, RPGConflictError):

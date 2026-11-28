@@ -1,6 +1,5 @@
 {
   "api/v1/endpoints/media/document_insights.py": {"references": 1, "reason": null},
-  "core/Claims_Extraction/ingestion_claims.py": {"references": 1, "reason": null},
   "core/Data_Tables/jobs_worker.py": {"references": 1, "reason": null},
   "core/Evaluations/cli/evals_cli.py": {"references": 1, "reason": null},
   "core/Evaluations/cli/evals_cli_enhanced.py": {"references": 1, "reason": null},

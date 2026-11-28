@@ -13,7 +13,8 @@ from tldw_Server_API.app.core.Chat.Chat_Deps import (
     ChatConfigurationError,
     ChatRateLimitError,
 )
-
+from tldw_Server_API.app.core.exceptions import LLMPolicyRefusal
+from tldw_Server_API.app.core.LLM_Calls.provider_results import raise_if_content_filtered
 from tldw_Server_API.app.core.VN_Play.models import TurnResult
 from tldw_Server_API.app.core.VN_Play.parser import (
     NormalizedTurnResult,
@@ -84,13 +85,13 @@ VN_GENERATION_SYSTEM_MESSAGE = (
 )
 
 
-async def perform_chat_api_call_async(**kwargs: Any) -> Any:
+async def perform_chat_api_call_async(*, llm_surface: str | None = None, **kwargs: Any) -> Any:
     """Late-bound chat service call so tests can monkeypatch this module safely."""
     from tldw_Server_API.app.core.Chat.chat_service import (
         perform_chat_api_call_async as chat_call,
     )
 
-    return await chat_call(**kwargs)
+    return await chat_call(**kwargs, llm_surface=llm_surface)
 
 
 class DeterministicVNPlayAdapter:
@@ -139,7 +140,10 @@ class ChatVNPlayTurnAdapter:
             kwargs["max_tokens"] = self.max_tokens
 
         try:
-            response = await perform_chat_api_call_async(**kwargs)
+            response = await perform_chat_api_call_async(**kwargs, llm_surface="vn_play")
+            raise_if_content_filtered(response)
+        except LLMPolicyRefusal:
+            raise  # the route answers 400; a refusal is not a provider failure
         except Exception as exc:
             raise VNPlayModelError("vn_play_chat_provider_failed") from exc
 
@@ -196,7 +200,13 @@ class ScriptedVNGenerationAdapter:
         kwargs.update(_usage_context_kwargs(request.usage_context))
 
         try:
-            response = await perform_chat_api_call_async(**kwargs)
+            response = await perform_chat_api_call_async(**kwargs, llm_surface="vn_play")
+            raise_if_content_filtered(response)
+        except LLMPolicyRefusal as exc:
+            # A refusal is its own terminal code, never "model_error" or a provider failure.
+            raise VNGenerationAdapterError(
+                "llm_policy_refused", debug_metadata={"provider": provider, "error_type": type(exc).__name__}
+            ) from exc
         except Exception as exc:
             raise _generation_adapter_error(exc, provider=provider) from exc
 

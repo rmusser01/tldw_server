@@ -23,7 +23,7 @@ from tldw_Server_API.app.core.Claims_Extraction.monitoring import (
 from tldw_Server_API.app.core.config import settings
 from tldw_Server_API.app.core.DB_Management.db_path_utils import get_user_media_db_path
 from tldw_Server_API.app.core.DB_Management.media_db.api import managed_media_database
-from tldw_Server_API.app.core.exceptions import LLMQuotaExceededError
+from tldw_Server_API.app.core.exceptions import LLMPolicyRefusal, LLMQuotaExceededError
 from tldw_Server_API.app.core.Usage.llm_roots import llm_call_root
 
 _CLAIMS_REBUILD_NONCRITICAL_EXCEPTIONS: tuple[type[BaseException], ...] = (
@@ -260,10 +260,10 @@ class ClaimsRebuildService:
                 )
                 self._persist_health()
             # A quota refusal fails this task only; uncaught, it would end the worker thread.
-            except (*_CLAIMS_REBUILD_NONCRITICAL_EXCEPTIONS, LLMQuotaExceededError) as e:
-                if isinstance(e, LLMQuotaExceededError):
-                    # The owner's limit, not a fault: a warning, and no quota details in the shared health row.
-                    error = "llm_quota_exceeded"
+            except (*_CLAIMS_REBUILD_NONCRITICAL_EXCEPTIONS, LLMQuotaExceededError, LLMPolicyRefusal) as e:
+                if isinstance(e, (LLMQuotaExceededError, LLMPolicyRefusal)):
+                    # The owner's limit or a moderation refusal, not a fault: a warning, and no details in the shared health row.
+                    error = "llm_quota_exceeded" if isinstance(e, LLMQuotaExceededError) else "llm_policy_refused"
                     logger.warning(f"Claims rebuild refused for media_id={task.media_id}: {error}")
                 else:
                     error = str(e)

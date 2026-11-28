@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import json
 import re
+from functools import partial
 from typing import Any, Callable
 
 from loguru import logger
@@ -11,6 +12,8 @@ from loguru import logger
 from tldw_Server_API.app.core.Chat.chat_helpers import extract_response_content
 from tldw_Server_API.app.core.Chat.chat_service import perform_chat_api_call
 from tldw_Server_API.app.core.config import settings
+from tldw_Server_API.app.core.exceptions import LLMPolicyRefusal
+from tldw_Server_API.app.core.LLM_Calls.provider_results import raise_if_content_filtered
 from tldw_Server_API.app.core.Provider_Credentials.llm_provider_overrides import ProviderOverridePolicyError
 from tldw_Server_API.app.core.Slides.visual_style_generation import (
     apply_visual_block_fallback,
@@ -189,7 +192,7 @@ class SlidesGenerator:
         *,
         llm_call: Callable[..., Any] | None = None,
     ) -> None:
-        self._llm_call = llm_call or perform_chat_api_call
+        self._llm_call = llm_call or partial(perform_chat_api_call, llm_surface="slides.generation")
 
     def generate_from_text(
         self,
@@ -432,8 +435,11 @@ class SlidesGenerator:
                 temperature=temperature,
                 max_tokens=max_tokens,
             )
+            raise_if_content_filtered(response)  # a refused answer is never parsed as slides
         except ProviderOverridePolicyError as exc:
             raise SlidesGenerationInputError(exc.policy_code) from None
+        except LLMPolicyRefusal:
+            raise  # the endpoint answers 400, a job fails without a retry
         except Exception as exc:
             logger.error("slides generation LLM call failed: {}", exc)
             raise SlidesGenerationError("llm_call_failed") from exc

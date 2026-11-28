@@ -12,7 +12,7 @@ from urllib.parse import urlsplit
 import httpx
 
 from tldw_Server_API.app.core import http_client as hc
-from tldw_Server_API.app.core.exceptions import EgressPolicyError, raise_detached_error
+from tldw_Server_API.app.core.exceptions import EgressPolicyError, LLMPolicyRefusal, raise_detached_error
 from tldw_Server_API.app.core.LLM_Calls.provider_config_resolution import TrustedProviderEndpoint
 from tldw_Server_API.app.core.MCP_unified.adapters.model_completion import normalization
 from tldw_Server_API.app.core.MCP_unified.interfaces.model_completion import (
@@ -21,13 +21,19 @@ from tldw_Server_API.app.core.MCP_unified.interfaces.model_completion import (
     ModelCompletionRequest,
     ModelFailureDomain,
 )
+from tldw_Server_API.app.core.Moderation.gateway_hooks import (
+    moderate_input_messages_for_surface,
+    moderate_output_text_for_surface,
+)
 from tldw_Server_API.app.core.Provider_Credentials.provider_credential_runtime import (
     ProviderCallCredentials,
     is_runtime_issued_provider_call_credentials,
 )
 from tldw_Server_API.app.core.Security.egress import ConfiguredEndpointScope
+from tldw_Server_API.app.core.Usage.llm_call_context import current_llm_user_id
 
 _T = TypeVar("_T")
+_SURFACE = "mcp.model_completion"
 _CAPABILITIES = ModelCompletionCapabilities(
     native_async_cancellation=True,
     response_limit_before_decode=True,
@@ -282,6 +288,16 @@ class OpenAICompletionTransport:
             "tools": None,
             self._policy.output_token_field: request.max_output_tokens,
         }
+        # No gateway here (R7): the user prompt is moderated before the POST. A refusal is a request-local
+        # failure like a quota refusal, so it cannot count against the shared transport.
+        try:
+            messages = moderate_input_messages_for_surface(
+                payload["messages"], surface=_SURFACE, user_id=current_llm_user_id()
+            )
+        except LLMPolicyRefusal:
+            _fail("model_policy_refused", ModelFailureDomain.REQUEST)
+        if messages is not payload["messages"]:
+            payload["messages"] = messages
         response_received = False
         response_rejected = False
 
@@ -374,8 +390,18 @@ class OpenAICompletionTransport:
             )
             phase = "normalize"
             result = normalization.normalize_model_completion_response(envelope, request)
-            if on_receipt is not None:
-                on_receipt(result.content)
+            phase = "moderate"
+            content, action = moderate_output_text_for_surface(
+                result.content, surface=_SURFACE, user_id=current_llm_user_id()
+            )
+            phase = "normalize"
+            if action == "block":
+                result = None
+                failure = ModelCompletionFailure("model_policy_refused", ModelFailureDomain.REQUEST)
+            else:
+                result = result if content == result.content else replace(result, content=content)
+                if on_receipt is not None:
+                    on_receipt(result.content)
         except asyncio.CancelledError as error:
             cancellation = error
         except EgressPolicyError:
@@ -392,6 +418,8 @@ class OpenAICompletionTransport:
                 failure = dispatch_failure
             elif phase == "normalize":
                 failure = ModelCompletionFailure("invalid_model_output", ModelFailureDomain.REQUEST)
+            elif phase == "moderate":  # the policy could not be resolved: fail closed, nothing is released
+                failure = ModelCompletionFailure("model_policy_refused", ModelFailureDomain.REQUEST)
             elif response_received:
                 failure = ModelCompletionFailure(
                     "model_response_rejected" if response_rejected else "model_response_invalid",

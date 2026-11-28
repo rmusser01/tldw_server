@@ -4,6 +4,7 @@ from typing import Any, Literal
 
 from loguru import logger
 
+from tldw_Server_API.app.core.exceptions import LLMPolicyRefusal
 from tldw_Server_API.app.core.RPG.errors import RPGError, RPGValidationError
 from tldw_Server_API.app.core.RPG.rules.answering import (
     RulesAnswerGenerator,
@@ -98,6 +99,8 @@ class RulesLookupService:
                         evidence=retrieval_items,
                         options=answer_options or RulesAnswerOptions(),
                     )
+                except LLMPolicyRefusal:
+                    raise  # a moderation refusal is the route's 400, not a null answer with a 200
                 except Exception as exc:  # noqa: BLE001
                     logger.warning("RPG rules answer generation failed: {}", type(exc).__name__)
                     answer_status = "generation_error"

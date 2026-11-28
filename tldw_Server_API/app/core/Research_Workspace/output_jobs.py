@@ -29,6 +29,7 @@ from tldw_Server_API.app.core.Workspaces.workspace_schemas import WorkspaceArtif
 from tldw_Server_API.app.core.exceptions import (
     FileArtifactsError,
     FileArtifactsValidationError,
+    LLMPolicyRefusal,
     ResearchWorkspaceOutputJobError,
     file_artifacts_http_status,
 )
@@ -620,8 +621,10 @@ async def _process_infographic_output_payload(
     }
 
 
-def _slides_generation_job_error(exc: SlidesGenerationError) -> ResearchWorkspaceOutputJobError:
+def _slides_generation_job_error(exc: SlidesGenerationError | LLMPolicyRefusal) -> ResearchWorkspaceOutputJobError:
     """Map slide generation failures onto stable output job errors."""
+    if isinstance(exc, LLMPolicyRefusal):  # moderation refused the deck: final, never retried
+        return ResearchWorkspaceOutputJobError("llm_policy_refused", retryable=False)
     if isinstance(exc, SlidesSourceTooLargeError):
         return ResearchWorkspaceOutputJobError("slides_source_too_large", retryable=False)
     if isinstance(exc, (SlidesGenerationInputError, SlidesGenerationOutputError)):
@@ -720,7 +723,7 @@ async def _process_video_overview_output_payload(
                 summary_tokens=None,
                 visual_style_snapshot=visual_style_snapshot,
             )
-        except SlidesGenerationError as exc:
+        except (SlidesGenerationError, LLMPolicyRefusal) as exc:
             raise _slides_generation_job_error(exc) from exc
         title = str(generated.get("title") or title).strip() or title
         slides = _normalize_video_overview_slides(generated.get("slides"))

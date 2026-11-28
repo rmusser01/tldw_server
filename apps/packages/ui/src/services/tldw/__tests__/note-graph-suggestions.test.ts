@@ -1194,6 +1194,7 @@ describe("Notes graph suggestion client", () => {
       "notes_graph_capabilities_changed_before_provider",
       "notes_graph_fingerprint_stale",
       "notes_graph_fts_not_ready",
+      "notes_graph_provider_policy_refused",
       "notes_graph_provider_retry_policy_unsupported",
       "notes_graph_provider_unavailable",
       "notes_graph_source_too_large",

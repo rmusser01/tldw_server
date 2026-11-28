@@ -13,6 +13,7 @@ import pytest
 from tldw_Server_API.app.core.Claims_Extraction import claims_rebuild_service, claims_service, ingestion_claims
 from tldw_Server_API.app.core.Claims_Extraction.claims_rebuild_service import ClaimsRebuildService, ClaimsRebuildTask
 from tldw_Server_API.app.core.exceptions import LLMQuotaExceededError
+from tldw_Server_API.app.core.LLM_Calls import gateway
 from tldw_Server_API.app.core.LLM_Calls.providers.base import ChatProvider
 from tldw_Server_API.app.core.Usage import llm_accounting
 from tldw_Server_API.app.core.Usage.llm_roots import llm_call_root
@@ -134,10 +135,8 @@ async def test_the_real_extractor_lets_a_quota_refusal_out(rows, monkeypatch) ->
     """The worker's refusal branch needs the refusal to escape ``extract_claims_for_chunks``, not become a provider_error fallback."""
     refuse_llm_calls(monkeypatch)
     registry = type("_Registry", (), {"get_adapter": lambda self, name: _Provider()})()
-    monkeypatch.setattr(ingestion_claims, "get_registry", lambda: registry)
-    monkeypatch.setattr(ingestion_claims, "ensure_app_config", lambda: {})
-    monkeypatch.setattr(ingestion_claims, "resolve_provider_model", lambda name, cfg: "m")
-    monkeypatch.setattr(ingestion_claims, "resolve_provider_api_key_from_config", lambda name, cfg: None)
+    monkeypatch.setattr(gateway, "_get_llm_registry", lambda: registry)  # extraction now calls the gateway (TASK-13950.27 PR I)
+    monkeypatch.setenv("OPENAI_API_KEY", "k")
 
     def _extract() -> list[dict[str, Any]]:
         """Run the real LLM extractor as a rebuild worker thread does."""

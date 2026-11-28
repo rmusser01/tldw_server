@@ -39,6 +39,7 @@ from tldw_Server_API.app.core.DB_Management.Automation_Message_Store_DB import (
     AutomationMessageStore,
 )
 from tldw_Server_API.app.core.DB_Management.Scheduled_Tasks_DB import DefinitionRow
+from tldw_Server_API.app.core.LLM_Calls.provider_results import raise_if_content_filtered
 from tldw_Server_API.app.core.Scheduled_Tasks.agent_task_jobs import (
     APPROVAL_REQUIRED_ERROR_PREFIX,
     _phase1_tools_requested,
@@ -264,7 +265,8 @@ async def _run_generation(definition: DefinitionRow, user_prompt: str) -> str:
     if target["model"]:
         call_kwargs["model"] = target["model"]
 
-    response = await perform_chat_api_call_async(**call_kwargs)
+    # extract_openai_content raises LLMPolicyRefusal on a blocked answer: the run fails, it is not retried.
+    response = await perform_chat_api_call_async(**call_kwargs, llm_surface="scheduled_tasks.automation")
     text = (extract_openai_content(response) or "").strip()
     if not text:
         raise RuntimeError("automation executor received an empty completion")
@@ -328,7 +330,8 @@ async def _envelope_llm_call(**kwargs: Any) -> Any:
     """LLM-call seam for the envelope loop (tests monkeypatch this)."""
     from tldw_Server_API.app.core.Chat.chat_service import perform_chat_api_call_async
 
-    return await perform_chat_api_call_async(**kwargs)
+    kwargs.pop("llm_surface", None)  # the surface is this module's, never the caller's
+    return await perform_chat_api_call_async(**kwargs, llm_surface="scheduled_tasks.automation")
 
 
 async def _envelope_execute_calls(**kwargs: Any) -> Any:
@@ -435,6 +438,7 @@ async def run_read_only_envelope(
             messages=messages, tools=presented.llm_tools,
             system_message=_definition_system_prompt(definition),
             max_tokens=resolve_execution_target(definition)["max_tokens"])
+        raise_if_content_filtered(response)  # a blocked answer is a refusal, not tool-free content
         message = (response.get("choices") or [{}])[0].get("message", {})
         tool_calls = message.get("tool_calls") or []
         content = (message.get("content") or "").strip()

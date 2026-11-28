@@ -21,7 +21,7 @@ from tldw_Server_API.app.core.Claims_Extraction.analyze_types import (
     AdjudicatorAnalyzeCallable,
 )
 from tldw_Server_API.app.core.Claims_Extraction.claims_engine import _run_bounded_claims_analyze
-from tldw_Server_API.app.core.exceptions import LLMQuotaExceededError
+from tldw_Server_API.app.core.exceptions import LLMPolicyRefusal, LLMQuotaExceededError
 from tldw_Server_API.app.core.RAG.rag_service.types import (
     Document,
     VerificationStatus,
@@ -230,8 +230,8 @@ class ClaimAdjudicator:
                         confidence=confidence,
                     )
                 )
-            except LLMQuotaExceededError:
-                raise  # the user's limit: not a document that could not be assessed
+            except (LLMQuotaExceededError, LLMPolicyRefusal):
+                raise  # a final refusal: not a document that could not be assessed
             except Exception as e:
                 logger.warning(f"Failed to assess document {doc.id}: {e}")
                 continue

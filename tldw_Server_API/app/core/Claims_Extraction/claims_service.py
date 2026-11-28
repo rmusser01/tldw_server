@@ -72,7 +72,8 @@ from tldw_Server_API.app.core.DB_Management.db_path_utils import get_user_media_
 from tldw_Server_API.app.core.DB_Management.media_db.api import managed_media_database
 from tldw_Server_API.app.core.DB_Management.scope_context import scoped_context
 from tldw_Server_API.app.core.DB_Management.Watchlists_DB import WatchlistsDatabase
-from tldw_Server_API.app.core.exceptions import EgressPolicyError, LLMQuotaExceededError, RetryExhaustedError
+from tldw_Server_API.app.core.exceptions import EgressPolicyError, LLMPolicyRefusal, LLMQuotaExceededError, RetryExhaustedError
+from tldw_Server_API.app.core.LLM_Calls.provider_results import raise_if_content_filtered
 from tldw_Server_API.app.core.Jobs.worker_utils import jobs_manager_from_env
 from tldw_Server_API.app.core.Jobs.resource_contracts import ResourceAdmission, ResourceAdmissionRequest, ResourceScope
 from tldw_Server_API.app.core.Jobs.resource_policy import resource_requirement_for
@@ -618,10 +619,11 @@ def _fva_claims_analyze_call(
             call_kwargs["topp"] = float(topp)
 
     try:
-        response = perform_chat_api_call(**call_kwargs)
+        response = perform_chat_api_call(**call_kwargs, llm_surface="claims.extraction")
+        raise_if_content_filtered(response)  # a refused answer is never parsed as claims or re-asked
         return coerce_llm_response_text(response)
-    except LLMQuotaExceededError:
-        raise  # the user's limit: not an empty reply for the verifier to score without the LLM
+    except (LLMQuotaExceededError, LLMPolicyRefusal):
+        raise  # the user's limit or a moderation refusal: not an empty reply for the verifier to score without the LLM
     except _CLAIMS_NONCRITICAL_EXCEPTIONS as exc:
         logger.warning(f"FVA analyze function failed: {exc}")
         return ""

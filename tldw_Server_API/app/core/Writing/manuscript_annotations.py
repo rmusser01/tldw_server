@@ -210,6 +210,7 @@ async def create_selected_text_review_annotation(
 ) -> dict[str, Any]:
     """Review selected scene text with an LLM and persist the resulting annotation."""
     from tldw_Server_API.app.core.Chat import chat_service as _chat_service
+    from tldw_Server_API.app.core.LLM_Calls.provider_results import raise_if_content_filtered
     from tldw_Server_API.app.core.Writing.manuscript_analysis import _extract_content
 
     messages = build_selected_text_review_prompt(
@@ -224,7 +225,8 @@ async def create_selected_text_review_annotation(
     if model:
         chat_kwargs["model"] = model
 
-    llm_response = await _chat_service.perform_chat_api_call_async(**chat_kwargs)
+    llm_response = await _chat_service.perform_chat_api_call_async(**chat_kwargs, llm_surface="writing.manuscript")
+    raise_if_content_filtered(llm_response)  # the endpoint answers 400, never stores the refusal text as an annotation
     raw_text = _extract_content(llm_response)
     review_annotation = parse_annotation_review_response(raw_text)[0]
     annotation_id = manuscript_db.create_annotation(

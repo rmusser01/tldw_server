@@ -16,7 +16,6 @@ from typing import Any
 
 from loguru import logger
 
-from tldw_Server_API.app.core.Chat.Chat_Deps import ChatConfigurationError
 from tldw_Server_API.app.core.Claims_Extraction.alignment import align_claim
 from tldw_Server_API.app.core.Claims_Extraction.budget_guard import (
     ClaimsJobBudget,
@@ -61,14 +60,9 @@ from tldw_Server_API.app.core.Claims_Extraction.runtime_config import (
 )
 from tldw_Server_API.app.core.config import settings as _settings
 from tldw_Server_API.app.core.Context_Integrity.prompt_loader import load_prompt
-from tldw_Server_API.app.core.LLM_Calls.adapter_registry import get_registry
-from tldw_Server_API.app.core.LLM_Calls.adapter_utils import (
-    ensure_app_config,
-    normalize_provider,
-    resolve_provider_api_key_from_config,
-    resolve_provider_model,
-    split_system_message,
-)
+from tldw_Server_API.app.core.LLM_Calls.adapter_utils import normalize_provider
+from tldw_Server_API.app.core.LLM_Calls.gateway import perform_chat_api_call
+from tldw_Server_API.app.core.LLM_Calls.provider_results import raise_if_content_filtered
 from tldw_Server_API.app.core.Usage.llm_call_context import capture_llm_call_state, run_with_llm_call_state
 
 try:
@@ -334,41 +328,16 @@ def extract_claims_for_chunks(
                     response_format=response_format,
                 )
 
-            adapter = get_registry().get_adapter(provider_name)
-            if adapter is not None:
-                app_config = ensure_app_config()
-                resolved_model = model_override or resolve_provider_model(provider_name, app_config)
-                if not resolved_model:
-                    raise ChatConfigurationError(
-                        provider=provider_name,
-                        message="Model is required for provider.",
-                    )
-                system_message, cleaned_messages = split_system_message(
-                    [{"role": "system", "content": system}] + messages if system else messages
-                )
-                request: dict[str, Any] = {
-                    "messages": cleaned_messages,
-                    "system_message": system_message,
-                    "model": resolved_model,
-                    "api_key": resolve_provider_api_key_from_config(provider_name, app_config),
-                    "temperature": temperature,
-                    "app_config": app_config,
-                }
-                if response_format is not None:
-                    request["response_format"] = response_format
-                return adapter.chat(request, timeout=timeout_sec)
-
-            from tldw_Server_API.app.core.Chat.chat_orchestrator import chat_api_call as _cac  # type: ignore
-
-            return _cac(
-                api_endpoint=provider,
-                messages_payload=messages,
-                api_key=None,
-                temp=temperature,
+            # The gateway runs the hooks, model validation and quota; it resolves the model and key from config.
+            return perform_chat_api_call(
+                api_provider=provider_name,
+                messages=messages,
                 system_message=system,
-                streaming=False,
                 model=model_override,
+                temperature=temperature,
                 response_format=response_format,
+                timeout=timeout_sec,
+                llm_surface="claims.extraction",
             )
 
         cost_estimate = estimate_claims_cost(
@@ -471,6 +440,7 @@ def extract_claims_for_chunks(
             logger.debug(f"LLM-based claim extraction failed ({current_mode}): {exc}")
             return []
 
+        raise_if_content_filtered(resp)  # a refused answer is neither parsed nor replaced by the heuristic fallback
         text = coerce_llm_response_text(resp)
         if budget is not None:
             budget.add_usage(tokens=estimate_claims_tokens(text))

@@ -25,6 +25,11 @@ from tldw_Server_API.app.core.LLM_Calls import provider_model_inventory
 from tldw_Server_API.app.core.LLM_Calls.anthropic_model_ids import canonical_anthropic_model_id
 from tldw_Server_API.app.core.LLM_Calls.capability_registry import ProviderCallPolicy
 from tldw_Server_API.app.core.LLM_Calls.provider_readiness import ModelDiscoveryResult
+from tldw_Server_API.app.core.Moderation.gateway_hooks import (
+    moderate_anthropic_request,
+    moderate_input_messages_for_surface,
+    moderate_output_text_for_surface,
+)
 from tldw_Server_API.app.core.Security.egress import ConfiguredEndpointScope
 from tldw_Server_API.app.core.Slides.standalone_html_config import (
     CLOSED_ADAPTER_CATALOG,
@@ -35,6 +40,7 @@ from tldw_Server_API.app.core.Slides.standalone_html_config import (
     ResolvedExecutionTarget,
     SlidesStandaloneHtmlConfig,
 )
+from tldw_Server_API.app.core.Usage.llm_call_context import current_llm_user_id
 
 _PROVIDER_JSON_MAX_DEPTH = 64
 _PROVIDER_JSON_MAX_TOKENS = 200_000
@@ -447,6 +453,36 @@ def _build_request(
     }
 
 
+_SURFACE = "slides.standalone_html"
+
+
+def _moderate_request(target: ResolvedExecutionTarget, payload: dict[str, Any]) -> dict[str, Any]:
+    """The payload to post: the same dict when nothing changes; a refusal is ``llm_policy_refused`` (R7).
+
+    This call has no gateway, so it moderates the user text itself: the source and options in ``user_content``.
+    The application-owned system prompt is not moderated, as for every surface.
+    """
+    user_id = current_llm_user_id()
+    try:
+        if target.provider == "anthropic":
+            return moderate_anthropic_request(payload, surface=_SURFACE, user_id=user_id)
+        messages = moderate_input_messages_for_surface(payload["messages"], surface=_SURFACE, user_id=user_id)
+    except Exception:  # noqa: BLE001 - a refusal, or a policy that could not be resolved: fail closed, terminal
+        _fail("llm_policy_refused")
+    return payload if messages is payload["messages"] else {**payload, "messages": messages}
+
+
+def _moderate_text(text: str) -> str:
+    """The generated document text: redacted, or a refusal. Unchanged and unevaluated when moderation is off."""
+    try:
+        moderated, action = moderate_output_text_for_surface(text, surface=_SURFACE, user_id=current_llm_user_id())
+    except Exception:  # noqa: BLE001 - the policy could not be resolved: fail closed, terminal, not a retried worker error
+        _fail("llm_policy_refused")
+    if action == "block":
+        _fail("llm_policy_refused")
+    return moderated
+
+
 def _extract_text(decoded: object, target: ResolvedExecutionTarget) -> str:
     if not isinstance(decoded, dict):
         _fail("standalone_html_provider_response_invalid")
@@ -609,6 +645,7 @@ async def _request_once(
                     provider_api_key=provider_api_key,
                     max_output_tokens=limits.max_output_tokens,
                 )
+            payload = _moderate_request(target, payload)
             request_timeout = _provider_timeout(current)
             current = _verify_current_target(target, current)
             return await _consume_response(
@@ -688,7 +725,7 @@ async def _consume_response(
         _fail("standalone_html_provider_http_error", status_code=status)
     preflight.finish()
     decoded = _strict_json_loads(bytes(body))
-    text = _extract_text(decoded, target)
+    text = _moderate_text(_extract_text(decoded, target))
     return _document_bytes(text, max_document_bytes=document_limit)
 
 

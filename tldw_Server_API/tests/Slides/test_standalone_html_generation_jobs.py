@@ -2830,6 +2830,8 @@ async def test_commit_transaction_independently_rejects_concurrent_input_time_ta
     [
         ("standalone_html_provider_response_invalid", False, "standalone_html_provider_response_invalid"),
         ("standalone_html_provider_timeout", True, "generation_quarantined"),
+        # A moderation refusal is terminal on its first attempt: failed, never reset to queued for a retry (TASK-13950.27 PR I).
+        ("llm_policy_refused", False, "llm_policy_refused"),
     ],
 )
 @pytest.mark.asyncio

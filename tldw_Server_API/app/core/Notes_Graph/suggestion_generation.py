@@ -11,8 +11,10 @@ from dataclasses import dataclass, field, replace
 from typing import Any, Literal
 
 from tldw_Server_API.app.core.Chat.chat_service import perform_chat_api_call_async
+from tldw_Server_API.app.core.exceptions import LLMPolicyRefusal
 from tldw_Server_API.app.core.LLM_Calls import adapter_registry
 from tldw_Server_API.app.core.LLM_Calls.capability_registry import ProviderCallPolicy
+from tldw_Server_API.app.core.LLM_Calls.provider_results import raise_if_content_filtered
 from tldw_Server_API.app.core.LLM_Calls.structured_generation import (
     StructuredGenerationCapabilityError,
     negotiate_structured_response_mode,
@@ -790,7 +792,10 @@ async def generate_suggestions_once(
     if response_format is not None:
         call_args["response_format"] = response_format
     try:
-        response = await perform_chat_api_call_async(**call_args)
+        response = await perform_chat_api_call_async(**call_args, llm_surface="notes.graph_suggestions")
+        raise_if_content_filtered(response)
+    except LLMPolicyRefusal:
+        raise SuggestionGenerationError("notes_graph_provider_policy_refused") from None
     except Exception:  # noqa: BLE001 - translate every provider SDK failure safely
         raise SuggestionGenerationError("notes_graph_provider_call_failed") from None
     response_text = _response_text(response)

@@ -38,6 +38,7 @@ class SuggestionErrorCode(str, Enum):
     JOB_CONTRACT_INVALID = "notes_graph_job_contract_invalid"
     JOB_MISSING = "notes_graph_job_missing"
     JOB_RESULT_CONTRACT_INVALID = "notes_graph_job_result_contract_invalid"
+    PROVIDER_POLICY_REFUSED = "notes_graph_provider_policy_refused"
     PROVIDER_RETRY_POLICY_UNSUPPORTED = "notes_graph_provider_retry_policy_unsupported"
     PROVIDER_UNAVAILABLE = "notes_graph_provider_unavailable"
     PUBLICATION_RECEIPT_MISMATCH = "notes_graph_publication_receipt_mismatch"
