@@ -24,7 +24,9 @@ from tldw_Server_API.app.core.Sync_Contracts.notes_moodboard_studio_contract imp
 )
 
 
-def _web_clipper_v56_rekey_plan(rows: list[Any]) -> list[tuple[str, str, str]]:
+def _web_clipper_v56_rekey_plan(
+    rows: list[Any], *, allow_separate_ids: bool = False,
+) -> list[tuple[str, str, str]]:
     """Validate legacy clip mappings and return ``(clip, old, new)`` rekeys."""
     plan: list[tuple[str, str, str]] = []
     targets: set[str] = set()
@@ -33,11 +35,15 @@ def _web_clipper_v56_rekey_plan(rows: list[Any]) -> list[tuple[str, str, str]]:
         note_id = str(row["note_id"])
         if row["existing_note_id"] is None:
             raise SchemaError(f"WebClipper mapping '{clip_id}' references a missing note.")  # noqa: TRY003
-        if clip_id != note_id:
+        if clip_id != note_id and not allow_separate_ids:
             raise SchemaError(f"WebClipper v55 mapping '{clip_id}' has inconsistent identities.")  # noqa: TRY003
         try:
             parsed = uuid.UUID(note_id)
         except ValueError:
+            if clip_id != note_id:
+                raise SchemaError(  # noqa: TRY003
+                    f"WebClipper mapping '{clip_id}' requires a canonical note ID."
+                ) from None
             digest = hashlib.sha256(
                 f"web-clipper-migration:notes.note:{clip_id}".encode()
             ).hexdigest()

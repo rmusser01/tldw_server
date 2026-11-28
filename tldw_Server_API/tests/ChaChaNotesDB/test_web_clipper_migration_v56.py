@@ -512,12 +512,14 @@ class _OwnerAwareMigrationBackend:
             return QueryResult(
                 rows=[
                     {
+                        "table_name": table_name,
                         "relrowsecurity": True,
                         "relforcerowsecurity": self.forced_rls,
                         "is_schema_owner": True,
                     }
+                    for table_name in params[0]
                 ],
-                rowcount=1,
+                rowcount=len(params[0]),
             )
         if "AS invalid_owner_count" in statement:
             return QueryResult(rows=[{"invalid_owner_count": self.invalid_owner_count}], rowcount=1)
@@ -537,34 +539,44 @@ class _OwnerAwareMigrationBackend:
             return QueryResult(rows=rows, rowcount=len(rows))
         if "c.confrelid = 'notes'::regclass" in statement:
             return QueryResult(rows=[], rowcount=0)
-        if "FROM pg_constraint c" in statement and "note_clipper_workspace_placements" in statement:
+        if "FROM pg_constraint c" in statement and params == ("note_clipper_workspace_placements",):
             return QueryResult(
                 rows=[
                     {
                         "conname": "note_clipper_workspace_placements_pkey",
                         "contype": "p",
+                        "immediate_valid": True,
                         "definition": "PRIMARY KEY (clip_id, workspace_id)",
                         "columns": ["clip_id", "workspace_id"],
                     },
                     {
                         "conname": "note_clipper_workspace_placements_clip_id_fkey",
                         "contype": "f",
+                        "immediate_valid": True,
                         "definition": (
                             "FOREIGN KEY (clip_id) REFERENCES note_clipper_documents(clip_id) ON UPDATE CASCADE"
                         ),
                         "columns": ["clip_id"],
+                        "references_documents": True,
+                        "cascades": True,
+                        "referenced_columns": ["clip_id"],
                     },
                 ],
                 rowcount=2,
             )
-        if "FROM pg_constraint c" in statement and "note_clipper_documents" in statement:
+        if "FROM pg_constraint c" in statement and params == ("note_clipper_documents",):
             return QueryResult(
                 rows=[
                     {
                         "conname": "note_clipper_documents_clip_id_fkey",
                         "contype": "f",
+                        "immediate_valid": True,
                         "definition": "FOREIGN KEY (clip_id) REFERENCES notes(id) ON UPDATE CASCADE",
                         "columns": ["clip_id"],
+                        "references_notes": True,
+                        "cascades": True,
+                        "referenced_columns": ["id"],
+                        "update_cascades": True,
                     },
                     {
                         "conname": "note_clipper_documents_check",
@@ -575,20 +587,26 @@ class _OwnerAwareMigrationBackend:
                     {
                         "conname": "note_clipper_documents_pkey",
                         "contype": "p",
+                        "immediate_valid": True,
                         "definition": "PRIMARY KEY (clip_id)",
                         "columns": ["clip_id"],
                     },
                     {
                         "conname": "note_clipper_documents_note_id_key",
                         "contype": "u",
+                        "immediate_valid": True,
                         "definition": "UNIQUE (note_id)",
                         "columns": ["note_id"],
                     },
                     {
                         "conname": "note_clipper_documents_note_id_fkey",
                         "contype": "f",
+                        "immediate_valid": True,
                         "definition": "FOREIGN KEY (note_id) REFERENCES notes(id) ON UPDATE CASCADE",
                         "columns": ["note_id"],
+                        "references_notes": True,
+                        "referenced_columns": ["id"],
+                        "update_cascades": True,
                     },
                 ],
                 rowcount=5,
@@ -622,9 +640,9 @@ def test_postgres_v55_to_v56_locks_before_preflight_and_restores_forced_rls() ->
 
     lock_index = _migration_statement_index(backend, "LOCK TABLE")
     rls_state_index = _migration_statement_index(backend, "relforcerowsecurity")
-    no_force_index = _migration_statement_index(backend, "ALTER TABLE notes NO FORCE ROW LEVEL SECURITY")
+    no_force_index = _migration_statement_index(backend, 'ALTER TABLE "notes" NO FORCE ROW LEVEL SECURITY')
     mapping_read_index = _migration_statement_index(backend, "FROM note_clipper_documents d")
-    force_index = _migration_statement_index(backend, "ALTER TABLE notes FORCE ROW LEVEL SECURITY")
+    force_index = _migration_statement_index(backend, 'ALTER TABLE "notes" FORCE ROW LEVEL SECURITY')
     version_index = _migration_statement_index(backend, "INSERT INTO db_schema_version")
 
     lock_sql = " ".join(backend.statements[lock_index][0].split())
@@ -751,95 +769,33 @@ def test_get_postgres_schema_version_can_lock_initializer_row() -> None:
     assert "FOR UPDATE" in backend.statement
 
 
-def test_postgres_v55_to_v56_removes_legacy_identity_constraints_and_advances_version() -> None:
-    class _FakePostgresBackend:
-        backend_type = BackendType.POSTGRESQL
-
-        def __init__(self) -> None:
-            self.statements: list[tuple[str, object]] = []
-
-        def table_exists(self, table_name: str, connection=None) -> bool:
-            return table_name in {
-                "note_clipper_documents",
-                "note_clipper_workspace_placements",
-                "notes",
-                "sync_log",
-            }
-
+def test_postgres_v55_to_v56_refuses_hidden_non_cascading_note_references() -> None:
+    class _FilteredReferenceBackend(_OwnerAwareMigrationBackend):
         def execute(self, statement: str, params=None, connection=None) -> QueryResult:
-            self.statements.append((statement, params))
-            if "relrowsecurity" in statement and "relforcerowsecurity" in statement:
+            if "row_security_active(c.conrelid::regclass)" in statement:
                 return QueryResult(
-                    rows=[
-                        {
-                            "relrowsecurity": True,
-                            "relforcerowsecurity": False,
-                            "is_schema_owner": True,
-                        }
-                    ],
+                    rows=[{
+                        "table_schema": "public",
+                        "table_name": "private_note_references",
+                        "column_name": "note_id",
+                        "on_update": "n",
+                        "rls_filters_reference": True,
+                    }],
                     rowcount=1,
                 )
-            if "FROM note_clipper_documents d" in statement:
-                return QueryResult(rows=[], rowcount=0)
-            if "FROM pg_constraint c" in statement and "note_clipper_workspace_placements" in statement:
-                return QueryResult(
-                    rows=[
-                        {
-                            "conname": "note_clipper_workspace_placements_pkey",
-                            "contype": "p",
-                            "definition": "PRIMARY KEY (clip_id, workspace_id)",
-                            "columns": ["clip_id", "workspace_id"],
-                        },
-                        {
-                            "conname": "note_clipper_workspace_placements_clip_id_fkey",
-                            "contype": "f",
-                            "definition": (
-                                "FOREIGN KEY (clip_id) REFERENCES note_clipper_documents(clip_id) ON UPDATE CASCADE"
-                            ),
-                            "columns": ["clip_id"],
-                        },
-                    ],
-                    rowcount=2,
-                )
-            if "FROM pg_constraint c" in statement and "note_clipper_documents" in statement:
-                return QueryResult(
-                    rows=[
-                        {
-                            "conname": "note_clipper_documents_clip_id_fkey",
-                            "contype": "f",
-                            "definition": "FOREIGN KEY (clip_id) REFERENCES notes(id) ON UPDATE CASCADE",
-                            "columns": ["clip_id"],
-                        },
-                        {
-                            "conname": "note_clipper_documents_check",
-                            "contype": "c",
-                            "definition": "CHECK ((clip_id = note_id))",
-                            "columns": ["clip_id", "note_id"],
-                        },
-                        {
-                            "conname": "note_clipper_documents_pkey",
-                            "contype": "p",
-                            "definition": "PRIMARY KEY (clip_id)",
-                            "columns": ["clip_id"],
-                        },
-                        {
-                            "conname": "note_clipper_documents_note_id_key",
-                            "contype": "u",
-                            "definition": "UNIQUE (note_id)",
-                            "columns": ["note_id"],
-                        },
-                        {
-                            "conname": "note_clipper_documents_note_id_fkey",
-                            "contype": "f",
-                            "definition": "FOREIGN KEY (note_id) REFERENCES notes(id) ON UPDATE CASCADE",
-                            "columns": ["note_id"],
-                        },
-                    ],
-                    rowcount=5,
-                )
-            return QueryResult(rows=[], rowcount=0)
+            return super().execute(statement, params, connection)
 
-    backend = _FakePostgresBackend()
+    db = CharactersRAGDB.__new__(CharactersRAGDB)
+    db._local = type("Local", (), {})()
+    db._backend = _FilteredReferenceBackend(legacy_row=True)
+    db._uses_shared_content_backend = False
+
+    with pytest.raises(SchemaError, match="non-cascading WebClipper note references.*under RLS"):
+        postgres_steps._migrate_from_v55_to_v56_postgres(db.ctx, object())
+
+
+def test_postgres_v55_to_v56_removes_legacy_identity_constraints_and_advances_version() -> None:
+    backend = _OwnerAwareMigrationBackend(forced_rls=False)
     db = CharactersRAGDB.__new__(CharactersRAGDB)
     db._local = type("Local", (), {})()
     db._backend = backend
@@ -857,39 +813,11 @@ def test_postgres_v55_to_v56_removes_legacy_identity_constraints_and_advances_ve
 
 
 def test_postgres_v55_to_v56_fails_closed_without_durable_note_mapping_constraints() -> None:
-    class _IncompletePostgresBackend:
-        backend_type = BackendType.POSTGRESQL
-
-        def table_exists(self, table_name: str, connection=None) -> bool:
-            return True
-
+    class _IncompletePostgresBackend(_OwnerAwareMigrationBackend):
         def execute(self, statement: str, params=None, connection=None) -> QueryResult:
-            if "relrowsecurity" in statement and "relforcerowsecurity" in statement:
-                return QueryResult(
-                    rows=[
-                        {
-                            "relrowsecurity": True,
-                            "relforcerowsecurity": False,
-                            "is_schema_owner": True,
-                        }
-                    ],
-                    rowcount=1,
-                )
-            if "FROM note_clipper_documents d" in statement:
+            if "FROM pg_constraint c" in statement and params == ("note_clipper_documents",):
                 return QueryResult(rows=[], rowcount=0)
-            if "FROM pg_constraint c" in statement and "note_clipper_documents" in statement:
-                return QueryResult(
-                    rows=[
-                        {
-                            "conname": "note_clipper_documents_clip_id_fkey",
-                            "contype": "f",
-                            "definition": "FOREIGN KEY (clip_id) REFERENCES notes(id) ON UPDATE CASCADE",
-                            "columns": ["clip_id"],
-                        }
-                    ],
-                    rowcount=1,
-                )
-            return QueryResult(rows=[], rowcount=0)
+            return super().execute(statement, params, connection)
 
     db = CharactersRAGDB.__new__(CharactersRAGDB)
     db._local = type("Local", (), {})()

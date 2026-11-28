@@ -77,6 +77,143 @@ def _migrate_from_v54_to_v55_postgres(ctx, conn: Any) -> None:
     postgres_schema._set_schema_version_postgres(ctx, conn, 55)
 
 
+def _web_clipper_v56_unforce_rls(backend: Any, conn: Any, locked_tables: list[str]) -> list[str]:
+    """Allow the verified table owner to inspect every tenant during the migration."""
+    states = backend.execute(
+        """
+            SELECT table_row.relname AS table_name,
+                   table_row.relrowsecurity,
+                   table_row.relforcerowsecurity,
+                   table_row.relowner = current_user::regrole AS is_schema_owner
+              FROM unnest(%s::text[]) AS requested(table_name)
+              JOIN pg_class AS table_row ON table_row.oid = to_regclass(requested.table_name)
+             WHERE table_row.relkind IN ('r', 'p')
+            """,
+        (locked_tables,),
+        connection=conn,
+    ).rows
+    by_table = {row["table_name"]: row for row in states}
+    if set(by_table) != set(locked_tables) or any(not row["is_schema_owner"] for row in states):
+        raise SchemaError(  # noqa: TRY003
+            "WebClipper v56 requires the verified PostgreSQL schema-owner migration path."
+        )
+
+    forced_tables: list[str] = []
+    for table_name in locked_tables:
+        state = by_table[table_name]
+        if not state["relforcerowsecurity"]:
+            continue
+        if not state["relrowsecurity"]:
+            raise SchemaError(f"PostgreSQL RLS state cannot be verified for {table_name}.")  # noqa: TRY003
+        quoted_table = postgres_schema._quoted_postgres_identifier(table_name)
+        backend.execute(f"ALTER TABLE {quoted_table} NO FORCE ROW LEVEL SECURITY", connection=conn)  # nosec B608
+        forced_tables.append(table_name)
+    return forced_tables
+
+
+def _web_clipper_v56_pg_constraints(backend: Any, conn: Any, table_name: str) -> list[Any]:
+    """Read local and referenced key columns in their declared order."""
+    return backend.execute(
+        """
+            SELECT c.conname,
+                   c.contype,
+                   pg_get_constraintdef(c.oid) AS definition,
+                   c.confrelid = to_regclass('notes') AS references_notes,
+                   c.confrelid = to_regclass('note_clipper_documents') AS references_documents,
+                   c.confupdtype = 'c' AS update_cascades,
+                   (c.confupdtype = 'c' AND c.confdeltype = 'c' AND c.confmatchtype = 's') AS cascades,
+                   (c.convalidated AND NOT c.condeferrable) AS immediate_valid,
+                   ARRAY(
+                     SELECT a.attname
+                       FROM unnest(c.conkey) WITH ORDINALITY AS key(attnum, ord)
+                       JOIN pg_attribute a
+                         ON a.attrelid = c.conrelid AND a.attnum = key.attnum
+                      ORDER BY key.ord
+                   ) AS columns,
+                   ARRAY(
+                     SELECT a.attname
+                       FROM unnest(c.confkey) WITH ORDINALITY AS key(attnum, ord)
+                       JOIN pg_attribute a
+                         ON a.attrelid = c.confrelid AND a.attnum = key.attnum
+                      ORDER BY key.ord
+                   ) AS referenced_columns
+              FROM pg_constraint c
+             WHERE c.conrelid = to_regclass(%s)
+            """,
+        (table_name,),
+        connection=conn,
+    ).rows
+
+
+def _web_clipper_v56_identity_constraints(
+    backend: Any, conn: Any, has_placements: bool,
+) -> tuple[bool, list[str], list[str]]:
+    """Verify the supported layouts and identify the keys replaced by v56."""
+    documents = _web_clipper_v56_pg_constraints(backend, conn, "note_clipper_documents")
+    clip_primary_keys = {("clip_id",), ("client_id", "clip_id")}
+    note_unique_keys = {("note_id",), ("client_id", "note_id")}
+    primary_key_shapes = {
+        tuple(row["columns"]) for row in documents if row["contype"] == "p" and row["immediate_valid"]
+    }
+    has_unique_note_id = any(
+        row["contype"] == "u" and row["immediate_valid"] and tuple(row["columns"]) in note_unique_keys
+        for row in documents
+    )
+    has_cascading_note_fk = any(
+        row["contype"] == "f" and row["columns"] == ["note_id"] and row["references_notes"]
+        and row["referenced_columns"] == ["id"] and row["update_cascades"] and row["immediate_valid"]
+        for row in documents
+    )
+    if not (primary_key_shapes & clip_primary_keys and has_unique_note_id and has_cascading_note_fk):
+        raise SchemaError("WebClipper durable note mapping constraints cannot be verified.")  # noqa: TRY003
+
+    document_drops: list[str] = []
+    for row in documents:
+        constraint_type = row["contype"]
+        columns = tuple(row["columns"])
+        definition = row["definition"].replace('"', "")
+        is_legacy_clip_fk = constraint_type == "f" and columns == ("clip_id",)
+        if is_legacy_clip_fk and not (
+            row["references_notes"] and row["referenced_columns"] == ["id"]
+            and row["cascades"] and row["immediate_valid"]
+        ):
+            raise SchemaError("WebClipper clip_id has an unverifiable PostgreSQL reference.")  # noqa: TRY003
+        is_legacy_identity_check = constraint_type == "c" and bool(
+            re.fullmatch(r"CHECK\s*\(+\s*(?:clip_id\s*=\s*note_id|note_id\s*=\s*clip_id)\s*\)+", definition)
+        )
+        if (
+            constraint_type == "c"
+            and "clip_id" in definition
+            and "note_id" in definition
+            and not is_legacy_identity_check
+        ):
+            raise SchemaError("WebClipper identity check constraint cannot be verified.")  # noqa: TRY003
+        if (
+            is_legacy_clip_fk or is_legacy_identity_check
+            or (constraint_type == "p" and row["immediate_valid"] and columns in clip_primary_keys)
+            or (constraint_type == "u" and row["immediate_valid"] and columns in note_unique_keys)
+        ):
+            document_drops.append(row["conname"])
+
+    placement_drops: list[str] = []
+    if has_placements:
+        placements = _web_clipper_v56_pg_constraints(backend, conn, "note_clipper_workspace_placements")
+        placement_keys = [
+            row["conname"] for row in placements if row["contype"] == "p" and row["immediate_valid"]
+            and tuple(row["columns"]) in {("clip_id", "workspace_id"), ("client_id", "clip_id", "workspace_id")}
+        ]
+        document_fks = [
+            row["conname"] for row in placements
+            if row["contype"] == "f" and row["references_documents"] and row["cascades"]
+            and row["immediate_valid"] and tuple(row["columns"]) in clip_primary_keys
+            and row["referenced_columns"] == row["columns"]
+        ]
+        if not (placement_keys and document_fks):
+            raise SchemaError("WebClipper placement constraints cannot be verified.")  # noqa: TRY003
+        placement_drops = document_fks + placement_keys
+    return ("client_id", "clip_id") in primary_key_shapes, document_drops, placement_drops
+
+
 def _migrate_from_v55_to_v56_postgres(ctx, conn: Any) -> None:
     """Owner-scope and rekey WebClipper rows in one serialized transaction."""
     backend = ctx.backend
@@ -102,29 +239,7 @@ def _migrate_from_v55_to_v56_postgres(ctx, conn: Any) -> None:
         connection=conn,
     )
 
-    rls_state = backend.execute(
-        """
-            SELECT notes_table.relrowsecurity,
-                   notes_table.relforcerowsecurity,
-                   notes_table.relowner = current_user::regrole AS is_schema_owner
-              FROM pg_class notes_table
-             WHERE notes_table.oid = 'notes'::regclass
-            """,
-        connection=conn,
-    ).first
-    if rls_state is None or not bool(rls_state.get("is_schema_owner")):
-        raise SchemaError(  # noqa: TRY003
-            "WebClipper v56 requires the verified PostgreSQL schema-owner migration path."
-        )
-    rls_enabled = bool(rls_state.get("relrowsecurity"))
-    rls_forced = bool(rls_state.get("relforcerowsecurity"))
-    if rls_forced and not rls_enabled:
-        raise SchemaError("PostgreSQL notes RLS state cannot be verified.")  # noqa: TRY003
-    if rls_forced:
-        backend.execute(
-            "ALTER TABLE notes NO FORCE ROW LEVEL SECURITY",
-            connection=conn,
-        )
+    forced_rls_tables = _web_clipper_v56_unforce_rls(backend, conn, lock_tables)
 
     backend.execute(
         "ALTER TABLE note_clipper_documents ADD COLUMN IF NOT EXISTS client_id TEXT",
@@ -166,6 +281,7 @@ def _migrate_from_v55_to_v56_postgres(ctx, conn: Any) -> None:
                   FROM note_clipper_workspace_placements placement
                   LEFT JOIN note_clipper_documents document
                     ON document.clip_id = placement.clip_id
+                   AND document.note_id = placement.source_note_id
                   LEFT JOIN notes owner_note
                     ON owner_note.id = document.note_id
                   LEFT JOIN notes source_note
@@ -174,7 +290,6 @@ def _migrate_from_v55_to_v56_postgres(ctx, conn: Any) -> None:
                     ON workspace.id = placement.workspace_id
                  WHERE document.clip_id IS NULL
                     OR owner_note.id IS NULL
-                    OR placement.source_note_id IS DISTINCT FROM document.note_id
                     OR source_note.client_id IS DISTINCT FROM owner_note.client_id
                     OR workspace.client_id IS DISTINCT FROM owner_note.client_id
                     OR (
@@ -193,6 +308,9 @@ def _migrate_from_v55_to_v56_postgres(ctx, conn: Any) -> None:
                 "Cannot migrate WebClipper placements: owner relationships are invalid."
             )
 
+    owner_scoped, document_drops, placement_drops = _web_clipper_v56_identity_constraints(
+        backend, conn, has_placements,
+    )
     rows = backend.execute(
         """
             SELECT document.clip_id,
@@ -205,13 +323,10 @@ def _migrate_from_v55_to_v56_postgres(ctx, conn: Any) -> None:
             """,
         connection=conn,
     ).rows
-    plan = migration_support._web_clipper_v56_rekey_plan(rows)
-    owner_by_clip_id = {
-        str(row["clip_id"]): str(row["owner_client_id"])
-        for row in rows
-    }
+    plan = migration_support._web_clipper_v56_rekey_plan(rows, allow_separate_ids=owner_scoped)
+    owner_by_note_id = {str(row["note_id"]): str(row["owner_client_id"]) for row in rows}
     old_ids = [old_id for _, old_id, _ in plan]
-    for clip_id, _, replacement in plan:
+    for _, old_id, replacement in plan:
         collision = backend.execute(
             "SELECT 1 FROM notes WHERE id = %s LIMIT 1",
             (replacement,),
@@ -219,7 +334,7 @@ def _migrate_from_v55_to_v56_postgres(ctx, conn: Any) -> None:
         ).first
         if collision:
             raise SchemaError(f"WebClipper note rekey target '{replacement}' already exists.")  # noqa: TRY003
-        owner_client_id = owner_by_clip_id[clip_id]
+        owner_client_id = owner_by_note_id[old_id]
         sync_log_collision = backend.execute(
             "SELECT 1 FROM sync_log "
             "WHERE client_id = %s AND entity = %s AND entity_id = %s LIMIT 1",
@@ -267,7 +382,8 @@ def _migrate_from_v55_to_v56_postgres(ctx, conn: Any) -> None:
                        ns.nspname AS table_schema,
                        rel.relname AS table_name,
                        att.attname AS column_name,
-                       c.confupdtype AS on_update
+                       c.confupdtype AS on_update,
+                       row_security_active(c.conrelid::regclass) AS rls_filters_reference
                   FROM pg_constraint c
                   JOIN pg_class rel ON rel.oid = c.conrelid
                   JOIN pg_namespace ns ON ns.oid = rel.relnamespace
@@ -279,11 +395,17 @@ def _migrate_from_v55_to_v56_postgres(ctx, conn: Any) -> None:
             connection=conn,
         ).rows
         for foreign_key in foreign_keys:
-            if str(foreign_key["on_update"]) == "c":
+            on_update = foreign_key["on_update"]
+            if on_update == "c":
                 continue
             schema_name = str(foreign_key["table_schema"])
             table_name = str(foreign_key["table_name"])
             column_name = str(foreign_key["column_name"])
+            # SET NULL and SET DEFAULT can rewrite rows that RLS hides from the preflight.
+            if on_update in {"n", "d"} and foreign_key["rls_filters_reference"]:
+                raise SchemaError(  # noqa: TRY003
+                    f"Cannot verify non-cascading WebClipper note references in {schema_name}.{table_name} under RLS."
+                )
             qualified_table = (
                 f"{postgres_schema._quoted_postgres_identifier(schema_name)}."
                 f"{postgres_schema._quoted_postgres_identifier(table_name)}"
@@ -301,137 +423,16 @@ def _migrate_from_v55_to_v56_postgres(ctx, conn: Any) -> None:
                         f"from {table_name}.{column_name}."
                     )
 
-    constraints = backend.execute(
-        """
-            SELECT c.conname,
-                   c.contype,
-                   pg_get_constraintdef(c.oid) AS definition,
-                   ARRAY(
-                     SELECT a.attname
-                       FROM unnest(c.conkey) WITH ORDINALITY AS key(attnum, ord)
-                       JOIN pg_attribute a
-                         ON a.attrelid = c.conrelid AND a.attnum = key.attnum
-                      ORDER BY key.ord
-                   ) AS columns
-              FROM pg_constraint c
-             WHERE c.conrelid = 'note_clipper_documents'::regclass
-            """,
-        connection=conn,
-    ).rows
-    has_clip_primary_key = any(
-        str(constraint["contype"]) == "p"
-        and [str(column) for column in (constraint.get("columns") or [])] == ["clip_id"]
-        for constraint in constraints
-    )
-    has_unique_note_id = any(
-        str(constraint["contype"]) == "u"
-        and [str(column) for column in (constraint.get("columns") or [])] == ["note_id"]
-        for constraint in constraints
-    )
-    has_cascading_note_fk = any(
-        str(constraint["contype"]) == "f"
-        and [str(column) for column in (constraint.get("columns") or [])] == ["note_id"]
-        and re.search(
-            r"REFERENCES\s+(?:\w+\.)?notes\s*\(",
-            str(constraint.get("definition") or "").replace('"', ""),
-            re.IGNORECASE,
-        )
-        and "ON UPDATE CASCADE" in str(constraint.get("definition") or "").upper()
-        for constraint in constraints
-    )
-    if not (has_clip_primary_key and has_unique_note_id and has_cascading_note_fk):
-        raise SchemaError("WebClipper durable note mapping constraints cannot be verified.")  # noqa: TRY003
-
-    placement_constraints: list[Any] = []
-    if has_placements:
-        placement_constraints = backend.execute(
-            """
-                SELECT c.conname,
-                       c.contype,
-                       pg_get_constraintdef(c.oid) AS definition,
-                       ARRAY(
-                         SELECT a.attname
-                           FROM unnest(c.conkey) WITH ORDINALITY AS key(attnum, ord)
-                           JOIN pg_attribute a
-                             ON a.attrelid = c.conrelid AND a.attnum = key.attnum
-                          ORDER BY key.ord
-                       ) AS columns
-                  FROM pg_constraint c
-                 WHERE c.conrelid = 'note_clipper_workspace_placements'::regclass
-                """,
-            connection=conn,
-        ).rows
-        has_placement_primary_key = any(
-            str(constraint["contype"]) == "p"
-            and [str(column) for column in (constraint.get("columns") or [])]
-            == ["clip_id", "workspace_id"]
-            for constraint in placement_constraints
-        )
-        has_document_fk = any(
-            str(constraint["contype"]) == "f"
-            and [str(column) for column in (constraint.get("columns") or [])] == ["clip_id"]
-            and "REFERENCES note_clipper_documents" in str(
-                constraint.get("definition") or ""
-            ).replace('"', "")
-            for constraint in placement_constraints
-        )
-        if not (has_placement_primary_key and has_document_fk):
-            raise SchemaError("WebClipper placement constraints cannot be verified.")  # noqa: TRY003
-
-    for constraint in placement_constraints:
-        constraint_type = str(constraint["contype"])
-        columns = [str(column) for column in (constraint.get("columns") or [])]
-        definition = str(constraint.get("definition") or "").replace('"', "")
-        if not (
-            (constraint_type == "p" and columns == ["clip_id", "workspace_id"])
-            or (
-                constraint_type == "f"
-                and columns == ["clip_id"]
-                and "REFERENCES note_clipper_documents" in definition
-            )
-        ):
-            continue
-        backend.execute(
-            "ALTER TABLE note_clipper_workspace_placements DROP CONSTRAINT "
-            f"{postgres_schema._quoted_postgres_identifier(str(constraint['conname']))}",  # nosec B608
-            connection=conn,
-        )
-
-    for constraint in constraints:
-        constraint_name = str(constraint["conname"])
-        constraint_type = str(constraint["contype"])
-        definition = str(constraint.get("definition") or "")
-        columns = [str(column) for column in (constraint.get("columns") or [])]
-        normalized_definition = definition.replace('"', "")
-        is_clip_fk = constraint_type == "f" and columns == ["clip_id"]
-        is_legacy_clip_fk = is_clip_fk and bool(
-            re.search(r"REFERENCES\s+(?:\w+\.)?notes\s*\(", normalized_definition, re.IGNORECASE)
-        )
-        if is_clip_fk and not is_legacy_clip_fk:
-            raise SchemaError("WebClipper clip_id has an unverifiable PostgreSQL reference.")  # noqa: TRY003
-        is_legacy_identity_check = constraint_type == "c" and bool(
-            re.search(
-                r"(?:clip_id\s*=\s*note_id|note_id\s*=\s*clip_id)",
-                normalized_definition,
-            )
-        )
-        if (
-            constraint_type == "c"
-            and "clip_id" in normalized_definition
-            and "note_id" in normalized_definition
-            and not is_legacy_identity_check
-        ):
-            raise SchemaError("WebClipper identity check constraint cannot be verified.")  # noqa: TRY003
-        should_drop = (
-            is_legacy_clip_fk
-            or is_legacy_identity_check
-            or (constraint_type == "p" and columns == ["clip_id"])
-            or (constraint_type == "u" and columns == ["note_id"])
-        )
-        if should_drop:
+    # Remove the placement FK before replacing the referenced document key.
+    for table_name, constraint_names in (
+        ("note_clipper_workspace_placements", placement_drops),
+        ("note_clipper_documents", document_drops),
+    ):
+        quoted_table = postgres_schema._quoted_postgres_identifier(table_name)
+        for constraint_name in constraint_names:
+            quoted_constraint = postgres_schema._quoted_postgres_identifier(constraint_name)
             backend.execute(
-                "ALTER TABLE note_clipper_documents DROP CONSTRAINT "
-                f"{postgres_schema._quoted_postgres_identifier(constraint_name)}",  # nosec B608
+                f"ALTER TABLE {quoted_table} DROP CONSTRAINT {quoted_constraint}",  # nosec B608
                 connection=conn,
             )
 
@@ -440,7 +441,7 @@ def _migrate_from_v55_to_v56_postgres(ctx, conn: Any) -> None:
             UPDATE note_clipper_documents document
                SET client_id = note.client_id
               FROM notes note
-             WHERE note.id = document.note_id
+             WHERE note.id = document.note_id AND document.client_id IS NULL
             """,
         connection=conn,
     )
@@ -466,6 +467,8 @@ def _migrate_from_v55_to_v56_postgres(ctx, conn: Any) -> None:
                    SET client_id = document.client_id
                   FROM note_clipper_documents document
                  WHERE document.clip_id = placement.clip_id
+                   AND document.note_id = placement.source_note_id
+                   AND placement.client_id IS NULL
                 """,
             connection=conn,
         )
@@ -500,7 +503,7 @@ def _migrate_from_v55_to_v56_postgres(ctx, conn: Any) -> None:
         )
 
     for clip_id, old_id, replacement in plan:
-        owner_client_id = owner_by_clip_id[clip_id]
+        owner_client_id = owner_by_note_id[old_id]
         invalid_payloads = backend.execute(
             "SELECT COUNT(*) FROM sync_log "
             "WHERE client_id = %s AND entity = %s AND entity_id = %s "
@@ -559,11 +562,9 @@ def _migrate_from_v55_to_v56_postgres(ctx, conn: Any) -> None:
         if int(mismatched or 0):
             raise SchemaError("WebClipper v56 placement verification failed.")  # noqa: TRY003
 
-    if rls_forced:
-        backend.execute(
-            "ALTER TABLE notes FORCE ROW LEVEL SECURITY",
-            connection=conn,
-        )
+    for table_name in forced_rls_tables:
+        quoted_table = postgres_schema._quoted_postgres_identifier(table_name)
+        backend.execute(f"ALTER TABLE {quoted_table} FORCE ROW LEVEL SECURITY", connection=conn)  # nosec B608
     postgres_schema._ensure_web_clipper_schema_postgres(ctx, conn)
     if has_placements:
         backend.execute(

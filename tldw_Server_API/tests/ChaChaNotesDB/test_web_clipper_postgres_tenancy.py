@@ -3,7 +3,7 @@ from __future__ import annotations
 import hashlib
 import json
 from types import SimpleNamespace
-from uuid import uuid4
+from uuid import UUID, uuid4
 
 import pytest
 from fastapi import HTTPException
@@ -13,7 +13,9 @@ from tldw_Server_API.app.core.DB_Management.backends.base import (
     DatabaseBackend,
     DatabaseError,
 )
-from tldw_Server_API.app.core.DB_Management.ChaChaNotes_DB import CharactersRAGDB
+from tldw_Server_API.app.core.DB_Management.chacha import postgres_schema
+from tldw_Server_API.app.core.DB_Management.chacha.migrations import postgres_steps
+from tldw_Server_API.app.core.DB_Management.ChaChaNotes_DB import CharactersRAGDB, SchemaError
 
 # Runs under `pg_restricted_backend`, whose role is NOSUPERUSER NOBYPASSRLS.
 # The plain `pg_database_config` role is a superuser, and a superuser is exempt
@@ -49,6 +51,223 @@ def _create_owner_clip(
         source_note_id=note_id,
         source_note_version=1,
     )
+
+
+@pytest.mark.parametrize("with_clips", [False, True], ids=["empty", "shared-clip"])
+def test_postgres_web_clipper_v56_upgrades_owner_scoped_layout(
+    pg_restricted_backend: DatabaseBackend,
+    with_clips: bool,
+) -> None:
+    backend = pg_restricted_backend
+    owners = ("910001", "910002") if with_clips else ("910001",)
+    databases = [CharactersRAGDB(db_path=":memory:", client_id=owner, backend=backend) for owner in owners]
+    clip_id = "shared-migration-clip"
+    note_ids = (clip_id, str(uuid4())) if with_clips else ()
+    try:
+        if with_clips:
+            db_a, db_b = databases
+            assert db_a.add_note(title="Legacy capture", content="Body", note_id=clip_id)
+            db_a.workspace_store.upsert_workspace("ws-0", "Legacy workspace")
+            with db_a.transaction() as conn:
+                conn.execute(
+                    "INSERT INTO note_clipper_documents(client_id, clip_id, note_id, clip_type) "
+                    "VALUES (?, ?, ?, 'article')",
+                    (db_a.client_id, clip_id, clip_id),
+                )
+                conn.execute(
+                    "INSERT INTO note_clipper_workspace_placements(client_id, clip_id, workspace_id, source_note_id) "
+                    "VALUES (?, ?, 'ws-0', ?)",
+                    (db_a.client_id, clip_id, clip_id),
+                )
+            _create_owner_clip(db_b, clip_id=clip_id, note_id=note_ids[1], workspace_id="ws-1")
+
+        ctx = databases[0].ctx
+        with backend.transaction() as conn:
+            if with_clips:
+                conn.execute(
+                    "ALTER TABLE note_clipper_documents "
+                    "RENAME CONSTRAINT note_clipper_documents_pkey TO fixture_document_pk"
+                )
+            postgres_schema._set_schema_version_postgres(ctx, conn, 55)
+
+        with backend.transaction() as conn:
+            postgres_steps._migrate_from_v55_to_v56_postgres(ctx, conn)
+            assert postgres_schema._get_schema_version_postgres(ctx, conn) == 56
+            constraints = backend.execute(
+                """
+                SELECT conname, convalidated
+                  FROM pg_constraint
+                 WHERE (conrelid = 'note_clipper_documents'::regclass AND contype IN ('p', 'u'))
+                    OR (conrelid = 'note_clipper_workspace_placements'::regclass
+                        AND (contype = 'p' OR confrelid = 'note_clipper_documents'::regclass))
+                """,
+                connection=conn,
+            ).rows
+            assert {row["conname"]: row["convalidated"] for row in constraints} == {
+                "note_clipper_documents_pkey": True,
+                "note_clipper_documents_client_note_key": True,
+                "note_clipper_workspace_placements_pkey": True,
+                "note_clipper_workspace_placements_document_fkey": True,
+            }
+            forced_tables = backend.execute(
+                """
+                SELECT relname FROM pg_class
+                 WHERE relrowsecurity AND relforcerowsecurity
+                   AND relname IN (
+                       'notes', 'workspaces', 'sync_log',
+                       'note_clipper_documents', 'note_clipper_workspace_placements'
+                   )
+                """,
+                connection=conn,
+            ).rows
+            assert {row["relname"] for row in forced_tables} == {
+                "notes", "workspaces", "sync_log", "note_clipper_documents", "note_clipper_workspace_placements",
+            }
+
+        if with_clips:
+            for index, (db, note_id) in enumerate(zip(databases, note_ids)):
+                document = db.get_note_clipper_document_by_clip_id(clip_id)
+                assert document is not None
+                migrated_id = document["note_id"]
+                if note_id == clip_id:
+                    assert migrated_id != note_id and UUID(migrated_id).version == 4
+                else:
+                    assert migrated_id == note_id
+                placements = db.workspace_store.list_note_clipper_workspace_placements(clip_id)
+                assert [(row["workspace_id"], row["source_note_id"]) for row in placements] == [
+                    (f"ws-{index}", migrated_id)
+                ]
+    finally:
+        for db in databases:
+            db.close_connection()
+
+
+def test_postgres_web_clipper_v56_upgrades_legacy_single_owner_keys(
+    pg_restricted_backend: DatabaseBackend,
+) -> None:
+    backend = pg_restricted_backend
+    db = CharactersRAGDB(db_path=":memory:", client_id="910001", backend=backend)
+    clip_id = "legacy-clip-3001"
+    try:
+        assert db.add_note(title="Legacy capture", content="Body", note_id=clip_id)
+        db.workspace_store.upsert_workspace("legacy-ws", "Legacy workspace")
+        with backend.transaction() as conn:
+            conn.execute("DROP TABLE note_clipper_workspace_placements")
+            conn.execute("DROP TABLE note_clipper_documents")
+            conn.execute(
+                """
+                CREATE TABLE note_clipper_documents (
+                    clip_id TEXT PRIMARY KEY REFERENCES notes(id) ON UPDATE CASCADE ON DELETE CASCADE,
+                    note_id TEXT NOT NULL UNIQUE REFERENCES notes(id) ON UPDATE CASCADE ON DELETE CASCADE,
+                    CHECK (clip_id = note_id)
+                )
+                """
+            )
+            conn.execute(
+                """
+                CREATE TABLE note_clipper_workspace_placements (
+                    clip_id TEXT NOT NULL REFERENCES note_clipper_documents(clip_id)
+                        ON UPDATE CASCADE ON DELETE CASCADE,
+                    workspace_id TEXT NOT NULL REFERENCES workspaces(id) ON UPDATE CASCADE ON DELETE CASCADE,
+                    source_note_id TEXT NOT NULL REFERENCES notes(id) ON UPDATE CASCADE ON DELETE CASCADE,
+                    PRIMARY KEY (clip_id, workspace_id)
+                )
+                """
+            )
+            conn.execute("INSERT INTO note_clipper_documents VALUES (%s, %s)", (clip_id, clip_id))
+            conn.execute(
+                "INSERT INTO note_clipper_workspace_placements VALUES (%s, 'legacy-ws', %s)", (clip_id, clip_id)
+            )
+            postgres_schema._set_schema_version_postgres(db.ctx, conn, 55)
+
+        with backend.transaction() as conn:
+            postgres_steps._migrate_from_v55_to_v56_postgres(db.ctx, conn)
+            assert postgres_schema._get_schema_version_postgres(db.ctx, conn) == 56
+            conn.execute("SELECT set_config('app.current_user_id', %s, true)", (db.client_id,))
+            document = conn.execute(
+                "SELECT client_id, note_id FROM note_clipper_documents WHERE clip_id = %s", (clip_id,)
+            ).fetchone()
+            assert document is not None
+            assert document["client_id"] == db.client_id
+            assert document["note_id"] != clip_id and UUID(document["note_id"]).version == 4
+            placement = conn.execute(
+                "SELECT client_id, source_note_id FROM note_clipper_workspace_placements WHERE clip_id = %s",
+                (clip_id,),
+            ).fetchone()
+            assert placement == {"client_id": db.client_id, "source_note_id": document["note_id"]}
+    finally:
+        db.close_connection()
+
+
+def test_postgres_web_clipper_v56_preserves_unrecognized_foreign_key_actions(
+    pg_restricted_backend: DatabaseBackend,
+) -> None:
+    backend = pg_restricted_backend
+    db = CharactersRAGDB(db_path=":memory:", client_id="910001", backend=backend)
+    try:
+        with backend.transaction() as conn:
+            conn.execute(
+                "ALTER TABLE note_clipper_workspace_placements "
+                "DROP CONSTRAINT note_clipper_workspace_placements_client_id_clip_id_fkey"
+            )
+            conn.execute(
+                """
+                ALTER TABLE note_clipper_workspace_placements ADD CONSTRAINT clip_restricts_delete
+                FOREIGN KEY (client_id, clip_id) REFERENCES note_clipper_documents(client_id, clip_id)
+                ON UPDATE CASCADE ON DELETE RESTRICT
+                """
+            )
+            postgres_schema._set_schema_version_postgres(db.ctx, conn, 55)
+
+        with pytest.raises(SchemaError, match="placement constraints"), backend.transaction() as conn:
+            postgres_steps._migrate_from_v55_to_v56_postgres(db.ctx, conn)
+
+        with backend.transaction() as conn:
+            assert postgres_schema._get_schema_version_postgres(db.ctx, conn) == 55
+            key = conn.execute(
+                "SELECT confdeltype FROM pg_constraint WHERE conname = 'clip_restricts_delete'"
+            ).fetchone()
+            assert key == {"confdeltype": "r"}
+    finally:
+        db.close_connection()
+
+
+def test_postgres_web_clipper_v56_rolls_back_mismatched_placement(
+    pg_restricted_backend: DatabaseBackend,
+) -> None:
+    backend = pg_restricted_backend
+    db_a = CharactersRAGDB(db_path=":memory:", client_id="910001", backend=backend)
+    db_b = CharactersRAGDB(db_path=":memory:", client_id="910002", backend=backend)
+    try:
+        _create_owner_clip(db_a, clip_id="legacy-mapping", note_id=str(uuid4()), workspace_id="owned-ws")
+        db_b.workspace_store.upsert_workspace("other-ws", "Other workspace")
+        with backend.transaction() as conn:
+            conn.execute("ALTER TABLE note_clipper_workspace_placements NO FORCE ROW LEVEL SECURITY")
+            updated = conn.execute(
+                "UPDATE note_clipper_workspace_placements SET workspace_id = 'other-ws' "
+                "WHERE clip_id = 'legacy-mapping'"
+            )
+            assert updated.rowcount == 1
+            conn.execute("ALTER TABLE note_clipper_workspace_placements FORCE ROW LEVEL SECURITY")
+            postgres_schema._set_schema_version_postgres(db_a.ctx, conn, 55)
+
+        with pytest.raises(SchemaError, match="placement.*owner relationships"), backend.transaction() as conn:
+            postgres_steps._migrate_from_v55_to_v56_postgres(db_a.ctx, conn)
+
+        with backend.transaction() as conn:
+            assert postgres_schema._get_schema_version_postgres(db_a.ctx, conn) == 55
+            state = backend.execute(
+                """
+                SELECT relrowsecurity, relforcerowsecurity
+                  FROM pg_class
+                 WHERE oid = 'note_clipper_workspace_placements'::regclass
+                """,
+                connection=conn,
+            ).first
+            assert state == {"relrowsecurity": True, "relforcerowsecurity": True}
+    finally:
+        db_a.close_connection()
+        db_b.close_connection()
 
 
 def test_postgres_web_clipper_same_clip_is_owner_isolated_by_rls(
