@@ -39,7 +39,7 @@ Counts are refreshed after each merged migration PR. GitHub owns mutable tracker
 | --- | --- | --- | --- | --- |
 | Harden design-system baseline reporting and stale-entry cleanup | #1671 | TASK-45.44.14 | Open | TBD |
 | Define design-system CI gate tightening path | #1672 | TASK-45.44.15 | Open | TBD |
-| Design token, color, radius, and layout drift guards | #1673 | TASK-45.44.16 | Open | TBD |
+| [Design token, color, radius, and layout drift reporting](https://github.com/rmusser01/tldw_server/blob/dev/Docs/Design/tldw_web_design_system_contract.md#advisory-styling-drift-reports) | #1673 | TASK-45.44.16 | Advisory report merged | [#3294](https://github.com/rmusser01/tldw_server/pull/3294) |
 | Define shared design-system component ownership plan | #1674 | TASK-45.44.17 | Open | TBD |
 | Add shared design-system component documentation and examples | #1675 | TASK-45.44.18 | Open | TBD |
 | Add Browser/WebUI/extension visual QA checklist | #1676 | TASK-45.44.19 | Open | TBD |

@@ -1,7 +1,7 @@
 ---
 id: TASK-45.44.16
 title: Design token, color, radius, and layout drift guards
-status: In Progress
+status: Done
 assignee: []
 created_date: 2026-05-14 03:20
 labels:
@@ -12,7 +12,11 @@ labels:
 dependencies: []
 references:
 - https://github.com/rmusser01/tldw_server/issues/1673
+- https://github.com/rmusser01/tldw_server/issues/1655
+- https://github.com/rmusser01/tldw_server/pull/3294
 - Docs/superpowers/specs/2026-05-14-design-system-remaining-work-tracker-design.md
+- Docs/Design/tldw_web_design_system_contract.md
+- Docs/ADR/098-advisory-ui-design-drift-reporting.md
 parent_task_id: TASK-45.44
 priority: medium
 ---
@@ -25,18 +29,18 @@ Mirror the linked GitHub governance issue. Closure requires a durable guard, doc
 
 ## Acceptance Criteria
 <!-- AC:BEGIN -->
-- [ ] #1 The linked GitHub issue owns public status.
-- [ ] #2 Backlog notes record PR links and verification evidence.
+- [x] #1 The linked GitHub issue owns public status.
+- [x] #2 Backlog notes record PR links and verification evidence.
 <!-- AC:END -->
 
 ## Definition of Done
 <!-- DOD:BEGIN -->
-- [ ] #1 Acceptance criteria completed
-- [ ] #2 Tests or verification recorded
-- [ ] #3 Documentation updated when relevant
-- [ ] #4 Bandit run for touched code when applicable or document non-code/environment skip
-- [ ] #5 Final summary added
-- [ ] #6 Known skips or blockers documented
+- [x] #1 Acceptance criteria completed
+- [x] #2 Tests or verification recorded
+- [x] #3 Documentation updated when relevant
+- [x] #4 Bandit run for touched code when applicable or document non-code/environment skip
+- [x] #5 Final summary added
+- [x] #6 Known skips or blockers documented
 <!-- DOD:END -->
 
 ## Implementation Notes
@@ -53,4 +57,15 @@ Implementation plan written: Docs/superpowers/plans/2026-10-20-design-system-dri
 Draft implementation PR #3294: https://github.com/rmusser01/tldw_server/pull/3294. TASK-13894 is Done for the reviewable implementation/local-verification unit. Public issue #1673 and epic #1655 now contain artifacts, validation and PR progress; this governance task remains In Progress until public delivery/review/merge is complete. No blocking enforcement enabled. Local result189 focused tests,113 CI tests and clean committed-source scan; full details and skips in TASK-13894/PR.
 2026-11-24: PR #3294 has been rebased onto dev 0a5a41294a and the review follow-up is recorded in TASK-13894. ADR-098 remains proposed and advisory; no new ADR decision or enforcement. The requester waived the Change summary for #3294 only. Keep the governance task In Progress until hosted validation and public delivery are complete.
 Final 2026-11-24 rebase base: dev b4a9550f76. The PR's advisory scope and ADR-098 are unchanged; closure still requires hosted validation and delivery.
+2026-11-27: Verified that PR #3294 merged on 2026-11-25 in 246cb92795 and is an ancestor of remote dev 2053ec5ad4. The repository issue and epic copies now link the delivered reporter and review path. GitHub #1673 remains the public status record.
+ADR assessment: no new ADR is required for the delivery record. ADR-098 records the proposed advisory-only policy. Any required enforcement needs a separate owner decision and CI policy change.
+Fresh local verification on clean 2053ec5ad4 used Node 24.6.0 and Bun 1.3.2. The advisory report completed with clean provenance, 3,863 analyzed files across all four roots, 4,220 advisory findings, 1,267 coverage diagnostics, and zero operational errors. All 232 focused reporter and product-state guard tests passed.
+Hosted validation: verified the report generation, upload, and job-summary steps and downloaded the resulting JSON from https://github.com/rmusser01/tldw_server/actions/runs/46053191753/job/140694788637. The artifact reports complete and clean provenance at ed36f29369, a post-delivery PR head, with 3,863 analyzed files and zero operational errors. Five documentation links or anchors and git diff --check passed. Bandit is inapplicable because the closeout changes only Markdown.
+Closeout pull request: https://github.com/rmusser01/tldw_server/pull/3670
 <!-- SECTION:IMPLEMENTATION_NOTES:END -->
+
+## Final Summary
+
+<!-- SECTION:FINAL_SUMMARY:BEGIN -->
+PR #3294 delivered the advisory styling drift reporter and CI workflow. Verified a clean latest-dev scan and the published hosted artifact, and linked the reporter and review guidance from the repository issue and epic copies.
+<!-- SECTION:FINAL_SUMMARY:END -->
