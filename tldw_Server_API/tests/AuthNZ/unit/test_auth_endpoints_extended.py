@@ -132,13 +132,16 @@ async def test_reset_password_weak_and_success(monkeypatch):
         async def fetchval(self, *args, **kwargs):
             return None
 
-        async def execute(self, *args, **kwargs):
+        async def execute(self, query, *args, **kwargs):
+            # The account-lock read (security_locked_at, credentials_valid_after): not locked.
+            row = (None, None) if "security_locked_at" in str(query) else (1, None)
+
             class _C:
                 lastrowid = 1
 
                 async def fetchone(self):
                     # Simulate existing reset token record
-                    return (1, None)
+                    return row
 
             return _C()
 
@@ -170,8 +173,11 @@ async def test_reset_password_weak_and_success(monkeypatch):
     async def _fake_is_pg() -> bool:
         return False
 
+    revoked: list[tuple] = []
+
     class _StubBlacklist:
-        async def revoke_all_user_tokens(self, *_args, **_kwargs):
+        async def revoke_all_user_tokens(self, *args, **_kwargs):
+            revoked.append(args)
             return 0
 
     monkeypatch.setattr(_auth, "is_postgres_backend", _fake_is_pg)
@@ -208,6 +214,8 @@ async def test_reset_password_weak_and_success(monkeypatch):
         password_service=_StubPwd(weak=False),
     )
     assert "success" in out.get("message", "").lower()
+    # No request transaction owns an after-commit scope here, so the revoke runs inside the call.
+    assert revoked == [(42, "Password reset")]
 
 
 @pytest.mark.asyncio
@@ -1012,6 +1020,7 @@ async def test_login_returns_mfa_challenge_when_enabled(monkeypatch):
     response = Response()
     form_data = SimpleNamespace(username="mfa_user", password="password")
     session_manager = _StubSessionManager()
+    started = int(time.time())
 
     result = await auth.login(
         request=request,
@@ -1031,6 +1040,8 @@ async def test_login_returns_mfa_challenge_when_enabled(monkeypatch):
     assert result.session_token
     assert session_manager.cached
     cached = json.loads(session_manager.stored_value)
+    # issued_at: an unlock refuses a challenge started before it (TASK-15679).
+    assert started <= cached.pop("issued_at") <= int(time.time())
     assert cached == {"user_id": 5, "login_lockout_key": build_login_client_lockout_key("203.0.113.9", "mfa_user")}
     assert "203.0.113.9" not in session_manager.stored_value
     assert "mfa_user" not in session_manager.stored_value

@@ -23,6 +23,7 @@ import {
 } from "zustand/middleware"
 import { createWithEqualityFn } from "zustand/traditional"
 import type { ConferenceRetryRequestItem } from "@/services/tldw/conference-collections"
+import { extractCompletedIngestJobPayload } from "@/services/tldw/ingest-job-results"
 
 const STORAGE_KEY = "tldw-quick-ingest-session"
 
@@ -55,6 +56,7 @@ export type PersistedQuickIngestTracking = {
 export type PersistedWizardQueueItem = {
   id: string
   kind?: string
+  fileOrigin?: "upload" | "paste"
   fileName?: string
   name?: string
   key?: string
@@ -69,6 +71,7 @@ export type PersistedWizardQueueItem = {
   validation: QueueItemValidation
   playlist?: PlaylistQueueMetadata
   processAgain?: boolean
+  sourceUrlEdited?: boolean
   conferenceOverride?: ConferenceItemMetadataOverride
   fileStub?: {
     key?: string
@@ -391,6 +394,7 @@ const sanitizeQueueItems = (
     const next: PersistedWizardQueueItem = {
       id: String(item?.id || generateSessionId()),
       kind: typeof item?.kind === "string" ? item.kind : undefined,
+      fileOrigin: item?.fileOrigin === "upload" || item?.fileOrigin === "paste" ? item.fileOrigin : undefined,
       fileName:
         typeof item?.fileName === "string" ? item.fileName : undefined,
       name: typeof item?.name === "string" ? item.name : undefined,
@@ -422,6 +426,7 @@ const sanitizeQueueItems = (
             : undefined,
       validation: item?.validation || { valid: true },
       processAgain: item?.processAgain === true,
+      sourceUrlEdited: item?.sourceUrlEdited === true,
       playlist: item?.playlist,
       conferenceOverride: item?.conferenceOverride,
     }
@@ -687,10 +692,21 @@ const normalizeCountLike = (value: unknown): number | null => {
 const buildPersistedState = (
   session: QuickIngestSessionRecord | null,
   recentImports: RecentImport[]
-): QuickIngestSessionPersistedState => ({
-  session: sanitizeSession(session),
-  recentImports: sanitizeRecentImports(recentImports)
-})
+): QuickIngestSessionPersistedState => {
+  const storedSession = sanitizeSession(session)
+  if (storedSession) {
+    storedSession.results = storedSession.results.map(result => {
+      if (!result.omitDataOnReload) return result
+      const { data, omitDataOnReload: _omit, ...receipt } = result
+      if (result.status === "error" || result.outcome === "skipped") {
+        const { extraction_failures, errors, db_message } = extractCompletedIngestJobPayload(data) ?? {}
+        return { ...receipt, data: { extraction_failures, errors, db_message } }
+      }
+      return receipt
+    })
+  }
+  return { session: storedSession, recentImports: sanitizeRecentImports(recentImports) }
+}
 
 export const createEmptyQuickIngestSession = (): QuickIngestSessionRecord => {
   const now = Date.now()

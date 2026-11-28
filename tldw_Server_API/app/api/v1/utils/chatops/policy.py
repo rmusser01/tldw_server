@@ -46,6 +46,8 @@ __all__ = [
     "normalize_string_list",
 ]
 
+_MAX_USER_ID = 2_147_483_647  # users.id is int4 on PostgreSQL
+
 
 @dataclass(frozen=True)
 class ChatOpsPolicySpec:
@@ -322,6 +324,30 @@ def policy_error_response(
         headers=headers,
         content={"ok": False, **response_payload},
     )
+
+
+async def locked_actor_error(actor_user_id: str | None) -> dict[str, Any] | None:
+    """A policy error for an actor id that names a security-locked tldw user.
+
+    Slack and Discord have no account link: only an all-digit actor id is read as a tldw user id.
+    A failed lookup propagates; it is never read as "not locked". An id outside ``users.id`` (int4 on
+    PostgreSQL), such as an unmapped Discord user's 17-19 digit snowflake, is no tldw user id and is not
+    looked up (TASK-15679).
+    """
+    if not actor_user_id or not actor_user_id.isdigit():
+        return None
+    user_id = int(actor_user_id)
+    if not 1 <= user_id <= _MAX_USER_ID:
+        return None
+    from tldw_Server_API.app.core.AuthNZ.account_lock import is_user_security_locked
+
+    if not await is_user_security_locked(user_id):
+        return None
+    return {
+        "status_code": 403,
+        "error": "account_locked",
+        "message": "This account is locked",
+    }
 
 
 def action_route(runtime: ChatOpsPolicyRuntime, action: str) -> str:

@@ -289,13 +289,29 @@ describe("history-first sidebar navigation", () => {
   });
 
   it("lets the collapsed rail scroll when both priority shortcuts are omitted", async () => {
+    let releaseSelection!: () => void;
+    const selectionRead = new Promise<void>((resolve) => {
+      releaseSelection = resolve;
+    });
+    io.reads.set("tldw:sidebar:shortcutSelection", async () => {
+      await selectionRead;
+      return io.values.get("tldw:sidebar:shortcutSelection");
+    });
     renderSidebar({ collapsed: true });
 
-    const chat = await screen.findByTestId("chat-sidebar-shortcut-chat");
-    expect(screen.queryByRole("button", { name: "Media" })).not.toBeInTheDocument();
-    expect(screen.queryByRole("button", { name: "Research Workspace" })).not.toBeInTheDocument();
-    expect(screen.getByTestId("chat-sidebar")).toHaveClass("overflow-y-auto");
-    expect(chat.closest(".overflow-y-auto")).toHaveClass("min-h-10");
+    try {
+      const chat = await screen.findByTestId("chat-sidebar-shortcut-chat");
+      // Chat is also in the defaults; its presence does not prove hydration.
+      await act(async () => releaseSelection());
+      await waitFor(() => {
+        expect(screen.queryByRole("button", { name: "Media" })).not.toBeInTheDocument();
+        expect(screen.queryByRole("button", { name: "Research Workspace" })).not.toBeInTheDocument();
+      });
+      expect(screen.getByTestId("chat-sidebar")).toHaveClass("overflow-y-auto");
+      expect(chat.closest(".overflow-y-auto")).toHaveClass("min-h-10");
+    } finally {
+      await act(async () => releaseSelection());
+    }
   });
 
   it("names the global Server total while searching both sources", async () => {

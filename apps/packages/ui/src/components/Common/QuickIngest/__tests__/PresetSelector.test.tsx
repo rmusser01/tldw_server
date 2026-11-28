@@ -1,6 +1,7 @@
 import React from "react"
 import { describe, expect, it, vi } from "vitest"
 import { render, screen } from "@testing-library/react"
+import userEvent from "@testing-library/user-event"
 
 vi.mock("react-i18next", () => ({
   useTranslation: () => ({
@@ -33,6 +34,15 @@ const qi = (
   )
 
 describe("PresetSelector", () => {
+  it("allows a custom run to switch back to a named preset in the compact layout", async () => {
+    const onChange = vi.fn()
+    render(<PresetSelector compact qi={qi} value="custom" onChange={onChange} />)
+    const chooser = screen.getByRole("combobox", { name: "Processing preset" })
+    expect(chooser).toHaveValue("custom")
+    await userEvent.setup().selectOptions(chooser, "standard")
+    expect(onChange).toHaveBeenCalledWith("standard")
+  })
+
   it("does not predict model duration from a tiny document size", () => {
     render(<PresetSelector qi={qi} value="standard" onChange={vi.fn()} queueItems={[{
       id: "cedar", kind: "file", fileName: "cedar.txt", detectedType: "document",

@@ -442,6 +442,22 @@ class StorageQuotaResponse(BaseModel):
     }
 
 
+class AccountLockResponse(BaseModel):
+    """Result of locking one's own account."""
+
+    locked: bool
+    email_sent: bool
+    sent_to: list[str]  # masked addresses the unlock link was mailed to
+
+
+class LockAvailabilityResponse(BaseModel):
+    """Whether the account can be locked, and where the unlock link would go."""
+
+    available: bool
+    reason: str | None = None
+    sent_to: list[str]
+
+
 #
 # End of auth_schemas.py
 #######################################################################################################################

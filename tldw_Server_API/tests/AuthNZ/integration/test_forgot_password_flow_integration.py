@@ -32,29 +32,20 @@ async def test_forgot_password_email_and_reset_flow(tmp_path, monkeypatch):
     import tldw_Server_API.app.core.AuthNZ.email_service as email_service_mod
     def _get_email_service():
         return _StubEmailSvc()
-    email_service_mod.get_email_service = _get_email_service  # type: ignore
+    # monkeypatch throughout: stubs left in place broke later tests' MFA, reset and mail (TASK-15679).
+    monkeypatch.setattr(email_service_mod, "get_email_service", _get_email_service)
 
     # Provide a lightweight stub for mfa_service to avoid optional deps (qrcode)
     import sys, types
     mfa_stub = types.ModuleType("mfa_service")
     setattr(mfa_stub, "get_mfa_service", lambda: None)
-    sys.modules['tldw_Server_API.app.core.AuthNZ.mfa_service'] = mfa_stub
-
-    # Force Postgres-branch code paths without real DB
-    async def _is_pg() -> bool:
-        return True
+    monkeypatch.setitem(sys.modules, 'tldw_Server_API.app.core.AuthNZ.mfa_service', mfa_stub)
 
     # Reload app so auth router mounts with stubbed MFA
     _app = reload_app_main().app
 
-    # Patch is_postgres_backend on the auth endpoints module after reload
-    import tldw_Server_API.app.api.v1.endpoints.auth as auth
-    auth.is_postgres_backend = _is_pg  # type: ignore
-    # Ensure endpoint uses our stubbed email service
-    auth._get_email_service = _get_email_service  # type: ignore
-    # Simplify input validation for the test
-    from types import SimpleNamespace
-    auth.get_input_validator = lambda: SimpleNamespace(validate_email=lambda _e: (True, None))  # type: ignore
+    # forgot-password reaches the stubbed mail through email_service.get_email_service; it does not read
+    # is_postgres_backend, and alice@example.com passes the real email validator.
 
     # Stub DB adapter used by endpoints
     class _StubDB:

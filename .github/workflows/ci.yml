@@ -682,6 +682,7 @@ jobs:
           - name: gap-verified-7
             paths: >-
               tldw_Server_API/tests/Guardian
+              tldw_Server_API/tests/Moderation
               tldw_Server_API/tests/RPG
               tldw_Server_API/tests/Chat_Macros
           - name: gap-verified-8
@@ -936,6 +937,7 @@ jobs:
               tldw_Server_API/tests/Admin/test_usage_reporting*.py
           - name: auth-integration-admin-auth
             paths: >-
+              tldw_Server_API/tests/AuthNZ/integration/test_account_lock_postgres.py
               tldw_Server_API/tests/AuthNZ/integration/test_admin_*.py
               tldw_Server_API/tests/AuthNZ/integration/test_api_key_*.py
               tldw_Server_API/tests/AuthNZ/integration/test_audio_quota_dates_postgres.py
@@ -2438,6 +2440,7 @@ jobs:
           - name: gap-verified-7
             paths: >-
               tldw_Server_API/tests/Guardian
+              tldw_Server_API/tests/Moderation
               tldw_Server_API/tests/RPG
               tldw_Server_API/tests/Chat_Macros
           - name: gap-verified-8
@@ -2692,6 +2695,7 @@ jobs:
               tldw_Server_API/tests/Admin/test_usage_reporting*.py
           - name: auth-integration-admin-auth
             paths: >-
+              tldw_Server_API/tests/AuthNZ/integration/test_account_lock_postgres.py
               tldw_Server_API/tests/AuthNZ/integration/test_admin_*.py
               tldw_Server_API/tests/AuthNZ/integration/test_api_key_*.py
               tldw_Server_API/tests/AuthNZ/integration/test_audio_quota_dates_postgres.py
@@ -4258,6 +4262,7 @@ jobs:
               tldw_Server_API/tests/Admin/test_usage_reporting*.py
           - name: auth-integration-admin-auth
             paths: >-
+              tldw_Server_API/tests/AuthNZ/integration/test_account_lock_postgres.py
               tldw_Server_API/tests/AuthNZ/integration/test_admin_*.py
               tldw_Server_API/tests/AuthNZ/integration/test_api_key_*.py
               tldw_Server_API/tests/AuthNZ/integration/test_audio_quota_dates_postgres.py
@@ -5728,6 +5733,7 @@ jobs:
               tldw_Server_API/tests/Admin/test_usage_reporting*.py
           - name: auth-integration-admin-auth
             paths: >-
+              tldw_Server_API/tests/AuthNZ/integration/test_account_lock_postgres.py
               tldw_Server_API/tests/AuthNZ/integration/test_admin_*.py
               tldw_Server_API/tests/AuthNZ/integration/test_api_key_*.py
               tldw_Server_API/tests/AuthNZ/integration/test_audio_quota_dates_postgres.py
@@ -7189,6 +7195,7 @@ jobs:
               tldw_Server_API/tests/Admin/test_usage_reporting*.py
           - name: auth-integration-admin-auth
             paths: >-
+              tldw_Server_API/tests/AuthNZ/integration/test_account_lock_postgres.py
               tldw_Server_API/tests/AuthNZ/integration/test_admin_*.py
               tldw_Server_API/tests/AuthNZ/integration/test_api_key_*.py
               tldw_Server_API/tests/AuthNZ/integration/test_audio_quota_dates_postgres.py

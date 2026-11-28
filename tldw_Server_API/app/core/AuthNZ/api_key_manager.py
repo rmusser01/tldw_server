@@ -41,7 +41,7 @@ from tldw_Server_API.app.core.AuthNZ.api_key_audit import (
     emit_mandatory_api_key_management_audit,
 )
 from tldw_Server_API.app.core.AuthNZ.settings import Settings, get_settings
-from tldw_Server_API.app.core.exceptions import APIKeyRotationRejected
+from tldw_Server_API.app.core.exceptions import APIKeyRotationRejected, APIKeySuspendedError
 from tldw_Server_API.app.core.Audit.unified_audit_service import (
     AuditEventCategory,
     AuditEventType,
@@ -823,6 +823,12 @@ class APIKeyManager:
             key_info, primary_hash = verification
             stored_hash = key_info.get("key_hash")
 
+            # A locked, deactivated or suspended owner's key is refused before any usage is recorded.
+            owner_locked_at = key_info.pop("owner_security_locked_at", None)
+            owner_active = key_info.pop("owner_is_active", True)
+            if owner_locked_at is not None or owner_active in (False, 0) or key_info.get("suspended_at") is not None:
+                return None
+
             # Check expiration
             expires_at_raw = key_info.get("expires_at")
             if expires_at_raw:
@@ -984,6 +990,8 @@ class APIKeyManager:
                     raise APIKeyRotationRejected()
                 if str(old_key.get("status") or "").lower() != APIKeyStatus.ACTIVE.value:
                     raise APIKeyRotationRejected()
+                if old_key.get("suspended_at") is not None:
+                    raise APIKeySuspendedError()
 
                 raw_allowed_ips = old_key.get("allowed_ips")
                 allowed_ips: Optional[list[str]] = None

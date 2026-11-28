@@ -70,7 +70,6 @@ class UserUpdateRequest(BaseModel):
     role: str | None = Field(None, pattern="^(user|admin)$")
     is_active: bool | None = None
     is_verified: bool | None = None
-    is_locked: bool | None = None
     storage_quota_mb: int | None = Field(None, ge=0)
     reason: str | None = Field(default=None, min_length=8, max_length=500)
     admin_password: SecretStr | None = Field(default=None, max_length=128, repr=False)
@@ -97,6 +96,16 @@ class AdminPrivilegedActionRequest(BaseModel):
         return _blank_string_to_none(value)
 
     model_config = ConfigDict(from_attributes=True)
+
+
+class SecurityUnlockRequest(AdminPrivilegedActionRequest):
+    """Request payload for an admin unlocking an account the owner locked."""
+
+
+class SecurityUnlockResponse(BaseModel):
+    """False when the account was not locked."""
+
+    unlocked: bool
 
 
 class AdminPasswordResetRequest(AdminPrivilegedActionRequest):
@@ -178,6 +187,7 @@ class UserSummary(BaseModel):
     last_login: datetime | None = None
     storage_quota_mb: int | None
     storage_used_mb: float
+    security_locked_at: datetime | None = None
 
     model_config = ConfigDict(from_attributes=True)
 
@@ -200,6 +210,7 @@ class UserDetailResponse(BaseModel):
     storage_quota_mb: int | None = None
     storage_used_mb: float | None = None
     is_locked: bool | None = None
+    security_locked_at: datetime | None = None
     failed_login_attempts: int | None = None
     locked_until: datetime | None = None
     metadata: Any | None = None

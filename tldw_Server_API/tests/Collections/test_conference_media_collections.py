@@ -8,7 +8,6 @@ from fastapi.testclient import TestClient
 from tldw_Server_API.app.core.config import settings
 from tldw_Server_API.app.core.DB_Management.Collections_DB import CollectionsDatabase
 
-
 pytestmark = pytest.mark.unit
 
 
@@ -290,6 +289,20 @@ def test_media_collections_router_exposes_collection_crud(
         assert item_response.status_code == 201, item_response.text
         item_id = item_response.json()["id"]
 
+        item_path = f"/api/v1/media/collections/{collection_id}/items/{item_id}"
+        headers = {"X-API-KEY": "test-api-key-12345"}
+        repair = {"source_url": "https://example.org/corrected.pdf", "retry_count": 1,
+                  "idempotency_key": f"conference-retry-{item_id}-1"}
+        for _ in range(2):
+            corrected = client.patch(item_path, json=repair, headers=headers)
+            assert corrected.status_code == 200, corrected.text
+            assert corrected.json()["source_url"] == repair["source_url"]
+            assert corrected.json()["normalized_source_id"] is None
+            assert corrected.json()["source_kind"] is None
+            assert corrected.json()["speaker"] == "Ada Lovelace"
+        competing = {**repair, "source_url": "https://example.org/different.pdf"}
+        assert client.patch(item_path, json=competing, headers=headers).status_code == 409
+
         patch_response = client.patch(
             f"/api/v1/media/collections/{collection_id}/items/{item_id}",
             json={
@@ -302,6 +315,7 @@ def test_media_collections_router_exposes_collection_crud(
         )
         assert patch_response.status_code == 200, patch_response.text
         assert patch_response.json()["status"] == "completed"
+        assert client.patch(item_path, json={**competing, "retry_count": 2}, headers=headers).status_code == 409
 
         get_response = client.get(
             f"/api/v1/media/collections/{collection_id}",

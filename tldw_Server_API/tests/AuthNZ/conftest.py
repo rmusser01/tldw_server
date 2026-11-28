@@ -748,7 +748,9 @@ async def isolated_test_environment(monkeypatch, tmp_path):
                 created_by INTEGER REFERENCES users(id),
                 password_changed_at TIMESTAMP,
                 previous_email VARCHAR(255),
-                email_changed_at TIMESTAMPTZ
+                email_changed_at TIMESTAMPTZ,
+                security_locked_at TIMESTAMPTZ,
+                credentials_valid_after TIMESTAMPTZ
             )
         """)
 
@@ -874,6 +876,7 @@ async def isolated_test_environment(monkeypatch, tmp_path):
                 revoked_at TIMESTAMP,
                 revoked_by INTEGER,
                 revoke_reason TEXT,
+                suspended_at TIMESTAMPTZ,
                 is_virtual BOOLEAN DEFAULT FALSE,
                 parent_key_id INTEGER REFERENCES api_keys(id),
                 org_id INTEGER,
@@ -1540,7 +1543,9 @@ async def setup_test_database(monkeypatch):
                 created_by INTEGER REFERENCES users(id),
                 password_changed_at TIMESTAMP,
                 previous_email VARCHAR(255),
-                email_changed_at TIMESTAMPTZ
+                email_changed_at TIMESTAMPTZ,
+                security_locked_at TIMESTAMPTZ,
+                credentials_valid_after TIMESTAMPTZ
             )
         """)
 
@@ -1611,6 +1616,7 @@ async def setup_test_database(monkeypatch):
                 revoked_at TIMESTAMP,
                 revoked_by INTEGER,
                 revoke_reason TEXT,
+                suspended_at TIMESTAMPTZ,
                 is_virtual BOOLEAN DEFAULT FALSE,
                 parent_key_id INTEGER REFERENCES api_keys(id),
                 org_id INTEGER,
