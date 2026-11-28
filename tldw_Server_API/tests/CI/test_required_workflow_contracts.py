@@ -456,7 +456,10 @@ def test_e2e_required_explicitly_loads_pytest_asyncio_plugin() -> None:
     assert "-p pytest_asyncio.plugin" in retry["run"]
 
 
-# Checked-in browser bundles predate ubuntu-latest's move to Ubuntu 26.
+LINUX_NATIVE_SCRAPING_JOBS = ("full-suite-linux-312-shards", "full-suite-linux-313-shards")
+
+
+# Checked-in frontend browser bundles predate ubuntu-latest's move to Ubuntu 26.
 PLAYWRIGHT_BROWSER_JOBS = {
     "frontend-e2e-tiers.yml": [
         "critical",
@@ -514,7 +517,7 @@ def test_playwright_browser_job_inventory_is_complete() -> None:
     actual = set()
     for path in sorted(Path(".github/workflows").glob("*.y*ml")):
         for job_name, job in _load(str(path)).get("jobs", {}).items():
-            if not str(job.get("runs-on", "")).startswith("ubuntu"):
+            if "ubuntu" not in str(job.get("runs-on", "")):
                 continue
             if any(
                 re.search(r"\bplaywright\s+install\b", step.get("run", ""))
@@ -526,6 +529,7 @@ def test_playwright_browser_job_inventory_is_complete() -> None:
         for workflow_name, job_names in PLAYWRIGHT_BROWSER_JOBS.items()
         for job_name in job_names
     }
+    expected.update(("ci.yml", job_name) for job_name in LINUX_NATIVE_SCRAPING_JOBS)
     assert actual == expected
 
 
@@ -863,6 +867,7 @@ def test_full_suite_ffmpeg_setup_scopes_heavy_install_to_media_runtime_shards() 
         "matrix.shard.name == 'ai-embeddings-media-validation' || "
         "matrix.shard.name == 'rag-new-unit-media-ingest' || "
         "matrix.shard.name == 'product-claims-service' || "
+        "matrix.shard.name == 'auth-integration-s-z' || "
         "(matrix.shard.name == 'platform-services-core' || "
         "matrix.shard.name == 'platform-services-main-routing' || "
         "matrix.shard.name == 'platform-services-main-pollers') }}"
@@ -883,6 +888,28 @@ def test_full_suite_ffmpeg_setup_scopes_heavy_install_to_media_runtime_shards() 
         assert setup_step["with"]["install-ffmpeg"] == expected_condition
         assert "product-watchlists" not in setup_step["with"]["install-ffmpeg"]
         assert "product-workflows" not in setup_step["with"]["install-ffmpeg"]
+
+
+@pytest.mark.parametrize(
+    ("job_name", "needs_system_deps"),
+    [(job_name, True) for job_name in LINUX_NATIVE_SCRAPING_JOBS]
+    + [
+        ("full-suite-macos-312-shards", False),
+        ("full-suite-windows-312-shards", False),
+        ("full-suite-os-313-release-shards", False),
+    ],
+)
+def test_full_suite_installs_chromium_for_native_scraping(job_name: str, needs_system_deps: bool) -> None:
+    job = _load(".github/workflows/ci.yml")["jobs"][job_name]
+    if needs_system_deps:
+        assert job["runs-on"] == "${{ matrix.shard.name == 'integrations' && 'ubuntu-24.04' || 'ubuntu-latest' }}"
+    steps = job["steps"]
+    setup = _get_step(steps, "Install Chromium for native scraping tests")
+    assert setup["if"] == "matrix.shard.name == 'integrations'"
+    install = "python -m playwright install"
+    expected = f"{install} --with-deps chromium" if needs_system_deps else f"{install} chromium"
+    assert setup["run"] == expected
+    assert steps.index(_get_step(steps, "Setup Python and deps (with uv)")) < steps.index(setup)
 
 
 def test_full_suite_test_result_uploads_are_non_blocking() -> None:

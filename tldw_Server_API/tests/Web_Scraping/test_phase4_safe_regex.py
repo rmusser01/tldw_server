@@ -745,6 +745,14 @@ def test_stdlib_worker_saturation_returns_timeout_without_spawning(
 )
 @pytest.mark.parametrize("held_permits", [1, 4])
 def test_forked_child_resets_inherited_stdlib_worker_admission(held_permits: int) -> None:
+    from tldw_Server_API.tests.Web_Scraping.fork_assertions import run_single_thread_fork_check
+
+    run_single_thread_fork_check(
+        __name__, "_assert_forked_child_resets_inherited_stdlib_worker_admission", held_permits
+    )
+
+
+def _assert_forked_child_resets_inherited_stdlib_worker_admission(held_permits: int) -> None:
     acquired = 0
     context = multiprocessing.get_context("fork")
     result_queue = context.Queue()

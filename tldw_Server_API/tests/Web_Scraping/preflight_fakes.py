@@ -876,6 +876,28 @@ class FakeBrowserContext:
             page.release_close()
 
 
+class FakeBrowserCDPSession:
+    """Public browser-session capability, with observable guard retirement."""
+
+    def __init__(self):
+        self.handlers = {}
+        self.commands = []
+        self.detached = False
+
+    def on(self, event, handler):
+        self.handlers[event] = handler
+
+    def remove_listener(self, event, handler):
+        self.handlers.pop(event, None)
+
+    async def send(self, method, params=None):
+        self.commands.append((method, params))
+        return {}
+
+    async def detach(self):
+        self.detached = True
+
+
 class FakeBrowser:
     """Browser fake creating one context from supplied options."""
 
@@ -893,6 +915,26 @@ class FakeBrowser:
         self.context_options: list[dict[str, Any]] = []
         self.close_calls = 0
         self.force_close_calls = 0
+        self.connected = True
+        self.handlers = {}
+        self.cdp = FakeBrowserCDPSession()
+
+    def on(self, event, handler):
+        self.handlers[event] = handler
+
+    def remove_listener(self, event, handler):
+        self.handlers.pop(event, None)
+
+    def is_connected(self):
+        return self.connected
+
+    def disconnect(self):
+        self.connected = False
+        if handler := self.handlers.get("disconnected"):
+            handler()
+
+    async def new_browser_cdp_session(self):
+        return self.cdp
 
     async def new_context(self, **kwargs: Any) -> FakeBrowserContext:
         await self.startup_gate.wait("new_context")
@@ -906,10 +948,12 @@ class FakeBrowser:
     async def close(self) -> None:
         self.close_calls += 1
         self.events.append("close:browser")
+        self.disconnect()
 
     async def force_close(self) -> None:
         self.force_close_calls += 1
         self.events.append("force:browser")
+        self.disconnect()
 
 
 class FakeChromium:
@@ -950,10 +994,12 @@ class FakePlaywright:
     async def stop(self) -> None:
         self.stop_calls += 1
         self.events.append("close:playwright")
+        self.chromium.browser.disconnect()
 
     async def force_close(self) -> None:
         self.force_close_calls += 1
         self.events.append("force:playwright")
+        self.chromium.browser.disconnect()
 
 
 class FakePlaywrightLauncher:
@@ -1055,6 +1101,8 @@ class RealLikeBrowser(FakeBrowser):
         for context in self.contexts:
             assert isinstance(context, RealLikeBrowserContext)
             context.release_close()
+        # Native exit can precede completion of the public close operation.
+        self.disconnect()
         await self._release_close.wait()
         self.closed = True
 
