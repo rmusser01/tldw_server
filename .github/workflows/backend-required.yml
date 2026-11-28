@@ -434,6 +434,7 @@ jobs:
             tldw_Server_API/tests/RAG_NEW/unit/test_rag_pipeline_types.py \
             tldw_Server_API/tests/RAG_NEW/unit/test_rag_profiles.py \
             tldw_Server_API/tests/RAG_NEW/unit/test_rag_provider_credentials.py \
+            tldw_Server_API/tests/RAG_NEW/unit/test_rag_refusal_branches.py \
             tldw_Server_API/tests/RAG_NEW/unit/test_rag_result_mapping_core.py \
             tldw_Server_API/tests/RAG_NEW/unit/test_rag_run_config_caller_equivalence.py \
             tldw_Server_API/tests/RAG_NEW/unit/test_rag_transport_helpers.py \
@@ -496,6 +497,7 @@ jobs:
             tldw_Server_API/tests/RAG_NEW/unit/test_rag_pipeline_types.py \
             tldw_Server_API/tests/RAG_NEW/unit/test_rag_profiles.py \
             tldw_Server_API/tests/RAG_NEW/unit/test_rag_provider_credentials.py \
+            tldw_Server_API/tests/RAG_NEW/unit/test_rag_refusal_branches.py \
             tldw_Server_API/tests/RAG_NEW/unit/test_rag_result_mapping_core.py \
             tldw_Server_API/tests/RAG_NEW/unit/test_rag_run_config_caller_equivalence.py \
             tldw_Server_API/tests/RAG_NEW/unit/test_rag_transport_helpers.py \
