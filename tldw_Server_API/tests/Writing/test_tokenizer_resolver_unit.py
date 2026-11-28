@@ -1,4 +1,5 @@
 import configparser
+import sys
 import threading
 from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
@@ -817,6 +818,38 @@ def test_coerce_int_rejects_non_integral_float():
 
     assert resolver._coerce_int(12.5) is None
     assert resolver._coerce_int(12.0) == 12
+
+
+@pytest.mark.parametrize("is_file", [False, True], ids=["missing", "file"])
+def test_mlx_artifact_tokenizer_checks_the_directory_before_importing(monkeypatch, tmp_path, is_file):
+    from tldw_Server_API.app.core.LLM_Calls import tokenizer_resolver as resolver
+
+    monkeypatch.setenv("MLX_MODEL_DIR", str(tmp_path))
+    model = "missing-mlx-artifact"
+    if is_file:
+        (tmp_path / model).touch()
+
+    monkeypatch.setitem(sys.modules, "transformers", None)
+    with pytest.raises(resolver.TokenizerUnavailable, match="MLX model artifact path not found"):
+        resolver._load_mlx_artifact_tokenizer(model)
+
+
+def test_mlx_artifact_tokenizer_reports_unreadable_directory(monkeypatch, tmp_path):
+    from tldw_Server_API.app.core.LLM_Calls import tokenizer_resolver as resolver
+
+    model = "unreadable-mlx-artifact"
+    monkeypatch.setenv("MLX_MODEL_DIR", str(tmp_path))
+    original_is_dir = Path.is_dir
+
+    def check_directory(path: Path) -> bool:
+        if path == tmp_path / model:
+            raise PermissionError("Cannot inspect MLX artifact")
+        return original_is_dir(path)
+
+    with monkeypatch.context() as context:
+        context.setattr(Path, "is_dir", check_directory)
+        with pytest.raises(resolver.TokenizerUnavailable, match="MLX tokenizer unavailable for model artifact"):
+            resolver._load_mlx_artifact_tokenizer(model)
 
 
 def test_mlx_candidate_paths_blocks_parent_traversal(monkeypatch):

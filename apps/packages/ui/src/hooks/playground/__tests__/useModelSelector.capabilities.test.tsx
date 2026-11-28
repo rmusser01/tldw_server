@@ -550,21 +550,29 @@ describe("useModelSelector capability rendering", () => {
     ).not.toBeInTheDocument()
   })
 
-  it("shows the connect-server error once loading finishes with no models", () => {
-    const navigate = vi.fn()
+  it("offers refresh and settings once loading finishes with no models", () => {
+    const onRetryModels = vi.fn()
     const { result } = renderHook(() =>
       useModelSelector({
         composerModels: [],
         selectedModel: null,
         setSelectedModel: vi.fn(),
-        navigate,
-        modelsLoading: false
+        navigate: vi.fn(),
+        modelsLoading: false,
+        onRetryModels
       })
     )
 
     const items = result.current.modelDropdownMenuItems
     expect(items.some((item: any) => item?.key === "no-models")).toBe(true)
     expect(items.some((item: any) => item?.key === "open-model-settings")).toBe(true)
+
+    const refresh = items.find((item) => item?.key === "models-refresh")
+    expect(refresh).toBeDefined()
+    act(() => {
+      if (refresh && "onClick" in refresh) refresh.onClick?.()
+    })
+    expect(onRetryModels).toHaveBeenCalledOnce()
 
     const noModels = items.find((item: any) => item?.key === "no-models")
     render(<>{noModels?.label}</>)

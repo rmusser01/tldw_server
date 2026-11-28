@@ -1,5 +1,3 @@
-import fs from "node:fs"
-import path from "node:path"
 import { beforeEach, describe, expect, it, vi } from "vitest"
 
 const mocks = vi.hoisted(() => ({
@@ -9,18 +7,7 @@ const mocks = vi.hoisted(() => ({
   contextMenusCreate: vi.fn(),
   contextMenusRemove: vi.fn(),
   alarmsClear: vi.fn(),
-  alarmsCreate: vi.fn(),
-  sessionStorage: new Map<string, unknown>()
-}))
-
-vi.mock("@/utils/safe-storage", () => ({
-  createSafeStorage: (options?: { area?: string }) => ({
-    get: async (key: string) =>
-      options?.area === "session" ? mocks.sessionStorage.get(key) : undefined,
-    set: vi.fn(async () => undefined),
-    remove: vi.fn(async () => undefined),
-    watch: vi.fn()
-  })
+  alarmsCreate: vi.fn()
 }))
 
 vi.mock("@/services/action", async (importOriginal) => ({
@@ -76,7 +63,6 @@ const flushPromises = async () => {
 describe("background clipper rollout guard", () => {
   const watchHandlers: Record<string, ((value: any) => void) | undefined> = {}
   let storedTldwConfig: Record<string, unknown>
-  let storedCookieSessionConfig: Record<string, unknown> | null
   const storage = {
     watch: vi.fn((handlers: Record<string, (value: any) => void>) => {
       Object.assign(watchHandlers, handlers)
@@ -85,24 +71,10 @@ describe("background clipper rollout guard", () => {
       if (key === "tldwConfig") {
         return storedTldwConfig
       }
-      if (key === "tldwCookieSessionConfig") {
-        return storedCookieSessionConfig
-      }
       return null
-    }),
-    set: vi.fn(async () => undefined)
+    })
   }
   const warmModels = vi.fn(async () => null)
-
-  it("reads quickstart deployment mode from extension-safe import.meta.env", () => {
-    const source = fs.readFileSync(
-      path.resolve(__dirname, "../background-init.ts"),
-      "utf8"
-    )
-
-    expect(source).toContain("import.meta.env")
-    expect(source).toContain("NEXT_PUBLIC_TLDW_DEPLOYMENT_MODE")
-  })
 
   beforeEach(() => {
     Object.keys(watchHandlers).forEach((key) => {
@@ -120,12 +92,10 @@ describe("background clipper rollout guard", () => {
     mocks.contextMenusRemoveAll.mockResolvedValue(undefined)
     mocks.alarmsClear.mockResolvedValue(undefined)
     mocks.alarmsCreate.mockResolvedValue(undefined)
-    mocks.sessionStorage.clear()
     storedTldwConfig = {
       serverUrl: "http://127.0.0.1:8000",
       authMode: "single-user"
     }
-    storedCookieSessionConfig = null
   })
 
   it("creates the clipper menu only when the connected server advertises support", async () => {
@@ -148,8 +118,7 @@ describe("background clipper rollout guard", () => {
       capabilities: {
         sendToTldw: false,
         processLocal: false,
-        transcribe: false,
-        openApiCheck: false
+        transcribe: false
       },
       onActionIconClickChange: vi.fn(),
       onContextMenuClickChange: vi.fn()
@@ -161,185 +130,48 @@ describe("background clipper rollout guard", () => {
     )
   })
 
-  it("skips same-origin WebUI OpenAPI drift probes", async () => {
-    const previousFetch = globalThis.fetch
-    const previousMode = process.env.NEXT_PUBLIC_TLDW_DEPLOYMENT_MODE
-    const fetchSpy = vi.fn()
-    vi.stubGlobal("fetch", fetchSpy)
-    process.env.NEXT_PUBLIC_TLDW_DEPLOYMENT_MODE = "quickstart"
-    storedTldwConfig = {
-      serverUrl: window.location.origin,
-      authMode: "single-user",
-      apiKey: "test-api-key",
-      credentialSource: "manual",
-      apiKeyPersistence: "device",
-      apiKeyServerOrigin: window.location.origin
-    }
-    try {
-      await initBackground({
-        storage: storage as never,
-        contextMenuId: { webui: "open-web-ui-pa", sidePanel: "open-side-panel-pa" },
-        saveToClipperMenuId: "save-to-clipper-pa",
-        saveToCompanionMenuId: "save-to-companion-pa",
-        saveToNotesMenuId: "save-to-notes-pa",
-        narrateSelectionMenuId: "narrate-selection-pa",
-        transcribeMenuId: {
-          transcribe: "transcribe-media-pa",
-          transcribeAndSummarize: "transcribe-and-summarize-media-pa"
-        },
-        warmModels,
-        capabilities: {
-          sendToTldw: false,
-          processLocal: false,
-          transcribe: false,
-          openApiCheck: true
-        },
-        onActionIconClickChange: vi.fn(),
-        onContextMenuClickChange: vi.fn()
-      })
-      await flushPromises()
-
-      expect(fetchSpy).not.toHaveBeenCalled()
-    } finally {
-      vi.stubGlobal("fetch", previousFetch)
-      if (previousMode === undefined) {
-        delete process.env.NEXT_PUBLIC_TLDW_DEPLOYMENT_MODE
-      } else {
-        process.env.NEXT_PUBLIC_TLDW_DEPLOYMENT_MODE = previousMode
+  it.each([window.location.origin, "https://api.example.test"])(
+    "does not send a separate OpenAPI drift probe at startup for %s",
+    async (serverUrl) => {
+      const fetchSpy = vi.fn(async () => ({ ok: false }))
+      vi.stubGlobal("fetch", fetchSpy)
+      storedTldwConfig = {
+        serverUrl,
+        authMode: "single-user",
+        apiKey: "test-api-key",
+        credentialSource: "manual",
+        apiKeyPersistence: "device",
+        apiKeyServerOrigin: serverUrl
       }
-    }
-  })
-
-  it("keeps advanced same-origin OpenAPI drift probes enabled", async () => {
-    const previousFetch = globalThis.fetch
-    const previousMode = process.env.NEXT_PUBLIC_TLDW_DEPLOYMENT_MODE
-    const fetchSpy = vi.fn(async () => ({ ok: false }))
-    vi.stubGlobal("fetch", fetchSpy)
-    process.env.NEXT_PUBLIC_TLDW_DEPLOYMENT_MODE = "advanced"
-    storedTldwConfig = {
-      serverUrl: window.location.origin,
-      authMode: "single-user",
-      apiKey: "test-api-key",
-      credentialSource: "manual",
-      apiKeyPersistence: "device",
-      apiKeyServerOrigin: window.location.origin
-    }
-    try {
-      await initBackground({
-        storage: storage as never,
-        contextMenuId: { webui: "open-web-ui-pa", sidePanel: "open-side-panel-pa" },
-        saveToClipperMenuId: "save-to-clipper-pa",
-        saveToCompanionMenuId: "save-to-companion-pa",
-        saveToNotesMenuId: "save-to-notes-pa",
-        narrateSelectionMenuId: "narrate-selection-pa",
-        transcribeMenuId: {
-          transcribe: "transcribe-media-pa",
-          transcribeAndSummarize: "transcribe-and-summarize-media-pa"
-        },
-        warmModels,
-        capabilities: {
-          sendToTldw: false,
-          processLocal: false,
-          transcribe: false,
-          openApiCheck: true
-        },
-        onActionIconClickChange: vi.fn(),
-        onContextMenuClickChange: vi.fn()
-      })
-      await vi.waitFor(() =>
-        expect(storage.set).toHaveBeenCalledWith(
-          "__tldwOpenApiDriftLastCheckV1",
-          { base: window.location.origin, checkedAt: expect.any(Number) }
-        )
-      )
-
-      expect(fetchSpy).toHaveBeenCalledWith(
-        `${window.location.origin}/openapi.json`,
-        expect.objectContaining({
-          headers: { "X-API-KEY": "test-api-key" }
+      try {
+        await initBackground({
+          storage: storage as never,
+          contextMenuId: { webui: "open-web-ui-pa", sidePanel: "open-side-panel-pa" },
+          saveToClipperMenuId: "save-to-clipper-pa",
+          saveToCompanionMenuId: "save-to-companion-pa",
+          saveToNotesMenuId: "save-to-notes-pa",
+          narrateSelectionMenuId: "narrate-selection-pa",
+          transcribeMenuId: {
+            transcribe: "transcribe-media-pa",
+            transcribeAndSummarize: "transcribe-and-summarize-media-pa"
+          },
+          warmModels,
+          capabilities: {
+            sendToTldw: false,
+            processLocal: false,
+            transcribe: false
+          },
+          onActionIconClickChange: vi.fn(),
+          onContextMenuClickChange: vi.fn()
         })
-      )
-    } finally {
-      vi.stubGlobal("fetch", previousFetch)
-      if (previousMode === undefined) {
-        delete process.env.NEXT_PUBLIC_TLDW_DEPLOYMENT_MODE
-      } else {
-        process.env.NEXT_PUBLIC_TLDW_DEPLOYMENT_MODE = previousMode
+        await flushPromises()
+
+        expect(fetchSpy).not.toHaveBeenCalled()
+      } finally {
+        vi.unstubAllGlobals()
       }
     }
-  })
-
-  it("hydrates extension session auth for OpenAPI checks and ignores cookie markers", async () => {
-    const previousFetch = globalThis.fetch
-    const previousMode = process.env.NEXT_PUBLIC_TLDW_DEPLOYMENT_MODE
-    const fetchSpy = vi.fn(async () => ({ ok: false }))
-    vi.stubGlobal("fetch", fetchSpy)
-    process.env.NEXT_PUBLIC_TLDW_DEPLOYMENT_MODE = "advanced"
-    storedTldwConfig = {
-      serverUrl: "https://api.example.test",
-      authMode: "single-user",
-      authSource: "manual",
-      credentialSource: "manual",
-      apiKeyPersistence: "session",
-      apiKeyServerOrigin: "https://api.example.test"
-    }
-    storedCookieSessionConfig = {
-      serverUrl: window.location.origin,
-      authMode: "single-user",
-      authSource: "cookie-session"
-    }
-    mocks.sessionStorage.set("tldwManualSessionApiKey", {
-      apiKey: "background-init-session-key",
-      credentialSource: "manual",
-      apiKeyPersistence: "session",
-      apiKeyServerOrigin: "https://api.example.test"
-    })
-
-    try {
-      await initBackground({
-        storage: storage as never,
-        contextMenuId: { webui: "open-web-ui-pa", sidePanel: "open-side-panel-pa" },
-        saveToClipperMenuId: "save-to-clipper-pa",
-        saveToCompanionMenuId: "save-to-companion-pa",
-        saveToNotesMenuId: "save-to-notes-pa",
-        narrateSelectionMenuId: "narrate-selection-pa",
-        transcribeMenuId: {
-          transcribe: "transcribe-media-pa",
-          transcribeAndSummarize: "transcribe-and-summarize-media-pa"
-        },
-        warmModels,
-        capabilities: {
-          sendToTldw: false,
-          processLocal: false,
-          transcribe: false,
-          openApiCheck: true
-        },
-        onActionIconClickChange: vi.fn(),
-        onContextMenuClickChange: vi.fn()
-      })
-      await vi.waitFor(() =>
-        expect(storage.set).toHaveBeenCalledWith(
-          "__tldwOpenApiDriftLastCheckV1",
-          { base: "https://api.example.test", checkedAt: expect.any(Number) }
-        )
-      )
-
-      expect(fetchSpy).toHaveBeenCalledWith(
-        "https://api.example.test/openapi.json",
-        expect.objectContaining({
-          headers: { "X-API-KEY": "background-init-session-key" }
-        })
-      )
-      expect(storedTldwConfig).not.toHaveProperty("apiKey")
-    } finally {
-      vi.stubGlobal("fetch", previousFetch)
-      if (previousMode === undefined) {
-        delete process.env.NEXT_PUBLIC_TLDW_DEPLOYMENT_MODE
-      } else {
-        process.env.NEXT_PUBLIC_TLDW_DEPLOYMENT_MODE = previousMode
-      }
-    }
-  })
+  )
 
   it("does not block startup on capability refreshes or model warmup", async () => {
     let resolveCapabilities: (value: { hasWebClipper: boolean }) => void = () => {}
@@ -369,8 +201,7 @@ describe("background clipper rollout guard", () => {
         capabilities: {
           sendToTldw: false,
           processLocal: false,
-          transcribe: false,
-          openApiCheck: false
+          transcribe: false
         },
         onActionIconClickChange: vi.fn(),
         onContextMenuClickChange: vi.fn()
@@ -402,8 +233,7 @@ describe("background clipper rollout guard", () => {
       capabilities: {
         sendToTldw: false,
         processLocal: false,
-        transcribe: false,
-        openApiCheck: false
+        transcribe: false
       },
       onActionIconClickChange: vi.fn(),
       onContextMenuClickChange: vi.fn()
@@ -440,8 +270,7 @@ describe("background clipper rollout guard", () => {
       capabilities: {
         sendToTldw: false,
         processLocal: false,
-        transcribe: false,
-        openApiCheck: false
+        transcribe: false
       },
       onActionIconClickChange: vi.fn(),
       onContextMenuClickChange: vi.fn()
@@ -489,8 +318,7 @@ describe("background clipper rollout guard", () => {
       capabilities: {
         sendToTldw: false,
         processLocal: false,
-        transcribe: false,
-        openApiCheck: false
+        transcribe: false
       },
       onActionIconClickChange: vi.fn(),
       onContextMenuClickChange: vi.fn()
@@ -525,8 +353,7 @@ describe("background clipper rollout guard", () => {
       capabilities: {
         sendToTldw: false,
         processLocal: false,
-        transcribe: false,
-        openApiCheck: false
+        transcribe: false
       },
       onActionIconClickChange: vi.fn(),
       onContextMenuClickChange: vi.fn()

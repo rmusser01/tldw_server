@@ -7,14 +7,11 @@ import {
 } from "@/services/action"
 import { getStorageForSetting } from "@/services/settings/registry"
 import { getServerCapabilities } from "@/services/tldw/server-capabilities"
-import { createSafeStorage } from "@/utils/safe-storage"
-import { resolveEffectiveTldwConfig } from "@/services/tldw/single-user-credential"
 
 export type BackgroundCapabilities = {
   sendToTldw: boolean
   processLocal: boolean
   transcribe: boolean
-  openApiCheck: boolean
 }
 
 export type BackgroundInitOptions = {
@@ -37,16 +34,6 @@ export type BackgroundInitResult = {
 
 export const MODEL_WARM_ALARM_NAME = "tldw:model-warm"
 const MODEL_WARM_INTERVAL_MINUTES = 360
-const OPENAPI_DRIFT_LAST_CHECK_KEY = "__tldwOpenApiDriftLastCheckV1"
-// Full /openapi.json downloads on every routine worker wake are far too
-// chatty; drift is re-checked at most daily (config changes still re-check
-// immediately because the persisted marker is scoped to the server base).
-const OPENAPI_DRIFT_MIN_INTERVAL_MS = 24 * 60 * 60 * 1000
-
-type OpenApiDriftLastCheck = {
-  base: string
-  checkedAt: number
-}
 
 const getServerUrl = (cfg: any): string => {
   if (!cfg || typeof cfg !== "object") return ""
@@ -98,176 +85,6 @@ const syncWebClipperContextMenu = async (menuId: string) => {
     title: browser.i18n.getMessage("contextSaveToClipper"),
     contexts: ["page", "selection"]
   })
-}
-
-const shouldSkipOpenApiDriftCheck = async (
-  storage: Storage,
-  base: string,
-  force = false
-): Promise<boolean> => {
-  if (force) return false
-  try {
-    const raw = await storage.get<OpenApiDriftLastCheck | null>(
-      OPENAPI_DRIFT_LAST_CHECK_KEY
-    )
-    if (!raw || typeof raw !== "object") return false
-
-    const previousBase = String((raw as any).base || "")
-    const checkedAt = Number((raw as any).checkedAt || 0)
-    if (!previousBase || previousBase !== base) return false
-    if (!Number.isFinite(checkedAt) || checkedAt <= 0) return false
-    return Date.now() - checkedAt < OPENAPI_DRIFT_MIN_INTERVAL_MS
-  } catch {
-    return false
-  }
-}
-
-const markOpenApiDriftCheck = async (
-  storage: Storage,
-  base: string
-): Promise<void> => {
-  try {
-    await storage.set(OPENAPI_DRIFT_LAST_CHECK_KEY, {
-      base,
-      checkedAt: Date.now()
-    } satisfies OpenApiDriftLastCheck)
-  } catch {
-    // best-effort cache write only
-  }
-}
-
-const getCurrentHttpPageOrigin = (): string | null => {
-  if (typeof window === "undefined") return null
-  try {
-    const protocol = String(window.location?.protocol || "").toLowerCase()
-    if (protocol !== "http:" && protocol !== "https:") return null
-    return String(window.location?.origin || "").trim() || null
-  } catch {
-    return null
-  }
-}
-
-const getDeploymentMode = (): string => {
-  try {
-    const viteEnv = import.meta.env as Record<string, unknown> | undefined
-    const viteMode = String(
-      (viteEnv?.NEXT_PUBLIC_TLDW_DEPLOYMENT_MODE as string | undefined) || ""
-    ).trim()
-    if (viteMode) return viteMode
-  } catch {
-    // Fall back to process.env for Next.js/test contexts.
-  }
-
-  try {
-    return String(
-      typeof process !== "undefined"
-        ? process.env.NEXT_PUBLIC_TLDW_DEPLOYMENT_MODE || ""
-        : ""
-    ).trim()
-  } catch {
-    return ""
-  }
-}
-
-const isQuickstartDeploymentMode = (): boolean => {
-  return getDeploymentMode() === "quickstart"
-}
-
-const isSameOriginWebUiOpenApiBase = (base: string): boolean => {
-  if (!isQuickstartDeploymentMode()) return false
-  const pageOrigin = getCurrentHttpPageOrigin()
-  if (!pageOrigin) return false
-  try {
-    const parsed = new URL(base)
-    const basePath = parsed.pathname.replace(/\/+$/, "")
-    return parsed.origin === pageOrigin && basePath === ""
-  } catch {
-    return false
-  }
-}
-
-const checkOpenApiDrift = async (storage: Storage, options?: { force?: boolean }) => {
-  let timeout: ReturnType<typeof setTimeout> | null = null
-  try {
-    const cfg = await resolveEffectiveTldwConfig({
-      persistent: storage,
-      session: createSafeStorage({ area: "session" })
-    })
-    const base = String(cfg?.serverUrl || "").replace(/\/$/, "")
-    if (!base) return
-    if (isSameOriginWebUiOpenApiBase(base)) return
-    if (await shouldSkipOpenApiDriftCheck(storage, base, options?.force === true))
-      return
-
-    const controller = new AbortController()
-    timeout = setTimeout(() => controller.abort(), 10000)
-    const headers: Record<string, string> = {}
-
-    if (cfg?.authMode === "single-user") {
-      const key = String(cfg?.apiKey || "").trim()
-      if (key) headers["X-API-KEY"] = key
-    } else if (cfg?.authMode === "multi-user") {
-      const token = String(cfg?.accessToken || "").trim()
-      if (token) headers["Authorization"] = `Bearer ${token}`
-    }
-
-    const res = await fetch(`${base}/openapi.json`, {
-      headers,
-      signal: controller.signal
-    })
-    await markOpenApiDriftCheck(storage, base)
-
-    if (!res.ok) return
-
-    const spec = await res.json().catch(() => null)
-    const paths = spec && spec.paths ? spec.paths : {}
-    const required = [
-      "/api/v1/chat/completions",
-      "/api/v1/rag/search",
-      "/api/v1/rag/search/stream",
-      "/api/v1/media/ingest/jobs",
-      "/api/v1/media/process-videos",
-      "/api/v1/media/process-audios",
-      "/api/v1/media/process-pdfs",
-      "/api/v1/media/process-ebooks",
-      "/api/v1/media/process-documents",
-      "/api/v1/media/process-web-scraping",
-      "/api/v1/reading/save",
-      "/api/v1/reading/items",
-      "/api/v1/audio/transcriptions",
-      "/api/v1/audio/speech",
-      "/api/v1/llm/models",
-      "/api/v1/llm/models/metadata",
-      "/api/v1/llm/providers",
-      // Workspace features
-      "/api/v1/notes/",
-      "/api/v1/notes/search/",
-      "/api/v1/flashcards",
-      "/api/v1/flashcards/decks",
-      "/api/v1/characters/world-books",
-      "/api/v1/chat/dictionaries",
-      "/api/v1/web-clipper/save"
-    ]
-    const missing = required.filter((path) => !(path in paths))
-    if (missing.length > 0) {
-      console.warn("[tldw] OpenAPI drift detected - missing endpoints:", missing)
-      try {
-        await browser.runtime.sendMessage({
-          type: "tldw:openapi-warn",
-          payload: { missing }
-        })
-      } catch {}
-    }
-  } catch (error) {
-    console.debug(
-      "[tldw] OpenAPI check skipped:",
-      (error as any)?.message || error
-    )
-  } finally {
-    if (timeout) {
-      clearTimeout(timeout)
-    }
-  }
 }
 
 export const initBackground = async (
@@ -465,10 +282,6 @@ export const initBackground = async (
         contexts: ["page", "link"]
       })
     }
-  }
-
-  if (capabilities.openApiCheck) {
-    void checkOpenApiDrift(storage)
   }
 
   let hasServer = false

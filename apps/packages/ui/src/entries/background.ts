@@ -583,7 +583,6 @@ export default defineBackground({
             sendToTldw: true,
             processLocal: true,
             transcribe: true,
-            openApiCheck: true,
           },
           onActionIconClickChange: (value) => {
             actionIconClick = value;

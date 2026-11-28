@@ -6,6 +6,7 @@ import os
 import time
 from collections.abc import Mapping
 from concurrent.futures import ThreadPoolExecutor, as_completed
+from dataclasses import dataclass
 from functools import partial
 from time import monotonic as _vision_cache_time
 from typing import Any, Optional
@@ -102,6 +103,8 @@ import tldw_Server_API.app.core.config_llm_providers as _config_llm_providers
 # Functions:
 
 router = APIRouter()
+
+_CATALOG_CREDENTIAL_STORE_UNAVAILABLE = "credential_store_unavailable"
 
 _LLM_PROVIDERS_NONCRITICAL_EXCEPTIONS = (
     AssertionError,
@@ -874,24 +877,50 @@ def _resolve_commercial_listings(
         return None
 
 
+def _local_only_provider_listing(listing: dict[str, Any]) -> dict[str, Any]:
+    """Keep local discovery available when cloud credential policy cannot be verified."""
+    providers = [
+        entry
+        for entry in listing.get("providers", [])
+        if isinstance(entry, dict) and entry.get("type") == "local"
+    ]
+    return {
+        **listing,
+        "providers": providers,
+        "total_configured": len(providers),
+        "error": "Provider credential store is unavailable.",
+        "error_code": _CATALOG_CREDENTIAL_STORE_UNAVAILABLE,
+    }
+
+
+@dataclass(frozen=True, repr=False)
+class _ProviderListingCredentials:
+    """Credential state for one provider discovery call."""
+
+    own_keys: Mapping[str, Any] | None = None
+    local_only: bool = False
+
+
 def get_configured_providers(
     include_deprecated: bool = False,
     refresh_openrouter: bool = False,
-    own_keys: Mapping[str, Any] | None = None,
+    credentials: _ProviderListingCredentials = _ProviderListingCredentials(),
 ) -> dict[str, Any]:
     """
     Get list of configured LLM providers with their models from the config file.
 
-    ``own_keys`` (provider -> the requesting user's own-key handle) lists each of those commercial providers on
-    that key instead of the server's (TASK-15583). Returns a dictionary containing provider information.
+    List commercial providers on the requesting user's own key where available.
+    Use local-only discovery when the caller already knows the credential store is unavailable.
     """
     try:
         config_parser = _config.load_comprehensive_config()
-        try:
-            provider_overrides = _llm_provider_overrides.get_llm_provider_overrides_snapshot()
-            credential_store_available = True
-        except ByokResolutionError:
-            provider_overrides, credential_store_available = {}, False
+        provider_overrides = {}
+        local_only = credentials.local_only
+        if not local_only:
+            try:
+                provider_overrides = _llm_provider_overrides.get_llm_provider_overrides_snapshot()
+            except ByokResolutionError:
+                local_only = True
         runtime_context = _build_runtime_context(config_parser)
         providers = []
 
@@ -907,12 +936,13 @@ def get_configured_providers(
             and not provider_overrides
         ):
             logger.warning("No API or Local-API sections found in config")
-            return {
+            empty_listing: dict[str, Any] = {
                 'providers': [],
                 'default_provider': None,
                 'total_configured': 0,
                 'message': 'No API configuration sections found in config.txt'
             }
+            return _local_only_provider_listing(empty_listing) if local_only else empty_listing
 
         try:
             api_keys_by_provider = _config_llm_providers.get_api_keys()
@@ -1184,9 +1214,9 @@ def get_configured_providers(
         commercial_listings = (
             _resolve_commercial_listings(
                 provider_mappings, config_parser, api_keys_by_provider, provider_overrides, refresh_openrouter,
-                own_keys,
+                credentials.own_keys,
             )
-            if credential_store_available else None
+            if not local_only else None
         )
         if commercial_listings is None:
             logger.error("Provider credential store is unavailable; listing local providers only")
@@ -1518,18 +1548,11 @@ def get_configured_providers(
             'default_provider': default_api,
             'total_configured': len(providers)
         }
-        if commercial_listings is None:
-            listing['error'] = 'Provider credential store is unavailable.'
-        return listing
+        return _local_only_provider_listing(listing) if commercial_listings is None else listing
 
     except ByokResolutionError:
         logger.error("Provider credential store is unavailable")
-        return {
-            'providers': [],
-            'default_provider': 'openai',
-            'total_configured': 0,
-            'error': 'Provider credential store is unavailable.',
-        }
+        return _local_only_provider_listing({"default_provider": "openai"})
     except _LLM_PROVIDERS_NONCRITICAL_EXCEPTIONS:
         logger.error("Error getting configured providers")
         return {
@@ -1543,7 +1566,7 @@ def get_configured_providers(
 async def get_configured_providers_async(
     include_deprecated: bool = False,
     refresh_openrouter: bool = False,
-    own_keys: Mapping[str, Any] | None = None,
+    credentials: _ProviderListingCredentials = _ProviderListingCredentials(),
 ) -> dict[str, Any]:
     """Run provider discovery in a worker thread to avoid blocking the event loop."""
     loop = asyncio.get_running_loop()
@@ -1553,7 +1576,7 @@ async def get_configured_providers_async(
             get_configured_providers,
             include_deprecated=include_deprecated,
             refresh_openrouter=refresh_openrouter,
-            own_keys=own_keys,
+            credentials=credentials,
         ),
     )
 
@@ -1864,24 +1887,38 @@ async def _users_listing(user_id: Any, **options: Any) -> dict[str, Any]:
             try:
                 snapshot = _llm_provider_overrides.capture_provider_override_call_snapshot(provider)
                 disabled = snapshot.policy_error(None, allowlist=False) is not None
+            except ByokResolutionError as error:
+                if error.code != _CATALOG_CREDENTIAL_STORE_UNAVAILABLE:
+                    raise
+                return await get_configured_providers_async(
+                    **options, credentials=_ProviderListingCredentials(local_only=True),
+                )
             except _LLM_PROVIDERS_NONCRITICAL_EXCEPTIONS:
-                disabled = True  # a store outage lists nothing on a user's key; the server's listing handles it
+                disabled = True
             if disabled:
                 continue  # a disabled provider's stored key is never touched (a lookup can refresh an OAuth token)
             handle = await users_own_key_credentials(user_id, provider, policy=False)
             if handle is not None:
                 own_keys[provider] = handle
-    listing = await get_configured_providers_async(**options, own_keys=own_keys)
-    if not own_keys:
-        return _llm_provider_overrides.apply_llm_provider_overrides_to_listing(listing)
-    providers: list[Any] = []
-    for entry in listing.get("providers", []):
-        if isinstance(entry, dict) and entry.get("name") in own_keys:
-            providers.append(_own_key_entry(entry))
-        else:
-            applied = _llm_provider_overrides.apply_llm_provider_overrides_to_listing({"providers": [entry]})
-            providers += applied["providers"]
-    return {**listing, "providers": providers}
+    listing = await get_configured_providers_async(
+        **options, credentials=_ProviderListingCredentials(own_keys=own_keys),
+    )
+    try:
+        if not own_keys:
+            return _llm_provider_overrides.apply_llm_provider_overrides_to_listing(listing)
+        providers: list[Any] = []
+        for entry in listing.get("providers", []):
+            if isinstance(entry, dict) and entry.get("name") in own_keys:
+                providers.append(_own_key_entry(entry))
+            else:
+                applied = _llm_provider_overrides.apply_llm_provider_overrides_to_listing({"providers": [entry]})
+                providers += applied["providers"]
+        return {**listing, "providers": providers}
+    except ByokResolutionError as error:
+        if error.code != _CATALOG_CREDENTIAL_STORE_UNAVAILABLE:
+            raise
+        logger.warning("Provider credential store became unavailable while publishing model discovery")
+        return _local_only_provider_listing(listing)
 
 
 #######################################################################################################################
@@ -2082,10 +2119,10 @@ async def get_models_metadata(
             ):
                 continue
             flattened.append(entry)
-        return {
-            'models': flattened,
-            'total': len(flattened)
-        }
+        metadata: dict[str, Any] = {'models': flattened, 'total': len(flattened)}
+        if 'error_code' in result:
+            metadata['error_code'] = result['error_code']
+        return metadata
     except _LLM_PROVIDERS_NONCRITICAL_EXCEPTIONS as e:
         logger.error("Error getting models metadata")
         raise HTTPException(

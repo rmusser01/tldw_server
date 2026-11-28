@@ -94,8 +94,7 @@ async function initialize() {
     capabilities: {
       sendToTldw: false,
       processLocal: false,
-      transcribe: false,
-      openApiCheck: false
+      transcribe: false
     },
     onActionIconClickChange: action,
     onContextMenuClickChange: contextMenu

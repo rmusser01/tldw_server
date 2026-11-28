@@ -5,6 +5,8 @@ from types import SimpleNamespace
 from unittest.mock import Mock
 
 import pytest
+from fastapi import FastAPI
+from fastapi.testclient import TestClient
 
 from tldw_Server_API.app.api.v1.endpoints import llm_providers as catalog
 from tldw_Server_API.app.core.AuthNZ import llm_provider_overrides as overrides
@@ -181,6 +183,43 @@ def test_credential_store_failure_drops_only_commercial_entries(inventory, monke
     assert "anthropic" not in names
     assert result["error"] == "Provider credential store is unavailable."
     inventory.assert_not_called()
+
+
+@pytest.mark.unit
+@pytest.mark.parametrize("user_id", [None, 42], ids=["anonymous", "signed-in"])
+@pytest.mark.parametrize("failure_at", ["snapshot", "discovery", "publication"])
+def test_model_metadata_keeps_local_catalog_when_credentials_are_unavailable(
+    inventory, monkeypatch, failure_at, user_id,
+):
+    _with_local_provider(monkeypatch)
+
+    def unavailable(*_args, **_kwargs):
+        raise ByokResolutionError("credential_store_unavailable", "provider-overrides")
+
+    if failure_at == "snapshot":
+        monkeypatch.setattr(overrides, "_get_healthy_override_snapshot", unavailable)
+        monkeypatch.setattr(overrides, "get_llm_provider_overrides_snapshot", unavailable)
+    elif failure_at == "discovery":
+        monkeypatch.setattr(overrides.ProviderOverrideCallSnapshot, "server_fallback", unavailable)
+    else:
+        monkeypatch.setattr(overrides, "apply_llm_provider_overrides_to_listing", unavailable)
+    monkeypatch.setattr("tldw_Server_API.app.core.Image_Generation.listing.list_image_models_for_catalog", lambda: [])
+
+    app = FastAPI()
+    app.include_router(catalog.router, prefix="/api/v1")
+    app.dependency_overrides[catalog.listing_user_id] = lambda: user_id
+    with TestClient(app, raise_server_exceptions=False) as client:
+        response = client.get("/api/v1/llm/models/metadata")
+
+    assert response.status_code == 200, response.text
+    body = response.json()
+    assert body["error_code"] == "credential_store_unavailable"
+    providers = {entry["provider"] for entry in body["models"]}
+    assert "ollama" in providers
+    assert "anthropic" not in providers
+    assert body["total"] == len(body["models"])
+    if failure_at != "publication":
+        inventory.assert_not_called()
 
 
 @pytest.mark.unit
