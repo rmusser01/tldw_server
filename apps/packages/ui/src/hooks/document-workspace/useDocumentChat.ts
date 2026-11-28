@@ -620,7 +620,10 @@ export function useDocumentChat(
                 collection.mediaUuid !== chat.historyInfo.document_media_uuid)) {
             throw new Error("Document conversation is unavailable")
           }
+          // IndexedDB returns these rows by message ID. The explicit projection
+          // below preserves its input order, so restore the saved chronology first.
           const rows = [...new Map(chat.messages.map(row => [row.serverMessageId || row.id, row])).values()]
+            .sort((a, b) => a.createdAt - b.createdAt)
           const messageIds = rows.map(row => row.id)
           session = {
             ...createEmptySession(),

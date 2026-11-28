@@ -87,9 +87,10 @@ async function openChat(browser: Browser, tokens: Awaited<ReturnType<typeof logi
   return { context, page, input, completions }
 }
 
-async function openWorkspaceChat(page: Page, documentTitle: string) {
+async function openWorkspaceChat(page: Page, documentTitle: string, reload = false) {
   const workspace = new DocumentWorkspacePage(page)
-  await workspace.goto()
+  if (reload) await page.reload()
+  else await workspace.goto()
   await workspace.assertPageReady()
   const dismiss = page.getByRole("button", { name: "Not now", exact: true })
   if (await dismiss.isVisible()) await dismiss.click()
@@ -120,6 +121,37 @@ const replies = (page: Page) => page.getByRole("article", { name: /assistant mes
   .getByText("Verified answer from the test model.", { exact: true })
 const sendButton = (page: Page) => page.getByRole("button", { name: "Send", exact: true })
 
+async function putReplyFirstInIndexedDb(page: Page, documentId: string) {
+  // Random production IDs sometimes sort this way. Keep the actual saved turn
+  // and force its key order so the regression fails on every run.
+  await page.evaluate(docId => new Promise<void>((resolve, reject) => {
+    const open = indexedDB.open("PageAssistDatabase")
+    open.onerror = () => reject(open.error)
+    open.onsuccess = () => {
+      const db = open.result
+      const tx = db.transaction(["chatHistories", "messages"], "readwrite")
+      tx.oncomplete = () => { db.close(); resolve() }
+      tx.onabort = () => { db.close(); reject(tx.error ?? new Error("Expected a saved browser-only turn")) }
+      const histories = tx.objectStore("chatHistories").index("doc_id").getAll(docId)
+      histories.onsuccess = () => {
+        const [history] = histories.result.filter(row => !row.server_chat_id)
+        if (!history) { tx.abort(); return }
+        const messages = tx.objectStore("messages")
+        const rows = messages.index("history_id").getAll(history.id)
+        rows.onsuccess = () => {
+          const question = rows.result.find(row => row.role === "user")
+          const reply = rows.result.find(row => row.role === "assistant")
+          if (rows.result.length !== 2 || !question || !reply) { tx.abort(); return }
+          messages.delete(question.id)
+          messages.delete(reply.id)
+          messages.add({ ...question, id: "z-order-question" })
+          messages.add({ ...reply, id: "a-order-reply", parent_message_id: "z-order-question" })
+        }
+      }
+    }
+  }), documentId)
+}
+
 function savedReply(page: Page) {
   return page.waitForResponse(response =>
     /\/chats\/[^/]+\/messages\?/.test(response.url()) &&
@@ -131,6 +163,41 @@ function savedReply(page: Page) {
 }
 
 for (const extension of ["pdf", "epub"] as const) {
+  test(`preserves browser-only ${extension.toUpperCase()} transcript order after switching chats and reloading`, async ({ browser, request }) => {
+    test.setTimeout(120_000)
+    const tokens = await login(request, await register(request))
+    const fixture = await upload(request, tokens.access_token, extension, `Browser-only ${extension} ordering fixture`)
+    const { context, page, input } = await openChat(browser, tokens, fixture.title)
+    try {
+      const question = `Original ${extension} question`
+      await expect(page.locator(extension === "pdf" ? ".react-pdf__Page__canvas" : "iframe").first()).toBeVisible()
+      await page.getByRole("checkbox", { name: "Save to server" }).uncheck()
+      await input.fill(question)
+      await sendButton(page).click()
+      await expect(page.getByRole("button", { name: "Save to server", exact: true })).toBeEnabled()
+      await putReplyFirstInIndexedDb(page, `document:${fixture.mediaId}`)
+
+      const saved = list(page).getByRole("tab", { name: question, exact: true })
+      const articles = page.getByRole("tabpanel", { name: question, exact: true }).getByRole("article")
+      const assertTranscript = async (transition: string) => {
+        await expect(articles).toHaveCount(2)
+        await expect.soft(articles.first(), `Question first after ${transition}`).toContainText(question, { timeout: 2_000 })
+        await expect.soft(articles.last(), `Reply second after ${transition}`).toContainText("Verified answer from the test model.", { timeout: 2_000 })
+      }
+      await page.getByRole("button", { name: "New chat" }).click()
+      await expect(articles).toHaveCount(0)
+      await saved.click()
+      await assertTranscript("switching conversations")
+
+      await openWorkspaceChat(page, fixture.title, true)
+      await saved.click()
+      await assertTranscript("reloading")
+      await expect(page.getByRole("button", { name: "Save to server", exact: true })).toBeEnabled()
+    } finally {
+      await context.close()
+    }
+  })
+
   test(`syncs the same ${extension.toUpperCase()} chat and sources between two signed-in browsers`, async ({ browser, request }) => {
     test.setTimeout(180_000)
     const owner = await register(request)
