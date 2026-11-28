@@ -13,6 +13,7 @@ from tldw_Server_API.app.api.v1.schemas.prompt_studio_schemas import ExecuteProm
 from tldw_Server_API.app.core.exceptions import LLMQuotaExceededError
 from tldw_Server_API.app.core.Prompt_Management.prompt_studio import prompt_executor as executor_module
 from tldw_Server_API.app.core.Prompt_Management.prompt_studio.prompt_executor import PromptExecutor
+from tldw_Server_API.tests.helpers.gateway_routing import route_gateway_adapters
 
 pytestmark = pytest.mark.unit
 
@@ -48,6 +49,7 @@ async def test_call_llm_lets_the_refusal_through(monkeypatch: pytest.MonkeyPatch
     monkeypatch.setattr(
         executor_module, "get_registry", lambda: SimpleNamespace(get_adapter=lambda _name: _RefusingAdapter())
     )
+    route_gateway_adapters(monkeypatch, lambda _name: _RefusingAdapter(), caller="prompt_executor")
     monkeypatch.setattr(executor_module, "await_bounded_sync_call", _run_sync_call)
 
     with pytest.raises(LLMQuotaExceededError):

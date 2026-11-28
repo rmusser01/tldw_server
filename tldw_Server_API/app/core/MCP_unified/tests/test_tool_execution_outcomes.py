@@ -57,6 +57,11 @@ def test_expected_tool_failure_reason_catalog_is_fixed_and_bounded() -> None:
             "The LLM usage limit for this account has been reached.",
             outcomes.BreakerAction.IGNORE,
         ),
+        "LLM_POLICY_REFUSED": (
+            "llm_policy_refused",
+            "The request was refused by the moderation policy.",
+            outcomes.BreakerAction.IGNORE,
+        ),
     }
 
     assert {

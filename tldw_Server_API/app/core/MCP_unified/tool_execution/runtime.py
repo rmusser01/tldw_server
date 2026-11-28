@@ -512,7 +512,7 @@ class ToolExecutionRuntime:
                             execution_args = dict(admitted_tool_args)
                             execution_args["idempotencyKey"] = normalized_idempotency_key
                         module_invoked = True
-                        from tldw_Server_API.app.core.exceptions import LLMQuotaExceededError
+                        from tldw_Server_API.app.core.exceptions import LLMPolicyRefusal, LLMQuotaExceededError
                         from tldw_Server_API.app.core.Usage.llm_call_context import llm_call_context
                         from tldw_Server_API.app.core.Usage.quota_checks import as_quota_user_id
 
@@ -534,6 +534,11 @@ class ToolExecutionRuntime:
                                 # One user's limit, not a module fault: the breaker ignores it (spec §4b).
                                 raise ExpectedToolFailure(
                                     ExpectedToolFailureReason.LLM_QUOTA_EXCEEDED,
+                                ) from None
+                            except LLMPolicyRefusal:
+                                # One user's blocked text, not a module fault: it must not trip the breaker for everyone.
+                                raise ExpectedToolFailure(
+                                    ExpectedToolFailureReason.LLM_POLICY_REFUSED,
                                 ) from None
 
                     result = await module.execute_with_circuit_breaker(

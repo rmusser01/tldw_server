@@ -21,6 +21,7 @@ from tldw_Server_API.app.api.v1.schemas.prompt_studio_schemas import (
 from tldw_Server_API.app.core.AuthNZ.provider_credential_runtime import (
     PROVIDER_CALL_CREDENTIALS_CONTEXT_KEY,
 )
+from tldw_Server_API.tests.helpers.gateway_routing import route_gateway_adapters
 
 
 def _install_owned_worker_cancellation_ack(
@@ -223,6 +224,7 @@ async def test_direct_prompt_endpoint_uses_scoped_runtime_and_shared_adapter_poo
         pool,
     )
     monkeypatch.setattr(executor_module, "get_registry", lambda: _Registry())
+    route_gateway_adapters(monkeypatch, lambda provider, _registry=lambda: _Registry(): _registry().get_adapter(provider), caller="prompt_executor")
     monkeypatch.setattr(
         executor_module,
         "ensure_app_config",
@@ -512,6 +514,7 @@ async def test_direct_prompt_endpoint_rejects_nonsemantic_adapter_200_before_mar
         pool,
     )
     monkeypatch.setattr(executor_module, "get_registry", lambda: _Registry())
+    route_gateway_adapters(monkeypatch, lambda provider, _registry=lambda: _Registry(): _registry().get_adapter(provider), caller="prompt_executor")
     monkeypatch.setattr(executor_module, "ensure_app_config", lambda *_a, **_k: {})
     monkeypatch.setattr(
         executor_module,
@@ -759,6 +762,7 @@ async def test_direct_prompt_endpoint_cancellation_drains_before_mark_and_close(
         pool,
     )
     monkeypatch.setattr(executor_module, "get_registry", lambda: _Registry())
+    route_gateway_adapters(monkeypatch, lambda provider, _registry=lambda: _Registry(): _registry().get_adapter(provider), caller="prompt_executor")
     monkeypatch.setattr(executor_module, "ensure_app_config", lambda *_a, **_k: {})
     monkeypatch.setattr(
         executor_module,
@@ -881,6 +885,7 @@ async def test_direct_prompt_endpoint_concurrent_scopes_and_marks_are_isolated(
         pool,
     )
     monkeypatch.setattr(executor_module, "get_registry", lambda: _Registry())
+    route_gateway_adapters(monkeypatch, lambda provider, _registry=lambda: _Registry(): _registry().get_adapter(provider), caller="prompt_executor")
     monkeypatch.setattr(
         executor_module,
         "ensure_app_config",
@@ -2166,7 +2171,7 @@ async def test_prompt_studio_keeps_request_snapshot_at_adapter_boundary(
         adapter_providers.append(provider)
         return RecordingAdapter()
 
-    monkeypatch.setattr(evaluation_manager, "get_adapter_or_raise", get_recording_adapter)
+    route_gateway_adapters(monkeypatch, get_recording_adapter)
     monkeypatch.setattr(test_runner.TestRunner, "run_single_test", run_single_test)
     monkeypatch.delenv("PYTEST_CURRENT_TEST", raising=False)
 
@@ -2197,16 +2202,19 @@ async def test_prompt_studio_keeps_request_snapshot_at_adapter_boundary(
         func, args, kwargs = background_tasks.task
         await func(*args, **kwargs)
 
+    if captured_key is None:
+        # A resolved call with no key never falls back to a server key: it fails closed before any dispatch.
+        assert not adapter_requests
+        return
     assert adapter_requests
     assert all(request["api_key"] == captured_key for request, _timeout in adapter_requests)
     assert all(
         request["app_config"] == (captured_config or {})
         for request, _timeout in adapter_requests
     )
-    assert all(
-        request["credentials_resolved"] is True
-        for request, _timeout in adapter_requests
-    )
+    # Without a runtime handle the gateway takes the explicit key and config as given (TASK-13950.27 R6): the
+    # flag is not forwarded to the adapter.
+    assert all("credentials_resolved" not in request for request, _timeout in adapter_requests)
     assert [timeout for _request, timeout in adapter_requests] == [37]
     assert adapter_providers == ["anthropic"]
     init_kwargs = lifecycle[0][1]
@@ -2338,11 +2346,7 @@ async def test_prompt_studio_concurrent_adapter_snapshots_remain_isolated(
             }
         },
     )
-    monkeypatch.setattr(
-        evaluation_manager,
-        "get_adapter_or_raise",
-        lambda provider: RecordingAdapter() if provider == "anthropic" else None,
-    )
+    route_gateway_adapters(monkeypatch, lambda provider: RecordingAdapter() if provider == "anthropic" else None)
     monkeypatch.setattr(test_runner.TestRunner, "run_single_test", run_single_test)
     monkeypatch.delenv("PYTEST_CURRENT_TEST", raising=False)
 
@@ -2479,7 +2483,7 @@ async def test_prompt_studio_timeout_drains_adapter_before_runtime_close_without
     monkeypatch.setattr("tldw_Server_API.app.core.Logging.log_context.ensure_request_id", lambda _request: "req-timeout")
     monkeypatch.setattr("tldw_Server_API.app.core.Logging.log_context.ensure_traceparent", lambda _request: "")
     monkeypatch.setattr(evaluation_manager, "is_test_mode", lambda: False)
-    monkeypatch.setattr(evaluation_manager, "get_adapter_or_raise", lambda _provider: _TimeoutAdapter())
+    route_gateway_adapters(monkeypatch, lambda _provider: _TimeoutAdapter())
     monkeypatch.setattr(test_runner.TestRunner, "run_single_test", _run_single_test)
     monkeypatch.delenv("PYTEST_CURRENT_TEST", raising=False)
 
@@ -3453,7 +3457,7 @@ def test_prompt_studio_manager_adapter_rejects_in_band_provider_error(
 
     monkeypatch.setattr(evaluation_manager, "is_test_mode", lambda: False)
     monkeypatch.delenv("PYTEST_CURRENT_TEST", raising=False)
-    monkeypatch.setattr(evaluation_manager, "get_adapter_or_raise", lambda _provider: _Adapter())
+    route_gateway_adapters(monkeypatch, lambda _provider: _Adapter())
 
     with pytest.raises(RuntimeError) as exc_info:
         evaluation_manager.EvaluationManager._call_adapter_text(

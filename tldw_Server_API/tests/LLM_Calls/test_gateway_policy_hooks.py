@@ -85,7 +85,7 @@ async def _mcp():  # the weakest driver: a private method on an instance built w
 @pytest.mark.asyncio
 @pytest.mark.parametrize(
     ("drive", "surface"),
-    [(_workflow, "workflows.step"), (_rag, "rag.generation"), (_mcp, None)],  # MCP names its surface in a later PR
+    [(_workflow, "workflows.step"), (_rag, "rag.generation"), (_mcp, "study.quizzes")],
     ids=["workflows", "rag", "mcp"],
 )
 async def test_a_registered_hook_fires_for_workflow_rag_and_mcp_calls(fake_provider, recorded, drive, surface):

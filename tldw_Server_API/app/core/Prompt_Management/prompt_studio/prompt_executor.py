@@ -22,7 +22,7 @@ from tldw_Server_API.app.core.Chat.streaming_utils import (
     provider_result_contains_error,
 )
 from tldw_Server_API.app.core.DB_Management.PromptStudioDatabase import PromptStudioDatabase
-from tldw_Server_API.app.core.exceptions import LLMQuotaExceededError, raise_detached_error
+from tldw_Server_API.app.core.exceptions import LLMPolicyRefusal, LLMQuotaExceededError, raise_detached_error
 from tldw_Server_API.app.core.LLM_Calls.adapter_registry import get_registry
 from tldw_Server_API.app.core.LLM_Calls.adapter_utils import (
     ensure_app_config,
@@ -31,6 +31,8 @@ from tldw_Server_API.app.core.LLM_Calls.adapter_utils import (
     resolve_provider_model,
     split_system_message,
 )
+from tldw_Server_API.app.core.LLM_Calls.provider_results import raise_if_content_filtered
+from tldw_Server_API.app.core.Prompt_Management.prompt_studio.gateway_call import call_prompt_studio_llm
 from tldw_Server_API.app.core.Prompt_Management.structured_prompts import (
     StructuredPromptAssemblyError,
     assemble_prompt_definition,
@@ -189,8 +191,8 @@ class PromptExecutor:
                 }
             }
 
-        except LLMQuotaExceededError:
-            raise  # the user's limit, not a failed execution reported as a provider error
+        except (LLMQuotaExceededError, LLMPolicyRefusal):
+            raise  # the user's limit or a moderation refusal, not a failed execution reported as a provider error
         except Exception as e:
             logger.error(
                 "Prompt execution failed; error_type={}",
@@ -530,6 +532,7 @@ class PromptExecutor:
                         streaming=False,
                         app_config=request["app_config"],
                         credentials_resolved=request["credentials_resolved"],
+                        llm_surface="prompt_studio",
                     ),
                     pool=SYNC_ADAPTER_CALL_POOL,
                     exhaustion_message="Prompt Studio adapter capacity is exhausted",
@@ -539,13 +542,12 @@ class PromptExecutor:
                         else None
                     ),
                 )
+                raise_if_content_filtered(response)  # the legacy path gets the same refusal rule
             else:
                 provider_dispatched = True
                 response = await await_bounded_sync_call(
-                    lambda adapter=adapter, request=request: (
-                        adapter.chat(request, timeout=timeout_seconds)
-                        if timeout_seconds is not None
-                        else adapter.chat(request)
+                    lambda request=request: call_prompt_studio_llm(
+                        normalize_provider(api_endpoint), request, timeout=timeout_seconds
                     ),
                     pool=SYNC_ADAPTER_CALL_POOL,
                     exhaustion_message="Prompt Studio adapter capacity is exhausted",
@@ -559,8 +561,8 @@ class PromptExecutor:
             if on_provider_success is not None:
                 await await_owned_worker(on_provider_success())
             return {"content": content, "tokens": tokens}
-        except LLMQuotaExceededError:
-            raise  # the user's limit, not "Provider returned an error response"
+        except (LLMQuotaExceededError, LLMPolicyRefusal):
+            raise  # the user's limit or a moderation refusal, not "Provider returned an error response"
         except Exception as e:
             logger.error(
                 "LLM call failed for {}/{}; error_type={}",

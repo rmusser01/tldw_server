@@ -33,6 +33,7 @@ from tldw_Server_API.app.core.Prompt_Management.prompt_studio.test_runner import
 from tldw_Server_API.app.core.Prompt_Management.prompt_studio.types_common import (
     MetricType,
 )
+from tldw_Server_API.tests.helpers.gateway_routing import route_gateway_adapters
 
 pytestmark = pytest.mark.unit
 
@@ -537,6 +538,7 @@ async def test_mcts_routes_candidate_evaluation_and_distinct_scorer_through_one_
 
     monkeypatch.setattr(runner, "_call_adapter", _call_adapter, raising=True)
     monkeypatch.setattr(prompt_executor_module, "get_registry", lambda: _InternalRegistry(), raising=True)
+    route_gateway_adapters(monkeypatch, lambda provider, _registry=lambda: _InternalRegistry(): _registry().get_adapter(provider), caller="prompt_executor")
     monkeypatch.setattr(optimizer.executor, "_call_llm", _capture_llm_boundary, raising=True)
     monkeypatch.setattr(optimizer.decomposer, "decompose_text", lambda _text: ["segment"], raising=True)
 
@@ -717,6 +719,7 @@ async def test_public_mcts_post_baseline_refiner_uses_authoritative_non_openai_r
         return await original_call_llm(self, *args, **kwargs)
 
     monkeypatch.setattr(prompt_executor_module, "get_registry", lambda: _Registry(), raising=True)
+    route_gateway_adapters(monkeypatch, lambda provider, _registry=lambda: _Registry(): _registry().get_adapter(provider), caller="prompt_executor")
     monkeypatch.setattr(
         prompt_executor_module.PromptExecutor,
         "_call_llm",
@@ -758,7 +761,7 @@ async def test_public_mcts_post_baseline_refiner_uses_authoritative_non_openai_r
         assert call["request"]["model"] == "claude-3-5-haiku-runtime"
         assert call["request"]["api_key"] == "runtime-anthropic-key"
         assert call["request"]["app_config"] == runtime_config["app_config"]
-        assert call["request"]["credentials_resolved"] is True
+        assert "credentials_resolved" not in call["request"]  # no runtime handle: the gateway drops the flag (R6)
         assert call["timeout"] == 23
 
     assert events[0] == "evaluation"

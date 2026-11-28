@@ -45,6 +45,11 @@ class ExpectedToolFailureReason(Enum):
         "The LLM usage limit for this account has been reached.",
         BreakerAction.IGNORE,
     )
+    LLM_POLICY_REFUSED = (
+        "llm_policy_refused",
+        "The request was refused by the moderation policy.",
+        BreakerAction.IGNORE,
+    )
 
     @property
     def reason_code(self) -> str:

@@ -12,6 +12,7 @@ import numpy as np
 from loguru import logger
 
 from tldw_Server_API.app.core.DB_Management.PromptStudioDatabase import PromptStudioDatabase
+from tldw_Server_API.app.core.exceptions import LLMPolicyRefusal
 from tldw_Server_API.app.core.Logging.log_context import log_context
 from tldw_Server_API.app.core.Provider_Credentials.provider_credential_runtime import (
     ProviderCallCredentials,
@@ -422,6 +423,8 @@ Suggest specific refinements to fix these errors:"""
                 on_provider_success=on_provider_success,
             )
             return result["content"].strip()
+        except LLMPolicyRefusal:
+            raise  # a refusal is not a fallback prompt or a score
         except Exception as e:
             if on_provider_success is not None:
                 raise
@@ -656,6 +659,8 @@ Variation:"""
                 "user_prompt": result["content"].strip(),
                 "system_prompt": prompt.get("system_prompt", "")
             }
+        except LLMPolicyRefusal:
+            raise  # a refusal is not a fallback prompt or a score
         except Exception as e:
             # Fallback to original with minor changes
             logger.debug(f"_generate_variation failed to call LLM; using fallback variation. error={e}")
@@ -719,6 +724,8 @@ Combined user prompt:"""
                 "user_prompt": result["content"].strip(),
                 "system_prompt": parent1.get("system_prompt", "")
             }
+        except LLMPolicyRefusal:
+            raise  # a refusal is not a fallback prompt or a score
         except Exception as e:
             # Fallback: return parent1
             logger.debug(f"_crossover failed to call LLM; returning parent1. error={e}")
@@ -744,6 +751,8 @@ Mutated user prompt:"""
                 "user_prompt": result["content"].strip(),
                 "system_prompt": individual.get("system_prompt", "")
             }
+        except LLMPolicyRefusal:
+            raise  # a refusal is not a fallback prompt or a score
         except Exception as e:
             # Fallback: add random instruction
             logger.debug(f"_mutate failed to call LLM; using random instruction. error={e}")
