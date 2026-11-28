@@ -1,0 +1,134 @@
+{
+  "task": "TASK-13422",
+  "reviewed_dev_sha": "8140e493f2d0a79e2039084930151eba6565df82",
+  "evidence_kind": "real imported module with deterministic injected provider/NLI responses",
+  "limits": "No real model accuracy measurement, live API/browser run, or production defect fix. Synthetic judgments isolate decision rules.",
+  "source_sha256": "9965961bc431fb271d1686e4f13912bbbfe04dd8ff35208c67b3cfb976aa6743",
+  "observations": [
+    {
+      "name": "confident_nli_neutral_becomes_refuted",
+      "expected_observation": "A neutral model decision is returned as refuted.",
+      "observed": {
+        "status": "refuted",
+        "confidence": 0.97,
+        "rationale": "NLI-nei 0.97",
+        "evidence_doc_ids": [
+          "selected"
+        ],
+        "citations": []
+      },
+      "confirmed": true
+    },
+    {
+      "name": "high_confidence_llm_overrides_numeric_error",
+      "expected_observation": "The real numeric guardrail rejects 999 vs 42, but the verifier returns verified.",
+      "observed": {
+        "numeric_guardrail_accepts": false,
+        "status": "verified",
+        "confidence": 0.99,
+        "rationale": "offline synthetic judge response",
+        "evidence_doc_ids": [
+          "selected"
+        ],
+        "citations": [
+          {
+            "doc_id": "selected",
+            "start": 0,
+            "end": 34
+          }
+        ]
+      },
+      "confirmed": true
+    },
+    {
+      "name": "high_confidence_llm_overrides_misquotation",
+      "expected_observation": "A fabricated quote is verified when the synthetic supported judgment is more confident than the quote rejection.",
+      "observed": {
+        "status": "verified",
+        "confidence": 0.99,
+        "rationale": "offline synthetic judge response",
+        "evidence_doc_ids": [
+          "selected"
+        ],
+        "citations": [
+          {
+            "doc_id": "selected",
+            "start": 0,
+            "end": 35
+          }
+        ]
+      },
+      "confirmed": true
+    },
+    {
+      "name": "retrieval_score_promotes_nei_to_verified",
+      "expected_observation": "A not-enough-information judge result is promoted to verified by source relevance.",
+      "observed": {
+        "status": "verified",
+        "confidence": 0.7200000000000001,
+        "rationale": "Moderate evidence support",
+        "evidence_doc_ids": [
+          "selected"
+        ],
+        "citations": [
+          {
+            "doc_id": "selected",
+            "start": 0,
+            "end": 35
+          }
+        ]
+      },
+      "confirmed": true
+    },
+    {
+      "name": "high_confidence_llm_overrides_missing_evidence",
+      "expected_observation": "Document-only mode returns verified without evidence/citations under a confident synthetic supported judgment.",
+      "observed": {
+        "status": "verified",
+        "confidence": 0.99,
+        "rationale": "offline synthetic judge response",
+        "evidence_doc_ids": [],
+        "citations": []
+      },
+      "confirmed": true
+    },
+    {
+      "name": "doc_only_does_not_enforce_selected_document_membership",
+      "expected_observation": "A retrieval callback can replace the supplied selected document with outside-selection evidence.",
+      "observed": {
+        "status": "verified",
+        "confidence": 0.99,
+        "rationale": "NLI entailment (0.99)",
+        "evidence_doc_ids": [
+          "outside-selection"
+        ],
+        "citations": [
+          {
+            "doc_id": "outside-selection",
+            "start": 0,
+            "end": 36
+          }
+        ]
+      },
+      "confirmed": true
+    },
+    {
+      "name": "unmatched_citation_gets_prefix_offsets",
+      "expected_observation": "Unmatched text returns a nonempty prefix range rather than an unavailable span.",
+      "observed": [
+        0,
+        8
+      ],
+      "confirmed": true
+    },
+    {
+      "name": "run_lacks_strict_verification_parameters",
+      "expected_observation": "The combined run method lacks both controls available on verify_claims_only.",
+      "observed": [
+        "doc_only_mode",
+        "numeric_precision_mode"
+      ],
+      "confirmed": true
+    }
+  ]
+}
