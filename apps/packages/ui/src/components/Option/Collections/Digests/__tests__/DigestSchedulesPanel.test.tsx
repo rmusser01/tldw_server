@@ -1,5 +1,5 @@
 import { beforeEach, describe, expect, it, vi } from "vitest"
-import { fireEvent, render, screen, waitFor } from "@testing-library/react"
+import { fireEvent, render, screen, waitFor, within } from "@testing-library/react"
 import { DigestSchedulesPanel } from "../DigestSchedulesPanel"
 
 const apiMock = vi.hoisted(() => ({
@@ -88,6 +88,19 @@ describe("DigestSchedulesPanel suggestions form", () => {
       })
     )
     apiMock.deleteReadingDigestSchedule.mockResolvedValue({ ok: true })
+  })
+
+  it("announces the schedule load error separately from its retry control", async () => {
+    apiMock.listReadingDigestSchedules.mockRejectedValueOnce(new Error("Schedule loading failed"))
+    render(<DigestSchedulesPanel />)
+
+    const error = await screen.findByRole("alert")
+    expect(error.textContent).toBe("Schedule loading failed")
+    expect(within(error).queryByRole("button")).toBeNull()
+
+    fireEvent.click(screen.getByRole("button", { name: "Retry" }))
+    await waitFor(() => expect(screen.queryByRole("alert")).toBeNull())
+    expect(apiMock.listReadingDigestSchedules).toHaveBeenCalledTimes(2)
   })
 
   it("shows suggestions fields only when toggle is enabled", async () => {
