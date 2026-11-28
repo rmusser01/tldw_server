@@ -1179,19 +1179,12 @@ async def test_translate_adapter_with_provider(monkeypatch):
     """Test translate adapter with OpenAI provider."""
     monkeypatch.delenv("TEST_MODE", raising=False)
 
-    # Import the translate module directly to patch get_registry at its usage site
-    import tldw_Server_API.app.core.Workflows.adapters.llm.translate as translate_module
+    async def fake_chat(**kwargs):
+        assert kwargs["llm_surface"] == "workflows.step"
+        return {"choices": [{"message": {"content": "Hola mundo"}}]}
 
-    class FakeAdapter:
-        async def achat(self, config):
-            return {"choices": [{"message": {"content": "Hola mundo"}}]}
-
-    class FakeRegistry:
-        def get_adapter(self, name):
-            return FakeAdapter()
-
-    # Patch get_registry where it's used in the translate module
-    monkeypatch.setattr(translate_module, "get_registry", lambda: FakeRegistry())
+    # Translate calls the gateway through chat_service (imported at call time)
+    monkeypatch.setattr("tldw_Server_API.app.core.Chat.chat_service.perform_chat_api_call_async", fake_chat)
 
     config = {"input": "Hello world", "target_lang": "es"}
     context = {"user_id": "1"}
@@ -1230,13 +1223,10 @@ async def test_translate_adapter_fallback_on_error(monkeypatch):
     """Test translate adapter fallback when provider fails."""
     monkeypatch.delenv("TEST_MODE", raising=False)
 
-    import tldw_Server_API.app.core.LLM_Calls.adapter_registry as adapter_registry
+    async def failing_chat(**_kwargs):
+        raise Exception("Provider unavailable")
 
-    class FakeRegistry:
-        def get_adapter(self, name):
-            raise Exception("Provider unavailable")
-
-    monkeypatch.setattr(adapter_registry, "get_registry", lambda: FakeRegistry())
+    monkeypatch.setattr("tldw_Server_API.app.core.Chat.chat_service.perform_chat_api_call_async", failing_chat)
 
     config = {"input": "Hello", "target_lang": "de"}
     context = {"user_id": "1"}

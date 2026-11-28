@@ -23,7 +23,7 @@ from tldw_Server_API.app.core.Context_Integrity.resolver import (
     ContextIntegrityResolver,
     get_global_context_integrity_resolver,
 )
-from tldw_Server_API.app.core.exceptions import LLMQuotaExceededError
+from tldw_Server_API.app.core.exceptions import LLMPolicyRefusal, LLMQuotaExceededError
 from tldw_Server_API.app.core.LLM_Calls.sse import is_done_line
 
 from .runtime_provider_call import (
@@ -478,8 +478,8 @@ class LLMGenerator(BaseGenerator):
                 }
             )
 
-        except LLMQuotaExceededError:
-            raise  # the user's limit: never replaced by a fallback answer (LLM usage accounting spec §4b)
+        except (LLMQuotaExceededError, LLMPolicyRefusal):
+            raise  # a refusal or the user's limit: never replaced by a fallback answer (LLM usage accounting spec §4b)
         except Exception:
             logger.error("Error generating response")
 
@@ -529,7 +529,7 @@ class LLMGenerator(BaseGenerator):
             call_kwargs["api_key"] = api_key
 
         response = await await_runtime_bound_provider_call(
-            perform_chat_api_call_async(**call_kwargs),
+            perform_chat_api_call_async(**call_kwargs, llm_surface="rag.generation"),
             credential_runtime=credential_runtime,
             credential_handle=credential_handle,
             mark_success=not streaming,

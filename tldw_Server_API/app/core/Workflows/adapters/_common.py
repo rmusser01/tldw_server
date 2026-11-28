@@ -18,7 +18,7 @@ from urllib.parse import parse_qsl, unquote, urlsplit
 from loguru import logger
 
 from tldw_Server_API.app.core.AuthNZ.User_DB_Handling import resolve_user_id_value
-from tldw_Server_API.app.core.exceptions import AdapterError
+from tldw_Server_API.app.core.exceptions import AdapterError, LLMPolicyRefusal
 from tldw_Server_API.app.core.testing import (
     env_flag_enabled,
     is_explicit_pytest_runtime,
@@ -51,6 +51,13 @@ def extract_openai_content(response: Any) -> str | None:
         Extracted text content or None
     """
     if isinstance(response, dict):
+        try:
+            choices = response.get("choices") or []
+            blocked = bool(choices) and choices[0].get("finish_reason") == "content_filter"
+        except _WORKFLOW_COMMON_NONCRITICAL_EXCEPTIONS:
+            blocked = False
+        if blocked:  # moderation replaced the answer: the step fails, the refusal text is not its output
+            raise LLMPolicyRefusal("Output violates moderation policy")
         try:
             choices = response.get("choices") or []
             if choices:

@@ -22,7 +22,7 @@ from typing import Any
 from loguru import logger
 
 from tldw_Server_API.app.core.Utils.template_render import apply_template_to_string
-from tldw_Server_API.app.core.exceptions import LLMQuotaExceededError
+from tldw_Server_API.app.core.exceptions import LLMPolicyRefusal, LLMQuotaExceededError
 from tldw_Server_API.app.core.Notes.studio_markdown import (
     canonical_studio_sections,
 )
@@ -44,7 +44,7 @@ from tldw_Server_API.app.core.Workflows.adapters.content._config import (
 try:
     from tldw_Server_API.app.core.Chat.chat_service import perform_chat_api_call_async
 except ImportError:
-    async def perform_chat_api_call_async(*args: Any, **kwargs: Any) -> dict[str, Any]:
+    async def perform_chat_api_call_async(*args: Any, llm_surface: str | None = None, **kwargs: Any) -> dict[str, Any]:
         raise ImportError("chat_service_unavailable")
 
 _GENERATION_NONCRITICAL_EXCEPTIONS: tuple[type[BaseException], ...] = (
@@ -287,6 +287,7 @@ async def run_flashcard_generate_adapter(config: dict[str, Any], context: dict[s
     try:
         messages = [{"role": "user", "content": f"Generate flashcards from:\n\n{text[:8000]}"}]
         response = await perform_chat_api_call_async(
+            llm_surface="workflows.step",
             messages=messages,
             api_provider=provider,
             model=model,
@@ -341,7 +342,7 @@ async def run_flashcard_generate_adapter(config: dict[str, Any], context: dict[s
             if actual_counts != expected_counts:
                 return {"error": "card_plan_mismatch", "flashcards": [], "count": 0}
         return {"flashcards": cleaned_flashcards, "count": len(cleaned_flashcards)}
-    except LLMQuotaExceededError:
+    except (LLMQuotaExceededError, LLMPolicyRefusal):
         raise
     except _GENERATION_NONCRITICAL_EXCEPTIONS:
         logger.exception("Flashcard generate adapter error")
@@ -393,6 +394,7 @@ async def run_quiz_generate_adapter(config: dict[str, Any], context: dict[str, A
     try:
         messages = [{"role": "user", "content": f"Generate quiz from:\n\n{text[:8000]}"}]
         response = await perform_chat_api_call_async(
+            llm_surface="workflows.step",
             messages=messages,
             api_provider=provider,
             model=model,
@@ -407,7 +409,7 @@ async def run_quiz_generate_adapter(config: dict[str, Any], context: dict[str, A
         except json.JSONDecodeError:
             questions = []
         return {"questions": questions, "count": len(questions)}
-    except LLMQuotaExceededError:
+    except (LLMQuotaExceededError, LLMPolicyRefusal):
         raise
     except _GENERATION_NONCRITICAL_EXCEPTIONS:
         logger.exception("Quiz generate adapter error")
@@ -447,6 +449,7 @@ async def run_outline_generate_adapter(config: dict[str, Any], context: dict[str
 
     try:
         response = await perform_chat_api_call_async(
+            llm_surface="workflows.step",
             messages=[{"role": "user", "content": f"Outline:\n\n{text[:8000]}"}],
             api_provider=provider,
             model=model,
@@ -462,7 +465,7 @@ async def run_outline_generate_adapter(config: dict[str, Any], context: dict[str
         except json.JSONDecodeError:
             pass
         return {"outline": outline, "outline_text": response_text, "sections": len(outline.get("sections", []))}
-    except LLMQuotaExceededError:
+    except (LLMQuotaExceededError, LLMPolicyRefusal):
         raise
     except _GENERATION_NONCRITICAL_EXCEPTIONS:
         logger.exception("Outline generate error")
@@ -499,6 +502,7 @@ async def run_glossary_extract_adapter(config: dict[str, Any], context: dict[str
 
     try:
         response = await perform_chat_api_call_async(
+            llm_surface="workflows.step",
             messages=[{"role": "user", "content": f"Extract glossary:\n\n{text[:8000]}"}],
             api_provider=provider,
             model=model,
@@ -513,7 +517,7 @@ async def run_glossary_extract_adapter(config: dict[str, Any], context: dict[str
         except json.JSONDecodeError:
             glossary = []
         return {"glossary": glossary, "count": len(glossary)}
-    except LLMQuotaExceededError:
+    except (LLMQuotaExceededError, LLMPolicyRefusal):
         raise
     except _GENERATION_NONCRITICAL_EXCEPTIONS:
         logger.exception("Glossary extract error")
@@ -553,6 +557,7 @@ async def run_mindmap_generate_adapter(config: dict[str, Any], context: dict[str
 
     try:
         response = await perform_chat_api_call_async(
+            llm_surface="workflows.step",
             messages=[{"role": "user", "content": f"Mindmap:\n\n{text[:8000]}"}],
             api_provider=provider,
             model=model,
@@ -568,7 +573,7 @@ async def run_mindmap_generate_adapter(config: dict[str, Any], context: dict[str
         except json.JSONDecodeError:
             pass
         return {"mindmap": mindmap, "mermaid": "", "node_count": 0}
-    except LLMQuotaExceededError:
+    except (LLMQuotaExceededError, LLMPolicyRefusal):
         raise
     except _GENERATION_NONCRITICAL_EXCEPTIONS:
         logger.exception("Mindmap generate error")
@@ -627,6 +632,7 @@ Content:
 
         messages = [{"role": "user", "content": prompt}]
         response = await perform_chat_api_call_async(
+            llm_surface="workflows.step",
             messages=messages,
             api_provider=config.get("provider"),
             model=config.get("model"),
@@ -647,7 +653,7 @@ Content:
 
         return {"slides": [], "raw_text": result_text, "error": "json_parse_failed"}
 
-    except LLMQuotaExceededError:
+    except (LLMQuotaExceededError, LLMPolicyRefusal):
         raise
     except _GENERATION_NONCRITICAL_EXCEPTIONS:
         logger.exception("Slides generate error")
@@ -712,6 +718,7 @@ Content:
 
         messages = [{"role": "user", "content": prompt}]
         response = await perform_chat_api_call_async(
+            llm_surface="workflows.step",
             messages=messages,
             api_provider=config.get("provider"),
             model=config.get("model"),
@@ -723,7 +730,7 @@ Content:
         report = extract_openai_content(response) or ""
         return {"report": report, "text": report, "title": title, "format": output_format}
 
-    except LLMQuotaExceededError:
+    except (LLMQuotaExceededError, LLMPolicyRefusal):
         raise
     except _GENERATION_NONCRITICAL_EXCEPTIONS:
         logger.exception("Report generate error")
@@ -799,6 +806,7 @@ Include a header, brief intro, main content sections, and a closing."""
 
         messages = [{"role": "user", "content": prompt}]
         response = await perform_chat_api_call_async(
+            llm_surface="workflows.step",
             messages=messages,
             api_provider=config.get("provider"),
             model=config.get("model"),
@@ -810,7 +818,7 @@ Include a header, brief intro, main content sections, and a closing."""
         newsletter = extract_openai_content(response) or ""
         return {"newsletter": newsletter, "text": newsletter, "title": title}
 
-    except LLMQuotaExceededError:
+    except (LLMQuotaExceededError, LLMPolicyRefusal):
         raise
     except _GENERATION_NONCRITICAL_EXCEPTIONS:
         logger.exception("Newsletter generate error")
@@ -859,6 +867,7 @@ async def run_notes_studio_generate_adapter(config: dict[str, Any], context: dic
             f"from this excerpt:\n\n{excerpt_text[:4000]}"
         )
         response = await perform_chat_api_call_async(
+            llm_surface="workflows.step",
             messages=[{"role": "user", "content": prompt}],
             api_provider=provider,
             model=model,
@@ -875,7 +884,7 @@ async def run_notes_studio_generate_adapter(config: dict[str, Any], context: dic
         if sanitized_payload is None:
             return {"payload": fallback_payload, "source": "deterministic_fallback"}
         return {"payload": sanitized_payload, "source": "llm"}
-    except LLMQuotaExceededError:
+    except (LLMQuotaExceededError, LLMPolicyRefusal):
         raise
     except _GENERATION_NONCRITICAL_EXCEPTIONS:
         logger.warning("Notes Studio generate fallback engaged")
@@ -952,6 +961,7 @@ Content:
 
         messages = [{"role": "user", "content": prompt}]
         response = await perform_chat_api_call_async(
+            llm_surface="workflows.step",
             messages=messages,
             api_provider=provider,
             model=model,
@@ -986,7 +996,7 @@ Content:
             "model": str(model),
         }
 
-    except LLMQuotaExceededError:
+    except (LLMQuotaExceededError, LLMPolicyRefusal):
         raise
     except _GENERATION_NONCRITICAL_EXCEPTIONS:
         logger.exception("Diagram generate error")

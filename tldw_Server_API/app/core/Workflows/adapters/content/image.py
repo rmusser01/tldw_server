@@ -18,11 +18,11 @@ from loguru import logger
 try:
     from tldw_Server_API.app.core.Chat.chat_service import perform_chat_api_call_async
 except ImportError:
-    async def perform_chat_api_call_async(*args: Any, **kwargs: Any) -> dict[str, Any]:
+    async def perform_chat_api_call_async(*args: Any, llm_surface: str | None = None, **kwargs: Any) -> dict[str, Any]:
         raise ImportError("chat_service_unavailable")
 
 from tldw_Server_API.app.core.Utils.template_render import apply_template_to_string
-from tldw_Server_API.app.core.exceptions import LLMQuotaExceededError
+from tldw_Server_API.app.core.exceptions import LLMPolicyRefusal, LLMQuotaExceededError
 from tldw_Server_API.app.core.testing import is_test_mode
 from tldw_Server_API.app.core.Workflows.adapters._common import (
     extract_openai_content,
@@ -377,6 +377,7 @@ async def run_image_describe_adapter(config: dict[str, Any], context: dict[str, 
 
         messages = [{"role": "user", "content": content}]
         response = await perform_chat_api_call_async(
+            llm_surface="workflows.step",
             messages=messages,
             api_provider=config.get("provider"),
             model=config.get("model"),
@@ -386,7 +387,7 @@ async def run_image_describe_adapter(config: dict[str, Any], context: dict[str, 
         description = extract_openai_content(response) or ""
         return {"description": description, "text": description}
 
-    except LLMQuotaExceededError:
+    except (LLMQuotaExceededError, LLMPolicyRefusal):
         raise
     except Exception:
         logger.exception("Image describe error")

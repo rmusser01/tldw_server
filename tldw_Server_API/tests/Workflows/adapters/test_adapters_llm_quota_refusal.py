@@ -89,12 +89,8 @@ async def test_summarize_lets_the_refusal_through() -> None:
 
 @pytest.mark.asyncio
 async def test_translate_does_not_return_the_input_as_a_translation() -> None:
-    adapter = MagicMock()
-    adapter.achat = AsyncMock(side_effect=_refusal())
-    registry = MagicMock()
-    registry.get_adapter.return_value = adapter
-    with patch.object(translate, "is_test_mode", return_value=False), patch.object(
-        translate, "get_registry", return_value=registry
+    with patch.object(translate, "is_test_mode", return_value=False), patch(
+        CHAT_CALL, AsyncMock(side_effect=_refusal())
     ):
         with pytest.raises(LLMQuotaExceededError):
             await translate.run_translate_adapter({"input": "Bonjour", "target_lang": "en"}, {})

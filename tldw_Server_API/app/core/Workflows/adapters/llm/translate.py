@@ -7,9 +7,7 @@ from __future__ import annotations
 
 from typing import Any
 
-from tldw_Server_API.app.core.Chat.Chat_Deps import ChatConfigurationError
-from tldw_Server_API.app.core.exceptions import LLMQuotaExceededError
-from tldw_Server_API.app.core.LLM_Calls.adapter_registry import get_registry
+from tldw_Server_API.app.core.exceptions import LLMPolicyRefusal, LLMQuotaExceededError
 from tldw_Server_API.app.core.testing import is_test_mode
 from tldw_Server_API.app.core.Workflows.adapters._common import extract_openai_content
 from tldw_Server_API.app.core.Workflows.adapters._registry import registry
@@ -50,26 +48,24 @@ async def run_translate_adapter(config: dict[str, Any], context: dict[str, Any])
     if is_test_mode():
         return {"text": text, "target_lang": target, "simulated": True}
 
-    # Try OpenAI-compatible adapter first; fall back to returning input
+    # Try the gateway (openai) first; fall back to returning input. A policy refusal fails the step.
     try:
-        adapter = get_registry().get_adapter("openai")
-        if adapter is None:
-            raise ChatConfigurationError(provider="openai", message="OpenAI adapter unavailable.")
+        from tldw_Server_API.app.core.Chat.chat_service import perform_chat_api_call_async
+        from tldw_Server_API.app.core.LLM_Calls.adapter_utils import ensure_app_config, resolve_provider_model
+
         system = f"You are a professional translator. Translate the user text to {target}. Preserve meaning and tone. Output only the translation."
-        messages = [{"role": "user", "content": text}]
-        resp = await adapter.achat(
-            {
-                "messages": messages,
-                "system_message": system,
-                "model": None,
-                "stream": False,
-            }
+        resp = await perform_chat_api_call_async(
+            api_provider="openai",
+            messages=[{"role": "user", "content": text}],
+            system_message=system,
+            model=resolve_provider_model("openai", ensure_app_config()),
+            llm_surface="workflows.step",
         )
         out = extract_openai_content(resp)
         if not out:
             return {"text": text, "target_lang": target, "provider": "openai", "fallback": True}
         return {"text": out, "target_lang": target, "provider": "openai"}
-    except LLMQuotaExceededError:
+    except (LLMQuotaExceededError, LLMPolicyRefusal):
         raise
     except Exception:
         # Fallback: return original
