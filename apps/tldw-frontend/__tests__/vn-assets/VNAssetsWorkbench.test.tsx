@@ -471,13 +471,17 @@ describe('VNAssetsWorkbench', () => {
       const user = userEvent.setup();
       render(<VNAssetsWorkbench />);
       await screen.findByText('Original transport lost');
+      const refresh = screen.getByRole('button', { name: 'Refresh generation status' });
+      await waitFor(() => expect(refresh).toBeEnabled());
       sessionStorage.removeItem(receiptKey);
       const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
-      const read = vi.spyOn(Storage.prototype, 'getItem').mockImplementation(() => { throw new Error('Storage disabled'); });
-      await user.click(screen.getByRole('button', { name: 'Refresh generation status' }));
+      const storage = vi.spyOn(window, 'sessionStorage', 'get').mockImplementation(() => {
+        throw new DOMException('Storage disabled', 'SecurityError');
+      });
+      await user.click(refresh);
       await screen.findByText(/Recovery storage is unavailable/);
       expect(mocks.retryVNAssetSlot).toHaveBeenCalledTimes(1);
-      read.mockRestore();
+      storage.mockRestore();
       expect(warn).toHaveBeenCalled();
       for (const call of warn.mock.calls) {
         expect(call).toEqual(['[vn-assets] Could not read pending generation receipt: session storage unavailable.']);
