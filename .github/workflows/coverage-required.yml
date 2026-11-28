@@ -1,6 +1,7 @@
 name: coverage-required
 
 on:
+  # Retain skipped check results for the required dev context.
   pull_request:
     branches:
       - main
@@ -38,7 +39,7 @@ jobs:
   # sees -- but it used to start every gate immediately, in parallel with the
   # license audit it is supposed to follow. This makes it wait for the verdict.
   await_license:
-    if: github.event_name == 'pull_request'
+    if: github.event_name == 'pull_request' && github.base_ref != 'dev'
     uses: ./.github/workflows/license-first-await.yml
     permissions:
       contents: read
@@ -49,6 +50,7 @@ jobs:
     needs: [admission, await_license]
     if: >-
       always() && !cancelled() &&
+      github.base_ref != 'dev' &&
       (
         (
           github.event_name == 'workflow_run' &&
@@ -110,6 +112,7 @@ jobs:
     needs: [changes, admission, await_license]
     if: >-
       always() && !cancelled() &&
+      github.base_ref != 'dev' &&
       (
         (
           github.event_name == 'workflow_run' &&
@@ -191,6 +194,7 @@ jobs:
     needs: [changes, admission, await_license]
     if: >-
       always() && !cancelled() &&
+      github.base_ref != 'dev' &&
       (
         (
           github.event_name == 'workflow_run' &&
@@ -257,6 +261,7 @@ jobs:
     # workflow_run path with admission declined still skips it, as before.
     if: >-
       always() &&
+      github.base_ref != 'dev' &&
       (
         (
           github.event_name == 'workflow_run' &&

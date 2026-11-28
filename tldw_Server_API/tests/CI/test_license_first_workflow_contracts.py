@@ -79,36 +79,43 @@ QUEUE_TICK_GATES = {
     "frontend-required.yml": "frontend-required",
     "security-required.yml": "security-required",
 }
+DEV_STATUS_ONLY = {
+    "container-build-check.yml",
+    "coverage-required.yml",
+    "e2e-required.yml",
+    "frontend-e2e-tiers.yml",
+}
+NON_DEV_PR = "github.base_ref != 'dev'"
 DIRECT_TRIGGER_DIGESTS = {
     "actionlint.yml": "d31daa2c3e010b3a70dcbd640ef24f573bea18619228e7548c50992c54df0e99",
     "backend-required.yml": "88237a699f2e036ba116cd127e6a560a98ee417ef637db0163e6f90475bb6feb",
-    "ci.yml": "ea6e388f5851cd2dea4664a145425ec84107d8a9406f56ff5f01a51d4b5b3bec",
-    "codeql.yml": "8592a8565d97d233d6b27fb13d9a563f673550f3d8220d0b262487346a70e25f",
+    "ci.yml": "00acac7a886a12db9fe1b5d773f88a50dfcfcf7d58831a671ffa4a641b94817e",
+    "codeql.yml": "987f695800c3085392a9a3a6517e875ae19878bb7056fe5c7748688fba86d5f9",
     "container-build-check.yml": "4b65b09e5b40faee5abc68a5e88fd114d8fd4b5b0ae84eb977474336ffdd6653",
     "coverage-required.yml": "88237a699f2e036ba116cd127e6a560a98ee417ef637db0163e6f90475bb6feb",
     "e2e-required.yml": "88237a699f2e036ba116cd127e6a560a98ee417ef637db0163e6f90475bb6feb",
-    "e2e-smoke.yml": "47fa5c3b099aeee7d744da19e5c8db6f403d82963b9d19b9f60292f0377d7180",
+    "e2e-smoke.yml": "3217f7fd56468bc046a71f6b5ee6b0cd98c14254228286578647dcdbfbc631a4",
     "frontend-e2e-tiers.yml": "83b065adf87b98e2a2169cfd6b540a752c22661628bc697ddda1580a13a35920",
     "frontend-required.yml": "3b0371351439f7a458a405b3238da9cc540d34fdb377423c1a39f3978e601978",
-    "frontend-ux-gates.yml": "4b65b09e5b40faee5abc68a5e88fd114d8fd4b5b0ae84eb977474336ffdd6653",
-    "jobs-suite.yml": "023309eacbc53b533c94c56e00e710422e6e5885ba06a0921524964db7cf4476",
-    "mcp-unified-rc.yml": "8b1a9335ecab966807fcf0a8c81560b264942decc458cd9bc98275d6062310aa",
-    "notes-remediation-targeted.yml": "090c7ff3c4b668cd6c76fc3b9fc9a1b3be128b21b3b2b236cdfe33dd6f5edb5a",
-    "onboarding-docs-gate.yml": "38fc27642d68b7b198e20a9e910ddfa2e1f626b32be5911df63d64c89cb60afa",
+    "frontend-ux-gates.yml": "e5a8fc8e75cc1b0367a87136b9d591a529d164483105027c4835196841d82242",
+    "jobs-suite.yml": "72f0c6e7f6bf537da46b98ccb6221921b444427aaff44d5f4edce4c52d6805d7",
+    "mcp-unified-rc.yml": "e0c90813d5bd8f1fad3958a5cab5ea2c2e3fc5096c2aba8687bdfadafb5c3ac9",
+    "notes-remediation-targeted.yml": "baa4f56cfa9bfba2e8397428b8cb1610c23e8a6ce1b51692e2ade92b7036f45e",
+    "onboarding-docs-gate.yml": "6d43bd6f71ece0d3d05b8c8fd6547363556f33eb93aad4685290d73d4a65c7eb",
     "pre-commit.yml": "d3d381eead20326078cb0268da7340f8217d95336af86c8d9701419c5e67d3be",
-    "pypi-package.yml": "e90b731a35e91072df7737c033cc81208b6dd491e91ef1497fb47ce2a183768a",
-    "sbom.yml": "6ba4774ab2129a605bb160c5ee6f48ebc51544881592ad60ad5268b910fcfbde",
+    "pypi-package.yml": "62533f52539ef3361d4d7bb6a8eda768f8946ce4c814827ba64408bad740b603",
+    "sbom.yml": "584ef309e12bd9290fa3bb9ecd7322181beb50cfcc3d2d871c203e25cf4214e9",
     "security-required.yml": "17a6ff1c75afa8c8826e8378c3f73c1099375730bdd06067a2921ecaf38f58ab",
-    "ui-characters-harness-tests.yml": "8977899d9903b59c454c686e1fda272a7b919f63782d84ec8c24973449f2eee6",
-    "ui-design-system-drift-report.yml": "9668d35955cd772888b26c55ab8a92b6ab39da5032a63daed98cb7de6e96ed59",
-    "ui-dictionaries-tests.yml": "f191b9920abca964265ff7ff4510cc9ac554770d4e4a0b8b172854147c0c0dbe",
-    "ui-playground-quality-gates.yml": "af4b03b1d48dd12b93e1bd39a8036109b26a7890ee5cd8ef8ed57b7d2da3008a",
-    "ui-research-workspace-parity.yml": "aa73478a8917cbf0eb7be01e1f4212f1a0692200919d9a09982ab6525af49503",
-    "ui-watchlists-a11y-gates.yml": "3c66abf5ccddb422faad37764afec0e3c9d0ec66e74c36844f99425eb0214526",
-    "ui-watchlists-extension-e2e.yml": "4252eda6295ace0621dc9b3bc1a98e157753a6ba984218103942fbf6bbcdda42",
-    "ui-watchlists-help-tests.yml": "fe0ad30818f046c2ae0c54a10a1bb9f481968d8b73545ebe934135b2fed88907",
-    "ui-watchlists-scale-gates.yml": "9001042a9f6b85245d7f80dc4d13e16b214df17c2629e1c733ee691e99a4c884",
-    "ui-worldbooks-tests.yml": "c09cbf04ae823361ff2fb13da6b9c4c2b55773a2e58e88bf8bea635f30221ed2",
+    "ui-characters-harness-tests.yml": "8bf8fec5e9c62d2bf12c0e38894783cedb0b5e08102169f843097e1f8eff433d",
+    "ui-design-system-drift-report.yml": "7ffa2977e18ff585fc2c493f7ceef375545c85969c07ccb3d7879935c4c612ec",
+    "ui-dictionaries-tests.yml": "ff092c5764169d15ba17d03a9b00cb6c0077d27b655f980fd23d5b82030be06c",
+    "ui-playground-quality-gates.yml": "ae1b350e0cf0de932ec84d6082c1e7403644a9592e57815955c4f68170616705",
+    "ui-research-workspace-parity.yml": "3dc3e76627c7f264ea785fab2a4c7b18e2330ec877d355b5c0fdb9b641891f34",
+    "ui-watchlists-a11y-gates.yml": "78eb7901731093005cec1a47277054888b619b2b8bfb32ca43cf78a8e26a260a",
+    "ui-watchlists-extension-e2e.yml": "690889ee6fddfc3861bdab3b27d99f2910a538e0ea7c8f35780a742f81b11ab1",
+    "ui-watchlists-help-tests.yml": "de4e73c85841c73d03b3d427ef056e6c65e6f0a71e84603edbb71051782a5e9c",
+    "ui-watchlists-scale-gates.yml": "9d6966d8e04a7020eb94921749afd600ebbbfbe281282a242c7e67b581fbd821",
+    "ui-worldbooks-tests.yml": "5f24910d2a7d80067cdb0c5a9e377b3ed276e0dddfc8fd359f45f1fec7656eb7",
 }
 ORIGINAL_JOB_NAMES = {
     "actionlint.yml": ("actionlint",),
@@ -651,11 +658,15 @@ def test_all_ordinary_workflows_keep_the_pr_license_wait() -> None:
     for name, (data, _) in _load_ordinary_workflows().items():
         assert "workflow_run" not in _trigger(data), name
 
-        assert data["jobs"]["await_license"] == {
-            "if": "github.event_name == 'pull_request'",
+        wait_condition = "github.event_name == 'pull_request'"
+        if name in DEV_STATUS_ONLY:
+            wait_condition += f" && {NON_DEV_PR}"
+        expected_await = {
+            "if": wait_condition,
             "uses": "./.github/workflows/license-first-await.yml",
             "permissions": {"contents": "read", "statuses": "read"},
-        }, name
+        }
+        assert data["jobs"]["await_license"] == expected_await, name
 
         if name == "backend-required.yml":
             assert "admission" not in data["jobs"]
@@ -671,11 +682,7 @@ def test_all_ordinary_workflows_keep_the_pr_license_wait() -> None:
             "uses": "./.github/workflows/license-first-admission.yml",
             "with": {"workflow_file": name},
             "permissions": EXPECTED_PERMISSIONS,
-        }, {
-            "if": "github.event_name == 'pull_request'",
-            "uses": "./.github/workflows/license-first-await.yml",
-            "permissions": {"contents": "read", "statuses": "read"},
-        }), name
+        }, expected_await), name
 
 
 @pytest.mark.parametrize(
@@ -938,6 +945,19 @@ def test_runner_roots_cannot_bypass_admission_and_checkouts_are_immutable() -> N
                         "(github.event.inputs.queue_kick != 'true' || github.ref != 'refs/heads/dev') &&",
                         1,
                     )
+                if (
+                    name in DEV_STATUS_ONLY
+                    or (backend_direct and job_name in {
+                        "non-utc-tests", "chacha-owner-isolation", "rag-pipeline", "chat-executors",
+                    })
+                    or (name, job_name) == ("frontend-required.yml", "frontend-unit-tests")
+                ):
+                    prefix = "always() &&" if (name, job_name) == (
+                        "coverage-required.yml", "coverage-required",
+                    ) else "always() && !cancelled() &&"
+                    expected_condition = expected_condition.replace(
+                        prefix, f"{prefix} {NON_DEV_PR} &&", 1,
+                    )
                 assert _normalized(job.get("if")) == _normalized(expected_condition), (name, job_name)
             else:
                 assert "admission" not in needs, (name, job_name)
@@ -966,7 +986,9 @@ def test_runner_roots_cannot_bypass_admission_and_checkouts_are_immutable() -> N
                 elif name == "frontend-required.yml" and job_name in {
                     "shared-ui-coverage", "shared-ui-coverage-report",
                 }:
-                    expected = dependencies_succeeded
+                    expected = dependencies_succeeded.replace(
+                        "always() && !cancelled() &&", f"always() && !cancelled() && {NON_DEV_PR} &&",
+                    )
                     if job_name == "shared-ui-coverage":
                         expected += " && needs.changes.outputs.tldw_frontend_changed == 'true'"
                     assert _normalized(job.get("if")) == _normalized(expected), (name, job_name)
@@ -1004,6 +1026,14 @@ def test_runner_roots_cannot_bypass_admission_and_checkouts_are_immutable() -> N
                     )
                 if name == "pypi-package.yml":
                     expected_ref = expected_ref.replace("${{ ", "${{ (inputs.qualification && github.sha) || ")
+                if (name, job_name) in {
+                    ("backend-required.yml", "backend-required"),
+                    ("frontend-required.yml", "frontend-required"),
+                }:
+                    expected_ref = expected_ref.replace(
+                        "github.event.pull_request.head.sha",
+                        "(github.base_ref == 'dev' && github.sha) || github.event.pull_request.head.sha",
+                    )
                 assert checkout_inputs.get("ref") == expected_ref, (name, job_name)
                 other_inputs = {
                     key: value
@@ -1063,7 +1093,9 @@ def test_pr_context_and_base_diff_logic_are_workflow_run_safe() -> None:
             assert data["concurrency"]["cancel-in-progress"] == expected_cancel, name
 
         assert "github.head_ref" not in text
-        assert "github.base_ref" not in text
+        # The base ref can select the dev lane using an exact comparison.
+        branch_neutral = text.replace("github.base_ref == 'dev'", "").replace(NON_DEV_PR, "")
+        assert "github.base_ref" not in branch_neutral
         assert "GITHUB_HEAD_REF" not in text
         assert "GITHUB_BASE_REF" not in text
         assert "github.event.workflow_run.head_sha" not in text
@@ -1918,8 +1950,8 @@ def _test_mode_unset_problems(workflow: dict[str, Any]) -> list[str]:
     step, problems = steps[0], []
     if step.get("continue-on-error", False):
         problems.append("step is continue-on-error")
-    if step.get("if") != "needs.changes.outputs.backend_changed == 'true'":
-        problems.append("step does not run on every backend change")
+    if step.get("if") != f"{NON_DEV_PR} && needs.changes.outputs.backend_changed == 'true'":
+        problems.append("step does not run on every backend change in the full lane")
     env = step.get("env", {})
     # TLDW_UNSET_TEST_FLAGS also un-skips the sentinel; PYTEST_DISABLE_PLUGIN_AUTOLOAD lets the
     # explicit -p flags load without "Plugin already registered".
@@ -1987,7 +2019,7 @@ def test_test_mode_unset_contract_accepts_coverage_flags():
         ("unset-switch-dropped", "step does not set TLDW_UNSET_TEST_FLAGS=1"),
         ("autoload-dropped", "step does not set PYTEST_DISABLE_PLUGIN_AUTOLOAD=1"),
         ("continue-on-error", "step is continue-on-error"),
-        ("narrow-if", "step does not run on every backend change"),
+        ("narrow-if", "step does not run on every backend change in the full lane"),
     ],
 )
 def test_test_mode_unset_contract_fails_when_the_step_changes(mutation: str, expected: str):

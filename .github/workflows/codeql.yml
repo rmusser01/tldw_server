@@ -6,7 +6,7 @@ on:
     branches: [ main, master ]
   # Run on PRs targeting main/master/dev, not every branch
   pull_request:
-    branches: [ main, master, dev ]
+    branches: [ main, master ]
   schedule:
     - cron: '0 6 * * 1'
   # Allow manual runs

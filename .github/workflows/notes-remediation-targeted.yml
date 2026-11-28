@@ -4,7 +4,6 @@ on:
   pull_request:
     branches:
       - main
-      - dev
     paths:
       - "apps/packages/ui/src/components/Notes/**"
       - "apps/packages/ui/src/components/Common/NotesDock/**"

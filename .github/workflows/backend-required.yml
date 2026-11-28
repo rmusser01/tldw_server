@@ -72,6 +72,7 @@ jobs:
     needs: [changes, await_license]
     if: >-
       always() && !cancelled() &&
+      github.base_ref != 'dev' &&
       (
         github.event_name == 'workflow_dispatch' ||
         (github.event_name == 'pull_request' && needs.await_license.outputs.license_passed == 'true')
@@ -213,6 +214,7 @@ jobs:
     needs: [changes, await_license]
     if: >-
       always() && !cancelled() &&
+      github.base_ref != 'dev' &&
       (
         github.event_name == 'workflow_dispatch' ||
         (github.event_name == 'pull_request' && needs.await_license.outputs.license_passed == 'true')
@@ -335,6 +337,7 @@ jobs:
     needs: [changes, await_license]
     if: >-
       always() && !cancelled() &&
+      github.base_ref != 'dev' &&
       (
         github.event_name == 'workflow_dispatch' ||
         (github.event_name == 'pull_request' && needs.await_license.outputs.license_passed == 'true')
@@ -556,6 +559,7 @@ jobs:
     needs: [changes, await_license]
     if: >-
       always() && !cancelled() &&
+      github.base_ref != 'dev' &&
       (
         github.event_name == 'workflow_dispatch' ||
         (github.event_name == 'pull_request' && needs.await_license.outputs.license_passed == 'true')
@@ -732,7 +736,7 @@ jobs:
     timeout-minutes: 45
     services:
       postgres:
-        image: ${{ needs.changes.result == 'success' && needs.changes.outputs.backend_changed == 'true' && 'mirror.gcr.io/library/postgres:18-bookworm' || '' }}
+        image: ${{ github.base_ref != 'dev' && needs.changes.result == 'success' && needs.changes.outputs.backend_changed == 'true' && 'mirror.gcr.io/library/postgres:18-bookworm' || '' }}
         env:
           POSTGRES_USER: tldw_user
           POSTGRES_PASSWORD: TestPassword123!
@@ -764,6 +768,7 @@ jobs:
           exit 1
 
       - name: Require non-UTC timestamp tests to have passed
+        if: github.base_ref != 'dev'
         env:
           BACKEND_CHANGED: ${{ needs.changes.outputs.backend_changed }}
           TIMEZONE_RESULT: ${{ needs.non-utc-tests.result }}
@@ -780,6 +785,7 @@ jobs:
       # backend_changed:chacha_owner_scope_changed:result. A run is expected exactly when both
       # flags are true; a skip is fine only when the job was not due.
       - name: Require ChaCha owner isolation to have passed
+        if: github.base_ref != 'dev'
         env:
           BACKEND_CHANGED: ${{ needs.changes.outputs.backend_changed }}
           CHACHA_OWNER_SCOPE_CHANGED: ${{ needs.changes.outputs.chacha_owner_scope_changed }}
@@ -795,6 +801,7 @@ jobs:
           esac
 
       - name: Require the RAG pipeline gate to have passed
+        if: github.base_ref != 'dev'
         env:
           BACKEND_CHANGED: ${{ needs.changes.outputs.backend_changed }}
           RAG_PIPELINE_CHANGED: ${{ needs.changes.outputs.rag_pipeline_changed }}
@@ -810,6 +817,7 @@ jobs:
           esac
 
       - name: Require chat-executors gate to have passed
+        if: github.base_ref != 'dev'
         env:
           BACKEND_CHANGED: ${{ needs.changes.outputs.backend_changed }}
           CHAT_EXECUTORS_CHANGED: ${{ needs.changes.outputs.chat_executors_changed }}
@@ -833,18 +841,18 @@ jobs:
         uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd
         with:
           fetch-depth: 0
-          ref: ${{ github.event.pull_request.head.sha || github.sha }}
+          ref: ${{ (github.base_ref == 'dev' && github.sha) || github.event.pull_request.head.sha || github.sha }}
           persist-credentials: false
 
       - name: Install FFmpeg and PortAudio (Linux)
-        if: needs.changes.outputs.backend_changed == 'true'
+        if: github.base_ref != 'dev' && needs.changes.outputs.backend_changed == 'true'
         uses: ./.github/actions/setup-ffmpeg
         with:
           install-ffmpeg: 'false'
           install-portaudio: 'true'
 
       - name: Setup Python and dependencies
-        if: needs.changes.outputs.backend_changed == 'true'
+        if: github.base_ref != 'dev' && needs.changes.outputs.backend_changed == 'true'
         uses: ./.github/actions/setup-python-deps
         with:
           python-version: "3.12"
@@ -856,7 +864,7 @@ jobs:
           extras: dev
 
       - name: Test Auth PostgreSQL fixture teardown
-        if: needs.changes.outputs.backend_changed == 'true'
+        if: github.base_ref != 'dev' && needs.changes.outputs.backend_changed == 'true'
         timeout-minutes: 3
         env:
           PYTHONPATH: .
@@ -883,6 +891,31 @@ jobs:
               sys.exit("Expected one passing Auth PostgreSQL teardown case")
           PY
 
+      - name: Set up Python for dev sanity checks
+        if: github.base_ref == 'dev' && needs.changes.outputs.backend_changed == 'true'
+        uses: actions/setup-python@v6
+        with:
+          python-version: '3.12'
+
+      - name: Check HTTP client patching and quickstart target
+        if: github.base_ref == 'dev' && needs.changes.outputs.backend_changed == 'true'
+        run: |
+          python Helper_Scripts/checks/guard_http_client_patching.py
+          make -n quickstart-install
+
+      - name: Check workflow contracts when CI changes
+        if: github.base_ref == 'dev' && needs.changes.outputs.backend_changed == 'true'
+        env:
+          PYTEST_DISABLE_PLUGIN_AUTOLOAD: "1"
+        run: |
+          if git diff --quiet HEAD^1 HEAD -- .github/ Helper_Scripts/ci/ tldw_Server_API/tests/CI/; then
+            exit 0
+          fi
+          python -m pip install pytest pyyaml
+          python -m pytest -q --confcutdir=tldw_Server_API/tests/CI \
+            tldw_Server_API/tests/CI/test_license_first_workflow_contracts.py \
+            tldw_Server_API/tests/CI/test_merge_queue_gate_workflows.py
+
       - name: Compile backend modules
         if: needs.changes.outputs.backend_changed == 'true'
         shell: bash
@@ -894,7 +927,7 @@ jobs:
           PY
 
       - name: Type check changed backend modules
-        if: needs.changes.outputs.backend_changed == 'true'
+        if: github.base_ref != 'dev' && needs.changes.outputs.backend_changed == 'true'
         id: mypy_changed
         continue-on-error: true
         shell: bash
@@ -941,7 +974,7 @@ jobs:
           mypy --follow-imports=silent --ignore-missing-imports "${CHANGED_PY[@]}"
 
       - name: Enforce tenant isolation ratchets
-        if: needs.changes.outputs.backend_changed == 'true'
+        if: github.base_ref != 'dev' && needs.changes.outputs.backend_changed == 'true'
         env:
           PYTHONPATH: .
           PYTEST_DISABLE_PLUGIN_AUTOLOAD: "1"
@@ -977,7 +1010,7 @@ jobs:
       # The RAG split tool and structure pins (TASK-13950.24) guard each move PR.
       # inputs.base_sha is set only on a dispatch (the merge queue passes dev's tip).
       - name: Enforce CI contracts and code ratchets
-        if: needs.changes.outputs.backend_changed == 'true'
+        if: github.base_ref != 'dev' && needs.changes.outputs.backend_changed == 'true'
         env:
           BACKLOG_TASK_FORMAT_BASE: ${{ inputs.base_sha || github.event.pull_request.base.sha || github.event.before }}
           PYTHONPATH: .
@@ -1049,7 +1082,7 @@ jobs:
             tldw_Server_API/tests/AuthNZ/test_websocket_route_auth_matrix.py
 
       - name: Backend unit smoke
-        if: needs.changes.outputs.backend_changed == 'true'
+        if: github.base_ref != 'dev' && needs.changes.outputs.backend_changed == 'true'
         env:
           PYTHONPATH: .
           PYTEST_DISABLE_PLUGIN_AUTOLOAD: "1"
@@ -1066,7 +1099,7 @@ jobs:
       # e88c96500f). The script manages its own minimal child env, so no test
       # env is set at the step level.
       - name: Minimal-env startup smoke
-        if: needs.changes.outputs.backend_changed == 'true'
+        if: github.base_ref != 'dev' && needs.changes.outputs.backend_changed == 'true'
         run: |
           python Helper_Scripts/ci/minimal_env_smoke.py --timeout 150
 
@@ -1077,7 +1110,7 @@ jobs:
       # backend workflow because it is guaranteed to run on drift-causing PRs
       # and has the server deps installed.
       - name: OpenAPI contract drift gate
-        if: needs.changes.outputs.backend_changed == 'true'
+        if: github.base_ref != 'dev' && needs.changes.outputs.backend_changed == 'true'
         env:
           PYTHONPATH: .
         run: |

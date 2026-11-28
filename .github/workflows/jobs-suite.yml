@@ -3,6 +3,7 @@ name: Jobs Suite
 on:
   workflow_dispatch: {}
   pull_request:
+    branches-ignore: [dev]
     paths:
       - 'tldw_Server_API/app/core/Jobs/**'
       - 'tldw_Server_API/app/api/v1/endpoints/jobs_admin.py'

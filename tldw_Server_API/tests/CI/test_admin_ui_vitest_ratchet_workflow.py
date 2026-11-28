@@ -127,7 +127,9 @@ def test_admin_ui_ratchet_retains_exact_reports_after_failure() -> None:
     named_steps = {step.get("name"): step for step in steps}
     upload = named_steps["Upload admin-ui ratchet reports"]
 
-    assert upload["if"] == "${{ always() && needs.changes.outputs.admin_ui_changed == 'true' }}"
+    assert upload["if"] == (
+        "${{ always() && github.base_ref != 'dev' && needs.changes.outputs.admin_ui_changed == 'true' }}"
+    )
     assert upload["uses"] == "actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a"
     assert upload["with"]["path"].splitlines() == [
         "${{ runner.temp }}/admin-ui-unit-head.json",

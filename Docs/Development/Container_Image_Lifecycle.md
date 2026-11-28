@@ -20,7 +20,7 @@ Three GitHub Actions workflows manage the lifecycle:
 
 | Workflow | Trigger | Registry | Purpose |
 |----------|---------|----------|---------|
-| `container-build-check` | PR to `main`/`dev`, manual dispatch | None (build-only) | Validate Dockerfiles build |
+| `container-build-check` | PR to `main`, manual dispatch | None (build-only) | Validate Dockerfiles build |
 | `publish-ghcr-main` | Called from a qualified push to `main` | GHCR | Publish the rolling GPL backend snapshot |
 | `publish-docker` | Release (published), manual dispatch | GHCR | Qualify the event commit and publish versioned releases |
 
@@ -31,8 +31,8 @@ Three GitHub Actions workflows manage the lifecycle:
 | app | `Dockerfiles/Dockerfile.prod` | 8000 | Yes | Yes | Yes |
 | webui | `Dockerfiles/Dockerfile.webui` | 3000 | Yes | No (licensing freeze) | -- |
 | admin-ui | `Dockerfiles/Dockerfile.admin-ui` | 3001 | Yes | No (licensing freeze) | -- |
-| worker | `Dockerfiles/Dockerfile.worker` | -- | -- | -- | Yes |
-| audio-worker | `Dockerfiles/Dockerfile.audio_gpu_worker` | -- | -- | -- | Yes |
+| worker | `Dockerfiles/Dockerfile.worker` | -- | Yes | -- | Yes |
+| audio-worker | `Dockerfiles/Dockerfile.audio_gpu_worker` | -- | Yes | -- | Yes |
 
 ## Workflows
 
@@ -40,15 +40,15 @@ Three GitHub Actions workflows manage the lifecycle:
 
 **File:** `.github/workflows/container-build-check.yml`
 
-**Trigger:** Pull requests targeting `main` or `dev`, plus `workflow_dispatch` (manual).
+**Trigger:** Pull requests targeting `main` and manual dispatches. Pull requests targeting `dev` report a skipped check.
 
-**What it does:** Builds the `app`, `webui`, and `admin-ui` images without pushing. This validates that the Dockerfiles and their build contexts are healthy before merge.
+**What it does:** Builds the `app`, `worker`, `audio-worker`, `webui`, and `admin-ui` images without pushing.
 
 **Key details:**
-- Matrix: `app`, `webui`, `admin-ui` with `fail-fast: false` (all three run even if one fails).
+- Matrix: All five image builds run independently with `fail-fast: false`.
 - Build-only: `push: false`. No registry login or image push.
 - No GHA cache: each run is a cold build, ensuring Dockerfiles build from scratch.
-- Timeout: 30 minutes.
+- Timeout: 45 minutes for `worker` and 30 minutes for each other image.
 - Passes `build-args` for webui and admin-ui (Next.js environment variables like `NEXT_PUBLIC_API_URL`, `NEXT_PUBLIC_TLDW_DEPLOYMENT_MODE`). The `app` entry has no build args.
 - Concurrency: grouped per PR number with `cancel-in-progress: true` (a new push to the same PR cancels the previous run).
 
@@ -175,6 +175,6 @@ The coverage matrix is intentionally asymmetric. This section explains why.
 
 ## Branch Protection
 
-`container-build-check` is pending addition to the branch protection required status checks. See [CI_REQUIRED_GATES.md](CI_REQUIRED_GATES.md) rollout phase 5.
+`dev` requires the `container-build-check` context and receives a skipped summary job. See [CI Required Gates](CI_REQUIRED_GATES.md) for the active rulesets.
 
 The workflow includes a summary job that rolls up the matrix results into a single `container-build-check` status. Branch protection only needs to require this one check name, and it remains stable if the matrix changes.

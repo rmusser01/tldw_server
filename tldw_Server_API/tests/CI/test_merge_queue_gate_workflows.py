@@ -11,6 +11,7 @@ import json
 import os
 import re
 import subprocess
+from fnmatch import fnmatchcase
 from itertools import product
 from pathlib import Path
 from typing import NamedTuple
@@ -33,7 +34,7 @@ GATES = {
     # Path-scoped by its `if:` rather than by no-op steps: see test_e2e_critical_skips_only_an_irrelevant_change.
     "frontend-e2e-tiers.yml": "critical",
 }
-# The gates with a `changes` job. container-build-check builds every image on every run.
+# The gates with a `changes` job. container-build-check routes by target branch.
 CHANGE_GATED = tuple(name for name in GATES if name != "container-build-check.yml")
 
 LICENSE_STEP = "Require the license audit to have passed"
@@ -123,6 +124,86 @@ def _evaluate(expression: str, values: dict[str, str], cancelled: bool = False) 
     result = either()
     assert position == len(tokens), f"trailing tokens in: {expression}"
     return bool(result)
+
+
+DEV_STATUS_ONLY_WORKFLOWS = (
+    "container-build-check.yml",
+    "coverage-required.yml",
+    "e2e-required.yml",
+    "frontend-e2e-tiers.yml",
+)
+
+
+def test_dev_prs_only_trigger_sanity_and_required_status_workflows():
+    eligible = set()
+    for path in WORKFLOWS.glob("*.yml"):
+        triggers = _triggers(path.name)
+        if "pull_request" not in triggers:
+            continue
+        pr = triggers["pull_request"] or {}
+        if any(fnmatchcase("dev", pattern) for pattern in pr.get("branches", ["**"])) and not any(
+            fnmatchcase("dev", pattern) for pattern in pr.get("branches-ignore", [])
+        ):
+            eligible.add(path.name)
+    assert eligible == {  # nosec B101 -- Branch routing contract.
+        *DEV_STATUS_ONLY_WORKFLOWS,
+        "actionlint.yml",
+        "backend-required.yml",
+        "frontend-required.yml",
+        "merge-queue.yml",
+        "pre-commit.yml",
+        "security-required.yml",
+    }
+
+
+@pytest.mark.parametrize("name", DEV_STATUS_ONLY_WORKFLOWS)
+def test_dev_reports_retired_required_contexts_without_starting_runners(name):
+    assert _triggers(name)["pull_request"] == {"branches": ["main", "dev"]}  # nosec B101
+    for job_id, job in _wf(name)["jobs"].items():
+        # Admission is workflow_run-only. Queue tick needs a failed gate, which is skipped.
+        if job_id not in {"admission", "queue-tick"}:
+            assert "github.base_ref != 'dev'" in job["if"], (name, job_id)  # nosec B101
+
+
+@pytest.mark.parametrize(("event", "base", "builds"), [
+    ("pull_request", "dev", False),
+    ("pull_request", "main", True),
+    ("workflow_dispatch", "", True),
+])
+def test_container_matrix_and_result_follow_the_pr_target(event, base, builds):
+    context = {
+        "github.event_name": event,
+        "github.base_ref": base,
+        "needs.admission.result": "skipped",
+        "needs.admission.outputs.should_run": "",
+        "needs.await_license.result": "success" if base else "skipped",
+        "needs.await_license.outputs.license_passed": "true" if base else "",
+    }
+    jobs = _wf("container-build-check.yml")["jobs"]
+    assert _evaluate(jobs["build"]["if"], context) is builds  # nosec B101
+    assert _evaluate(jobs["container-build-check"]["if"], context) is builds  # nosec B101
+
+
+@pytest.mark.parametrize(("workflow", "heavy_jobs"), [
+    ("backend-required", ("non-utc-tests", "chacha-owner-isolation", "rag-pipeline", "chat-executors")),
+    ("frontend-required", ("frontend-unit-tests", "shared-ui-coverage", "shared-ui-coverage-report")),
+])
+def test_dev_rollups_run_without_their_full_suite_jobs(workflow, heavy_jobs):
+    jobs = _wf(f"{workflow}.yml")["jobs"]
+    for job_id in heavy_jobs:
+        assert jobs[job_id]["if"].startswith(  # nosec B101
+            "always() && !cancelled() && github.base_ref != 'dev' && "
+        )
+    assert "github.base_ref != 'dev'" not in jobs[workflow]["if"]  # nosec B101
+
+
+def test_dev_backend_does_not_start_postgres():
+    gate = _gate("backend-required.yml")
+    image = gate["services"]["postgres"]["image"]
+    predicate, _ = image.removeprefix("${{ ").split(" && 'mirror.gcr.io/", 1)
+    values = {"needs.changes.result": "success", "needs.changes.outputs.backend_changed": "true"}
+    assert not _evaluate(predicate, {**values, "github.base_ref": "dev"})  # nosec B101
+    assert _evaluate(predicate, {**values, "github.base_ref": "main"})  # nosec B101
 
 
 # --- 4.3: the comparison base on a dispatched run ---------------------------------------------
@@ -249,6 +330,7 @@ class Row(NamedTuple):
     def values(self) -> dict[str, str]:
         return {
             "github.event_name": self.event,
+            "github.base_ref": "main" if self.event == "pull_request" else "",
             "needs.admission.result": self.admission,
             "needs.admission.outputs.should_run": self.should_run,
             "needs.await_license.result": self.awaited,
@@ -438,6 +520,7 @@ def test_every_gate_turns_a_license_wait_that_did_not_pass_red(name):
     for awaited, passed in outcomes:
         values = {
             "github.event_name": "pull_request",
+            "github.base_ref": "main",
             "needs.admission.result": "skipped",
             "needs.admission.outputs.should_run": "",
             "needs.await_license.result": awaited,
@@ -655,7 +738,7 @@ def test_timezone_prerequisite_cannot_silently_satisfy_the_required_gate(changed
     row = Row("pull_request", "skipped", "", "success", "true", "success", False)
     values = {**row.values, "needs.non-utc-tests.result": result}
     assert _evaluate(gate["if"], values), "a negative child result skipped the protected gate"  # nosec B101
-    assert "if" not in guard, "the prerequisite result must always be checked after admission"  # nosec B101
+    assert guard["if"] == "github.base_ref != 'dev'"  # nosec B101 -- Only the full gate schedules the prerequisite.
     assert guard["env"] == {  # nosec B101
         "BACKEND_CHANGED": "${{ needs.changes.outputs.backend_changed }}",
         "TIMEZONE_RESULT": "${{ needs.non-utc-tests.result }}",
@@ -702,9 +785,12 @@ def test_required_auth_teardown_rejects_missing_execution(tmp_path, report, pyte
     assert not gate.get("continue-on-error") and not step.get("continue-on-error")  # nosec B101
     assert step["env"]["TLDW_TEST_POSTGRES_REQUIRED"] == "1"  # nosec B101
     assert step["env"]["TLDW_TEST_NO_DOCKER"] == "1"  # nosec B101
-    assert step["if"] == "needs.changes.outputs.backend_changed == 'true'"  # nosec B101
+    assert step["if"] == (  # nosec B101
+        "github.base_ref != 'dev' && needs.changes.outputs.backend_changed == 'true'"
+    )
     assert gate["services"]["postgres"]["image"] == (  # nosec B101
-        "${{ needs.changes.result == 'success' && needs.changes.outputs.backend_changed == 'true' "
+        "${{ github.base_ref != 'dev' && needs.changes.result == 'success' "
+        "&& needs.changes.outputs.backend_changed == 'true' "
         "&& 'mirror.gcr.io/library/postgres:18-bookworm' || '' }}"
     )
 

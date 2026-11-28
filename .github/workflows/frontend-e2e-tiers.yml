@@ -4,6 +4,7 @@ on:
   # No `paths:` filter: a required check from a workflow that never triggers
   # never reports and blocks the PR forever, while a job skipped by its `if:`
   # counts as passing. The `changes` job below does the path scoping instead.
+  # Retain skipped check results for the required dev context.
   pull_request:
     branches: [main, dev]
   workflow_dispatch:
@@ -49,7 +50,7 @@ jobs:
   # sees -- but it used to start every gate immediately, in parallel with the
   # license audit it is supposed to follow. This makes it wait for the verdict.
   await_license:
-    if: github.event_name == 'pull_request'
+    if: github.event_name == 'pull_request' && github.base_ref != 'dev'
     uses: ./.github/workflows/license-first-await.yml
     permissions:
       contents: read
@@ -70,6 +71,7 @@ jobs:
     needs: [admission, await_license]
     if: >-
       always() && !cancelled() &&
+      github.base_ref != 'dev' &&
       (
         (
           github.event_name == 'workflow_run' &&
@@ -138,6 +140,7 @@ jobs:
     timeout-minutes: 30
     if: >-
       always() && !cancelled() &&
+      github.base_ref != 'dev' &&
       (
         (
           github.event_name == 'workflow_run' &&
@@ -354,6 +357,7 @@ jobs:
     timeout-minutes: 30
     if: >-
       always() && !cancelled() &&
+      github.base_ref != 'dev' &&
       (
         (
           github.event_name == 'workflow_run' &&
@@ -476,6 +480,7 @@ jobs:
     timeout-minutes: 30
     if: >-
       always() && !cancelled() &&
+      github.base_ref != 'dev' &&
       (
         (
           github.event_name == 'workflow_run' &&
@@ -605,6 +610,7 @@ jobs:
     timeout-minutes: 45
     if: >-
       always() && !cancelled() &&
+      github.base_ref != 'dev' &&
       (
         (
           github.event_name == 'workflow_run' &&

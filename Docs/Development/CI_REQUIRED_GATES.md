@@ -4,20 +4,20 @@ This document defines the required pull-request gates and server CI tiers.
 
 ## Server CI tiers
 
-[ADR-096](../ADR/096-tiered-development-and-release-ci.md) sets CI scope by target branch. The `dev` merge queue retains its seven path-scoped checks and the trusted license status. On a queue rebase, `backend-required` runs its own unit and startup smoke when backend paths change. The supplemental `CI` workflow runs on normal PR events.
+[ADR-106](../ADR/106-dev-pr-sanity-only.md) defines the `dev` sanity checks. [ADR-096](../ADR/096-tiered-development-and-release-ci.md) defines full server qualification.
 
 | Event | Validation |
 | --- | --- |
-| `dev` PR, including forks | Existing required gates and supplemental preflight. Backend-relevant changes also run the bounded chunking and readiness smoke tests. |
+| `dev` PR, including forks | Trusted license status, backlog ID validation, and path-scoped Python syntax and guardrails, frontend lint and type checking, and static security. Pre-commit and workflow lint retain their existing PR scopes. |
 | Nightly on `dev` | Existing broad Linux 3.12 shards and the `TEST_MODE=0` rate-limit lane, at the regression run's immutable event SHA |
-| PR into `main` | Complete existing Linux/macOS/Windows matrices and checked wheel/sdist, including a clean wheel install and import. Require `Main PR release qualification` at the current base. |
+| PR into `main` | Complete existing Linux/macOS/Windows matrices and checked wheel/sdist, including a clean wheel install and import. The five-image build check and path-scoped browser and coverage suites retain their existing routes. Require `Main PR release qualification` at the current base. |
 | `main` push, tagged Docker publication or manual server publication | The same full validation at the actual event SHA before eligible PyPI or GHCR jobs can publish |
 
 Full Linux regression runs on nightly and release events. Focused Jobs and browser suites retain their own workflows. Standalone MCP Unified publication retains its own release gates.
 
 For a non-publishing full qualification, dispatch `CI` with `nightly=false` on the intended ref. Check the resulting run's SHA and `Full release qualification` conclusion. The default-branch `Server Nightly Dispatcher` runs at 09:43 UTC and dispatches `CI` with `nightly=true` on `dev`. It skips an active or successful nightly for the observed SHA and retries a SHA without such a run. A push during dispatch can advance `dev`, so verify the SHA of the regression run itself. Dispatcher success alone establishes neither coverage nor regression success.
 
-1. Land the workflow change on `dev` through its existing required gates. Verify a normal backend PR reports `Server backend smoke` and skips the broad matrix. Verify a docs-only PR skips backend smoke.
+1. Verify that backend, frontend, and documentation PRs into `dev` report all required contexts. Confirm no image build, coverage, or browser job starts. Check that docs and backlog-only PRs still reach backlog ID validation.
 2. Open a CI-only promotion to `main`. Verify `Main PR release qualification` reports from the pull-request event and succeeds at the current base. Bind that exact context to GitHub Actions (integration `15368`) in a strict `main` ruleset alongside the existing license status. Then merge the promotion. After qualification, the push follows the normal rolling image and PyPI publication policy.
 3. Observe the scheduled dispatcher and its broad nightly run. Confirm the reported SHA and unchanged-SHA deduplication. A failed nightly remains retryable. Use the manual CI dispatch for an additional full qualification without publication.
 
@@ -38,10 +38,10 @@ The active `dev-core-required-gates` repository ruleset requires these checks:
 These check names are stable and must remain unchanged. Each status is bound to
 GitHub Actions integration `15368`.
 
-`E2E Critical (Tier 1 + Journeys)` is the `critical` job of `frontend-e2e-tiers.yml`.
-Add it to the ruleset only once that workflow's unfiltered `pull_request` trigger is on
-`dev`: an open PR whose last run predates it, and was path-filtered out, shows the check
-as "Expected" until its next push (which strict enforcement forces anyway).
+`coverage-required`, `e2e-required`, `container-build-check`, and `E2E Critical (Tier 1 + Journeys)`
+report skipped jobs on `dev` PRs. Keep those workflows' unfiltered `dev` PR triggers while the ruleset
+requires the contexts. GitHub counts a skipped job as passing. A workflow skipped by a trigger filter can leave
+its required check pending.
 
 ## Live `dev` Enforcement
 
@@ -64,11 +64,13 @@ responses in TASK-13013.2.
 
 ### Container Build Check Details
 
-`container-build-check` validates that the `app`, `webui`, and `admin-ui` Dockerfiles build successfully on PRs to `main` and `dev`. The workflow uses a matrix strategy with `fail-fast: false`, so all three images are tested even if one fails. A summary job rolls up the matrix results into a single `container-build-check` status for branch protection.
+`container-build-check` builds `app`, `worker`, `audio-worker`, `webui`, and `admin-ui` on PRs to `main` and manual dispatches. All five builds run independently and report through the summary job. PRs to `dev` report the skipped summary without starting a runner.
 
 See [Container Image Lifecycle](Container_Image_Lifecycle.md) for the full build and publish pipeline.
 
 ### security-required: TEST_MODE-unset suites
+
+The full security suites run on `main` PRs and manual diagnostics. On `dev` PRs the security gate performs static checks.
 
 The "Security suites with TEST_MODE unset" step runs `tests/http_client`, `tests/AuthNZ/unit`, `tests/AuthNZ_Unit`, `tests/Security` and the sentinel `tests/CI/test_unset_test_flags_run.py` with `TLDW_UNSET_TEST_FLAGS=1`, which makes `tests/conftest.py` drop `TEST_MODE`, `TESTING` and `TLDW_TEST_MODE`; the same variable un-skips the sentinel, and `test_license_first_workflow_contracts.py` pins it. AuthNZ means the unit-level suites only, because the integration suites take about 90 shard-minutes. The run is not production parity: `PYTEST_CURRENT_TEST`-keyed branches stay live, and the root conftests' other test settings still apply (`WORKFLOWS_EGRESS_BLOCK_PRIVATE=false`, `WORKFLOWS_EGRESS_ALLOWED_PORTS=*`, `WORKFLOWS_WEBHOOK_ALLOWLIST=*`, `MINIMAL_TEST_APP=1`, the single-user test key). Postgres cases skip (`TLDW_TEST_NO_DOCKER=1`) and run in ci.yml's Postgres shard. A test that fails only here means production code still branches on `TEST_MODE`, `TESTING` or `TLDW_TEST_MODE`.
 
@@ -81,7 +83,7 @@ deterministically. Between an unknown date and 2026-09-23 it did not; see
 [Gate Reporting and the `workflow_run` Admission Path](#gate-reporting-and-the-workflow_run-admission-path),
 and check current behaviour rather than assuming.
 
-- If relevant paths changed, the gate executes its full checks.
+- If relevant paths changed, the gate executes the checks for the target branch.
 - If relevant paths did not change, the gate exits with an explicit no-op success message.
   `E2E Critical (Tier 1 + Journeys)` instead skips its job, which GitHub counts as passing;
   its workflow has no `paths:` filter, so the check always reports.
@@ -98,11 +100,11 @@ and check current behaviour rather than assuming.
 
 Examples:
 
-- UI-only PRs no-op `backend-required` and `coverage-required`.
+- UI-only PRs no-op `backend-required`.
 - Backend-only PRs no-op `frontend-required`.
-- `e2e-required` runs on frontend changes and selected backend API/schema/auth paths.
-- `E2E Critical (Tier 1 + Journeys)` runs on any backend, workflow, shared-UI, web or
-  extension change (`backend_changed || e2e_changed`); docs- and backlog-only PRs skip it.
+- For `main` PRs, `e2e-required` runs on frontend changes and selected backend API/schema/auth paths.
+- For `main` PRs, `E2E Critical (Tier 1 + Journeys)` runs on backend, workflow, shared-UI, web or
+  extension changes. On `dev` it reports skipped.
 
 ## Gate Reporting and the `workflow_run` Admission Path
 
@@ -292,6 +294,11 @@ Tracked as TASK-13462, decided in [ADR-063](../ADR/063-in-repo-merge-queue.md), 
 Strict enforcement means one merge puts every other ready PR behind, and without a queue each of them rebases and
 re-runs the required gates to race for the next merge. The queue makes that serial: only the armed PR at the front of
 the line is rebased and tested.
+
+The shortened `dev` lane reduces the work after a rebase. Avoid rebasing waiting PRs in bulk. If the
+maintainer changes the `dev` ruleset to loose required checks, GitHub can accept checks on a head that no
+longer includes the latest `dev`. That saves rechecks and shifts detection of incompatible combinations to
+later integration. See [GitHub's strict and loose check settings](https://docs.github.com/en/repositories/configuring-branches-and-merges-in-your-repository/managing-protected-branches/about-protected-branches#require-status-checks-before-merging).
 
 ### Mode
 

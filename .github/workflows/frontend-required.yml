@@ -116,6 +116,7 @@ jobs:
     needs: [changes, admission, await_license]
     if: >-
       always() && !cancelled() &&
+      github.base_ref != 'dev' &&
       (
         (
           github.event_name == 'workflow_run' &&
@@ -585,6 +586,7 @@ jobs:
     needs: [changes]
     if: >-
       always() && !cancelled() &&
+      github.base_ref != 'dev' &&
       needs.changes.result == 'success' &&
       needs.changes.outputs.tldw_frontend_changed == 'true'
     runs-on: ubuntu-latest
@@ -652,6 +654,7 @@ jobs:
     needs: [changes, shared-ui-coverage]
     if: >-
       always() && !cancelled() &&
+      github.base_ref != 'dev' &&
       needs.changes.result == 'success' &&
       needs.shared-ui-coverage.result == 'success'
     runs-on: ubuntu-latest
@@ -771,6 +774,7 @@ jobs:
           fi
 
       - name: Require frontend unit shard success
+        if: github.base_ref != 'dev'
         shell: bash
         env:
           TLDW_FRONTEND_CHANGED: ${{ needs.changes.outputs.tldw_frontend_changed }}
@@ -795,7 +799,7 @@ jobs:
         uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd
         with:
           fetch-depth: 0
-          ref: ${{ needs.admission.outputs.head_sha || github.event.workflow_run.pull_requests[0].head.sha || github.event.pull_request.head.sha || github.sha }}
+          ref: ${{ needs.admission.outputs.head_sha || github.event.workflow_run.pull_requests[0].head.sha || (github.base_ref == 'dev' && github.sha) || github.event.pull_request.head.sha || github.sha }}
           persist-credentials: false
 
       - name: Setup Node.js
@@ -816,14 +820,14 @@ jobs:
         run: bun install
 
       - name: Install PortAudio build dependencies
-        if: needs.changes.outputs.tldw_frontend_changed == 'true'
+        if: github.base_ref != 'dev' && needs.changes.outputs.tldw_frontend_changed == 'true'
         uses: ./.github/actions/setup-ffmpeg
         with:
           install-ffmpeg: 'false'
           install-portaudio: 'true'
 
       - name: Setup Python for auth lifecycle
-        if: needs.changes.outputs.tldw_frontend_changed == 'true'
+        if: github.base_ref != 'dev' && needs.changes.outputs.tldw_frontend_changed == 'true'
         uses: ./.github/actions/setup-python-deps
         with:
           python-version: '3.12'
@@ -866,7 +870,7 @@ jobs:
         run: bunx tsc --project tsconfig.strict.json
 
       - name: Run all WebUI-owned tests with coverage
-        if: needs.changes.outputs.tldw_frontend_changed == 'true'
+        if: github.base_ref != 'dev' && needs.changes.outputs.tldw_frontend_changed == 'true'
         timeout-minutes: 17
         working-directory: apps/tldw-frontend
         run: |
@@ -876,37 +880,37 @@ jobs:
           timeout --kill-after=30s 15m bun run test:coverage --maxWorkers=2 --exclude '../packages/ui/**'
 
       - name: Run family guardrails parity tests
-        if: needs.changes.outputs.family_guardrails_changed == 'true'
+        if: github.base_ref != 'dev' && needs.changes.outputs.family_guardrails_changed == 'true'
         working-directory: apps/packages/ui
         run: bun run test:family-guardrails
 
       - name: Install Playwright Chromium
-        if: needs.changes.outputs.tldw_frontend_changed == 'true'
+        if: github.base_ref != 'dev' && needs.changes.outputs.tldw_frontend_changed == 'true'
         working-directory: apps/tldw-frontend
         run: bunx playwright install --with-deps chromium
 
       - name: Run family guardrails e2e
-        if: needs.changes.outputs.family_guardrails_changed == 'true'
+        if: github.base_ref != 'dev' && needs.changes.outputs.family_guardrails_changed == 'true'
         working-directory: apps/tldw-frontend
         run: bun run e2e:family-guardrails
 
       - name: Build production Chrome extension
-        if: needs.changes.outputs.tldw_frontend_changed == 'true'
+        if: github.base_ref != 'dev' && needs.changes.outputs.tldw_frontend_changed == 'true'
         working-directory: apps/extension
         run: bun run build:chrome:prod
 
       - name: Run WebUI API-key persistence lifecycle
-        if: needs.changes.outputs.tldw_frontend_changed == 'true'
+        if: github.base_ref != 'dev' && needs.changes.outputs.tldw_frontend_changed == 'true'
         working-directory: apps/tldw-frontend
         run: bunx playwright test e2e/manual-api-key-persistence.spec.ts --reporter=line
 
       - name: Run extension API-key persistence lifecycle
-        if: needs.changes.outputs.tldw_frontend_changed == 'true'
+        if: github.base_ref != 'dev' && needs.changes.outputs.tldw_frontend_changed == 'true'
         working-directory: apps/tldw-frontend
         run: bunx playwright test e2e/extension-api-key-persistence.spec.ts --reporter=line
 
       - name: Run single-user cookie persistence lifecycle
-        if: needs.changes.outputs.tldw_frontend_changed == 'true'
+        if: github.base_ref != 'dev' && needs.changes.outputs.tldw_frontend_changed == 'true'
         working-directory: apps/tldw-frontend
         env:
           TLDW_E2E_PYTHON: python
@@ -918,19 +922,19 @@ jobs:
         run: bun install --frozen-lockfile
 
       - name: Install admin-ui Playwright Chromium
-        if: needs.changes.outputs.admin_ui_changed == 'true'
+        if: github.base_ref != 'dev' && needs.changes.outputs.admin_ui_changed == 'true'
         working-directory: admin-ui
         run: bunx playwright install --with-deps chromium
 
       - name: Install PortAudio build dependencies
-        if: needs.changes.outputs.admin_ui_changed == 'true'
+        if: github.base_ref != 'dev' && needs.changes.outputs.admin_ui_changed == 'true'
         uses: ./.github/actions/setup-ffmpeg
         with:
           install-ffmpeg: 'false'
           install-portaudio: 'true'
 
       - name: Setup Python and server dependencies
-        if: needs.changes.outputs.admin_ui_changed == 'true'
+        if: github.base_ref != 'dev' && needs.changes.outputs.admin_ui_changed == 'true'
         uses: ./.github/actions/setup-python-deps
         with:
           python-version: '3.12'
@@ -952,7 +956,7 @@ jobs:
         run: bun run typecheck
 
       - name: Run admin-ui unit tests
-        if: needs.changes.outputs.admin_ui_changed == 'true'
+        if: github.base_ref != 'dev' && needs.changes.outputs.admin_ui_changed == 'true'
         shell: bash
         env:
           RATCHET_BASE_SHA: ${{ needs.admission.outputs.base_sha || github.event.pull_request.base.sha || inputs.base_sha }}
@@ -1118,7 +1122,7 @@ jobs:
             --changed-files "$CHANGED_FILES_PATH"
 
       - name: Upload admin-ui ratchet reports
-        if: ${{ always() && needs.changes.outputs.admin_ui_changed == 'true' }}
+        if: ${{ always() && github.base_ref != 'dev' && needs.changes.outputs.admin_ui_changed == 'true' }}
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a
         with:
           name: admin-ui-ratchet-reports
@@ -1131,14 +1135,14 @@ jobs:
           retention-days: 14
 
       - name: Run admin-ui real-backend e2e
-        if: needs.changes.outputs.admin_ui_changed == 'true'
+        if: github.base_ref != 'dev' && needs.changes.outputs.admin_ui_changed == 'true'
         working-directory: admin-ui
         env:
           TLDW_ADMIN_E2E_PYTHON: python
         run: bun run test:real-backend
 
       - name: Run admin-ui build
-        if: needs.changes.outputs.admin_ui_changed == 'true'
+        if: github.base_ref != 'dev' && needs.changes.outputs.admin_ui_changed == 'true'
         working-directory: admin-ui
         run: bun run build
 

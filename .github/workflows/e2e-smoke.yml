@@ -2,6 +2,7 @@ name: E2E Critical Smoke (In-Process)
 
 on:
   pull_request:
+    branches-ignore: [dev]
     types: [opened, synchronize, reopened]
   workflow_dispatch: {}
 
