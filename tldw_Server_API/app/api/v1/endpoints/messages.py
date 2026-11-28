@@ -72,8 +72,8 @@ from tldw_Server_API.app.core.Provider_Credentials.provider_credential_runtime i
 )
 from tldw_Server_API.app.core.testing import is_test_mode, is_truthy
 from tldw_Server_API.app.core.Moderation.gateway_hooks import (
-    moderate_anthropic_request,
-    moderate_anthropic_response,
+    moderate_anthropic_request_async,
+    moderate_anthropic_response_async,
     wrap_anthropic_stream,
 )
 from tldw_Server_API.app.core.Usage.llm_call_context import current_llm_user_id
@@ -2086,9 +2086,11 @@ def _messages_moderation_user_id(current_user: User) -> int | None:
         return current_llm_user_id()
 
 
-def _moderate_native_request(payload: dict[str, Any], current_user: User) -> dict[str, Any]:
+async def _moderate_native_request(payload: dict[str, Any], current_user: User) -> dict[str, Any]:
     """Moderate a native payload before it is POSTed (here, not in the transports ``count_tokens`` shares)."""
-    return moderate_anthropic_request(payload, surface="messages", user_id=_messages_moderation_user_id(current_user))
+    return await moderate_anthropic_request_async(
+        payload, surface="messages", user_id=_messages_moderation_user_id(current_user)
+    )
 
 
 async def _handle_messages(
@@ -2128,7 +2130,7 @@ async def _handle_messages(
                 anthropic_version=anthropic_version,
                 anthropic_beta=anthropic_beta,
             )
-            payload = _moderate_native_request(payload, current_user)
+            payload = await _moderate_native_request(payload, current_user)
             stream = _extract_stream_flag(request_data.stream)
             # No ChatProvider on this path, so it gets the adapters' check at the call (a no-op once admitted).
             await check_llm_call_async(getattr(credentials, "credential_source", None))
@@ -2173,18 +2175,21 @@ async def _handle_messages(
             )
             if not _native_message_payload_is_semantic(data):
                 raise_detached_error(_messages_upstream_http_exception())
-            data = moderate_anthropic_response(data, surface="messages", user_id=_messages_moderation_user_id(current_user))
+            # The provider already answered and billed this call, independently of moderation.
             record_direct_response(
-                provider, payload, data, started, credential_source=getattr(credentials, "credential_source", None)
+                provider, payload, data, started,
+                credential_source=getattr(credentials, "credential_source", None),
             )
-            response = JSONResponse(data)
             await await_owned_worker(
                 _mark_messages_credential_used(
                     credential_runtime,
                     credentials,
                 )
             )
-            return response
+            data = await moderate_anthropic_response_async(
+                data, surface="messages", user_id=_messages_moderation_user_id(current_user),
+            )
+            return JSONResponse(data)
 
         # Non-native providers: convert to OpenAI-compatible request
         call_params = _build_openai_call_params(

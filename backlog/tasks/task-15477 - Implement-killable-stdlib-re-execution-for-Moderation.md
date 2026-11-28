@@ -8,6 +8,7 @@ labels:
 - refactor
 dependencies:
 - TASK-15415
+updated_date: 2026-11-28 05:57
 ---
 
 ## Description
@@ -88,6 +89,7 @@ Published reviewed source52efef9d1b6f43b6df82f52f6a22518815fe2b63 after conflict
 Latest-dev integration afterca84130470publication: fetcheddev476527719a806e005225fd358b0f830f8b9253df (endpointtestmode cleanup/UI/docs), backupcodex/moderation-pre-20261108-dev-integration. All35commits rebasedconflict-free, everyrange-diffpatchidentical. Validatedsource1e2a4e801feb5f644b4047c64227e49ed5c6da40. No manualresolutions/newcodefixes; newdevendpointbehaviorpreserved. PostrebaseAudio/Chat/lifecycle/quality/OpenAPI/testmode/PGmanifest271passed1000warnings137.42sexit0; canonical3.12fingerprint/pathunionmatch;77PRPythonpathscompile3.14warningsaserrors. Immutableintegrationreviewacceptednofindings. Finalupdateevidence/task/planonly; exactleasepublicationagainstca84130470pendingnewheadCI. WaiverrecordedforPR3437only; no mergeorautomerge.
 2026-11-13: Rebasing PR3437 onto dev 4b6b9ec446 incorporates upstream Playwright runner and Notes/Persona shard fixes. Reproduced and fixed the leaked Chat audit dependency and restored authenticated Rules verdict auditing after rebase. Canonical Python 3.12 OpenAPI drift, 49 route/classification/ratchet tests, 5 Chat teardown tests, 15 migration tests, and 10 inventory tests passed. Keep open until current-head CI and merge are verified. See November 13 follow-up in the PR3437 review record.
 Final local follow-up: diagnosed transient macOS SIGKILL EPERM in the test process controller. Retry under the existing bound, still require native absence and reader completion. Two red regression cases, 16 green harness tests, 100 green overflow repetitions, independent review clear. Current-head GitHub CI remains the merge gate.
+2026-11-27: Rebased PR3437's 38 commits onto dev 1ed6ab3e36. Reproduced the disabled command-moderation capacity 503 with the real HTTP route (2 red disabled cases, enabled control already failed closed); bypassed admission only for disabled input moderation and preserved its audit. Reconciled extracted Chat streaming, surface-aware test doubles, Audio collaborator patches, documented Windows worker env reads, and refreshed canonical OpenAPI and the stale generated import inventory. Chat 182 pass/1 skip, moderation/Audio/Workflows/lifecycle 1248 pass, targeted frontend 17 pass, CI contracts 140 pass; keep in progress until current-head checks and merge are verified.
 <!-- SECTION:IMPLEMENTATION_NOTES:END -->
 
 ## Final Summary

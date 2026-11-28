@@ -3,13 +3,16 @@
 from __future__ import annotations
 
 import importlib.machinery
+import json
 import sys
 import types
+from collections.abc import Awaitable, Callable
 from configparser import ConfigParser
 from types import SimpleNamespace
 from typing import Any
 
 import pytest
+from starlette.websockets import WebSocketDisconnect
 
 import tldw_Server_API.app.core.Metrics.metrics_manager as metrics_manager
 from tldw_Server_API.app.core.exception_types import MODERATION_EXECUTION_REASONS, ModerationExecutionError
@@ -94,6 +97,103 @@ class DummyMediaDB:
         self.release_count += 1
 
 
+async def _emit_result(
+    socket: Any,
+    callback: Callable[[dict[str, Any], str], Awaitable[None]] | None,
+    payload: dict[str, Any],
+    full_text: str = "",
+) -> None:
+    if callback is not None:
+        await callback(payload, full_text)
+    await socket.send_json(payload)
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("kind", ["transcription", "full_transcript"])
+@pytest.mark.parametrize("fail_operation", [None, "redact_many", "redact"])
+async def test_transcript_emission_checks_frame_and_snapshot_before_saving(
+    monkeypatch, kind, fail_operation,
+):
+    from tldw_Server_API.app.core.Ingestion_Media_Processing.Audio import Audio_Streaming_Unified as unified
+    from tldw_Server_API.app.core.Moderation.execution_runner import ModerationExecutionRunner
+
+    monkeypatch.setenv("STT_REDACT_PII", "1")
+    monkeypatch.setenv("STT_REDACT_CATEGORIES", "pii_email")
+    text = "Please contact alice@example.com"
+    result = {"type": "transcription", "text": text, "is_final": True, "segments": [{"text": text}]}
+
+    class Transcriber:
+        def __init__(self, config):
+            self.config = config
+
+        def initialize(self):
+            pass
+
+        async def process_audio_chunk(self, _pcm):
+            return result if kind == "transcription" else None
+
+        def get_full_transcript(self):
+            return text
+
+        def reset(self):
+            pass
+
+        def cleanup(self):
+            pass
+
+    input_frames = [
+        {"type": "config", "model": "parakeet", "sample_rate": 16000},
+        {"type": "audio", "data": "AAAAAA=="},
+    ]
+    if kind == "full_transcript":
+        input_frames.append({"type": "commit"})
+    frames = iter(input_frames)
+
+    class Socket(DummyWebSocket):
+        async def receive_text(self):
+            frame = next(frames, None)
+            if frame is None:
+                raise WebSocketDisconnect()
+            return json.dumps(frame)
+
+    writes = []
+    checks = []
+    db = DummyMediaDB()
+    execute = ModerationExecutionRunner.execute
+
+    def observe(self, request, scope):
+        checks.append(request.operation)
+        if request.operation == fail_operation:
+            raise ModerationExecutionError("worker_unavailable")
+        return execute(self, request, scope)
+
+    def save(_db, *, media_id, transcription, idempotency_key, **_kwargs):
+        writes.append((media_id, transcription, idempotency_key))
+        return {"id": 1}
+
+    monkeypatch.setattr(unified, "UnifiedStreamingTranscriber", Transcriber)
+    monkeypatch.setattr(ModerationExecutionRunner, "execute", observe)
+    monkeypatch.setattr("tldw_Server_API.app.api.v1.API_Deps.DB_Deps._resolve_media_db_for_user", lambda _user: db)
+    monkeypatch.setattr("tldw_Server_API.app.core.DB_Management.media_db.legacy_transcripts.upsert_transcript", save)
+    ws = Socket(query_params={"persist_transcript": "1", "media_id": "42"})
+    await audio_streaming.websocket_transcribe(ws, token=None)
+
+    emitted = [frame for frame in ws.sent_json if frame.get("type") == kind]
+    if fail_operation is not None:
+        assert writes == [] and emitted == []
+        assert ws.close_calls[0] == 1011
+        assert [frame["code"] for frame in ws.sent_json if frame.get("type") == "error"] == ["moderation_unavailable"]
+    else:
+        assert checks == ["redact_many", "redact"]
+        (media_id, snapshot, key), = writes
+        assert (media_id, snapshot) == (42, "Please contact [PII]")
+        assert key.startswith("audio-ws:") and db.release_count == 1
+        frame, = emitted
+        assert frame["text"] == snapshot
+        if kind == "transcription":
+            assert frame["segments"] == [{"text": snapshot}]
+
+
 @pytest.fixture(autouse=True)
 def _mock_transcribe_dependencies(monkeypatch: pytest.MonkeyPatch) -> None:
     """Patch auth/quota dependencies so tests focus on persistence behavior."""
@@ -142,6 +242,7 @@ async def test_stream_transcribe_persists_partial_and_final(monkeypatch: pytest.
     )
     db = DummyMediaDB()
     calls: list[dict[str, Any]] = []
+    writes_before_partial: list[int] = []
 
     monkeypatch.setattr("tldw_Server_API.app.api.v1.API_Deps.DB_Deps._resolve_media_db_for_user", lambda _user: db)
 
@@ -165,7 +266,7 @@ async def test_stream_transcribe_persists_partial_and_final(monkeypatch: pytest.
         )
         return {"id": len(calls)}
 
-    monkeypatch.setattr(audio_streaming, "upsert_transcript", _upsert)
+    monkeypatch.setattr("tldw_Server_API.app.core.DB_Management.media_db.legacy_transcripts.upsert_transcript", _upsert)
 
     async def _mock_handle(
         _websocket,
@@ -175,24 +276,29 @@ async def test_stream_transcribe_persists_partial_and_final(monkeypatch: pytest.
         on_heartbeat=None,  # noqa: ARG001
         on_stream_config_resolved=None,
         on_transcript_result=None,
-        on_full_transcript=None,
     ):
         if on_stream_config_resolved is not None:
             await on_stream_config_resolved({"type": "config", "transcription_model": "stream-live-model"}, config)
+        partial = {"type": "partial", "text": "hello", "is_final": False}
         if on_transcript_result is not None:
-            await on_transcript_result({"type": "partial", "text": "hello", "is_final": False}, "")
-            await on_transcript_result(
-                {"type": "transcription", "text": "hello world", "is_final": True},
-                "hello world",
-            )
-        if on_full_transcript is not None:
-            await on_full_transcript("hello world final", False)
+            await on_transcript_result(partial, "")
+        await _emit_result(_websocket, on_transcript_result, {"type": "status", "text": "not a transcript"})
+        writes_before_partial.append(len(calls))
+        await _websocket.send_json(partial)
+        await _emit_result(
+            _websocket, on_transcript_result,
+            {"type": "transcription", "text": "hello world", "is_final": True}, "hello world",
+        )
+        full = {"type": "full_transcript", "text": "hello world final"}
+        await _emit_result(_websocket, on_transcript_result, full, "hello world final")
+        await _websocket.send_json(full)
 
     monkeypatch.setattr(audio_streaming, "handle_unified_websocket", _mock_handle)
 
     await audio_streaming.websocket_transcribe(ws, token=None)
 
-    assert len(calls) >= 2
+    assert writes_before_partial == [0]
+    assert [call["transcription"] for call in calls] == ["hello", "hello world", "hello world final"]
     assert all(call["media_id"] == 42 for call in calls)
     assert all(call["whisper_model"] == "stream-live-model" for call in calls)
     assert len({call.get("idempotency_key") for call in calls}) == 1
@@ -227,7 +333,7 @@ async def test_stream_transcribe_skips_persistence_when_disabled(monkeypatch: py
         )
         return {"id": len(calls)}
 
-    monkeypatch.setattr(audio_streaming, "upsert_transcript", _upsert)
+    monkeypatch.setattr("tldw_Server_API.app.core.DB_Management.media_db.legacy_transcripts.upsert_transcript", _upsert)
 
     async def _mock_handle(
         _websocket,
@@ -237,14 +343,11 @@ async def test_stream_transcribe_skips_persistence_when_disabled(monkeypatch: py
         on_heartbeat=None,  # noqa: ARG001
         on_stream_config_resolved=None,
         on_transcript_result=None,
-        on_full_transcript=None,
     ):
         if on_stream_config_resolved is not None:
             await on_stream_config_resolved({"type": "config"}, config)
-        if on_transcript_result is not None:
-            await on_transcript_result({"type": "partial", "text": "hello", "is_final": False}, "")
-        if on_full_transcript is not None:
-            await on_full_transcript("hello final", False)
+        await _emit_result(_websocket, on_transcript_result, {"type": "partial", "text": "hello", "is_final": False})
+        await _emit_result(_websocket, on_transcript_result, {"type": "full_transcript", "text": "hello final"}, "hello final")
 
     monkeypatch.setattr(audio_streaming, "handle_unified_websocket", _mock_handle)
 
@@ -279,7 +382,7 @@ async def test_stream_transcribe_persistence_fail_open(monkeypatch: pytest.Monke
         call_count["count"] += 1
         raise RuntimeError("simulated persistence failure")
 
-    monkeypatch.setattr(audio_streaming, "upsert_transcript", _upsert_raises)
+    monkeypatch.setattr("tldw_Server_API.app.core.DB_Management.media_db.legacy_transcripts.upsert_transcript", _upsert_raises)
 
     async def _mock_handle(
         _websocket,
@@ -289,15 +392,17 @@ async def test_stream_transcribe_persistence_fail_open(monkeypatch: pytest.Monke
         on_heartbeat=None,  # noqa: ARG001
         on_stream_config_resolved=None,
         on_transcript_result=None,
-        on_full_transcript=None,
     ):
         if on_stream_config_resolved is not None:
             await on_stream_config_resolved({"type": "config"}, config)
-        if on_transcript_result is not None:
-            await on_transcript_result({"type": "partial", "text": "hello", "is_final": False}, "")
-            await on_transcript_result({"type": "transcription", "text": "hello world", "is_final": True}, "hello")
-        if on_full_transcript is not None:
-            await on_full_transcript("hello world final", False)
+        await _emit_result(_websocket, on_transcript_result, {"type": "partial", "text": "hello", "is_final": False})
+        await _emit_result(
+            _websocket, on_transcript_result,
+            {"type": "transcription", "text": "hello world", "is_final": True}, "hello",
+        )
+        await _emit_result(
+            _websocket, on_transcript_result, {"type": "full_transcript", "text": "hello world final"}, "hello world final",
+        )
 
     monkeypatch.setattr(audio_streaming, "handle_unified_websocket", _mock_handle)
 
@@ -509,7 +614,7 @@ async def test_stream_transcribe_redacts_partial_and_final_payloads_when_partial
         )
         return {"id": len(calls)}
 
-    monkeypatch.setattr(audio_streaming, "upsert_transcript", _upsert)
+    monkeypatch.setattr("tldw_Server_API.app.core.DB_Management.media_db.legacy_transcripts.upsert_transcript", _upsert)
 
     async def _mock_handle(
         _websocket,
@@ -519,24 +624,21 @@ async def test_stream_transcribe_redacts_partial_and_final_payloads_when_partial
         on_heartbeat=None,  # noqa: ARG001
         on_stream_config_resolved=None,
         on_transcript_result=None,
-        on_full_transcript=None,
     ):
         if on_stream_config_resolved is not None:
             await on_stream_config_resolved({"type": "config", "transcription_model": "stream-live-model"}, config)
-        await _websocket.send_json({"type": "partial", "text": "contact alice@example.com", "is_final": False})
-        if on_transcript_result is not None:
-            await on_transcript_result({"type": "partial", "text": "contact alice@example.com", "is_final": False}, "")
-        await _websocket.send_json(
-            {"type": "transcription", "text": "contact alice@example.com now", "is_final": True}
+        await _emit_result(
+            _websocket, on_transcript_result, {"type": "partial", "text": "contact alice@example.com", "is_final": False},
         )
-        if on_transcript_result is not None:
-            await on_transcript_result(
-                {"type": "transcription", "text": "contact alice@example.com now", "is_final": True},
-                "contact alice@example.com now",
-            )
-        await _websocket.send_json({"type": "full_transcript", "text": "contact alice@example.com now"})
-        if on_full_transcript is not None:
-            await on_full_transcript("contact alice@example.com now", False)
+        await _emit_result(
+            _websocket, on_transcript_result,
+            {"type": "transcription", "text": "contact alice@example.com now", "is_final": True},
+            "contact alice@example.com now",
+        )
+        await _emit_result(
+            _websocket, on_transcript_result, {"type": "full_transcript", "text": "contact alice@example.com now"},
+            "contact alice@example.com now",
+        )
 
     monkeypatch.setattr(audio_streaming, "handle_unified_websocket", _mock_handle)
 
@@ -596,7 +698,7 @@ async def test_stream_transcribe_allows_unredacted_partials_but_redacts_final_pa
         )
         return {"id": len(calls)}
 
-    monkeypatch.setattr(audio_streaming, "upsert_transcript", _upsert)
+    monkeypatch.setattr("tldw_Server_API.app.core.DB_Management.media_db.legacy_transcripts.upsert_transcript", _upsert)
 
     async def _mock_handle(
         _websocket,
@@ -606,18 +708,17 @@ async def test_stream_transcribe_allows_unredacted_partials_but_redacts_final_pa
         on_heartbeat=None,  # noqa: ARG001
         on_stream_config_resolved=None,
         on_transcript_result=None,
-        on_full_transcript=None,
     ):
         if on_stream_config_resolved is not None:
             await on_stream_config_resolved({"type": "config", "transcription_model": "stream-live-model"}, config)
-        await _websocket.send_json({"type": "partial", "text": "contact alice@example.com", "is_final": False})
-        if on_transcript_result is not None:
-            await on_transcript_result({"type": "partial", "text": "contact alice@example.com", "is_final": False}, "")
-        await _websocket.send_json(
-            {"type": "full_transcript", "text": "contact alice@example.com now", "is_final": True}
+        await _emit_result(
+            _websocket, on_transcript_result, {"type": "partial", "text": "contact alice@example.com", "is_final": False},
         )
-        if on_full_transcript is not None:
-            await on_full_transcript("contact alice@example.com now", False)
+        await _emit_result(
+            _websocket, on_transcript_result,
+            {"type": "full_transcript", "text": "contact alice@example.com now", "is_final": True},
+            "contact alice@example.com now",
+        )
 
     monkeypatch.setattr(audio_streaming, "handle_unified_websocket", _mock_handle)
 
@@ -634,42 +735,42 @@ async def test_stream_transcribe_allows_unredacted_partials_but_redacts_final_pa
 
 @pytest.mark.asyncio
 @pytest.mark.parametrize("reason", sorted(MODERATION_EXECUTION_REASONS))
-@pytest.mark.parametrize("site", ["callback", "send"])
-async def test_moderation_failure_is_terminal_before_transcript_persistence(monkeypatch, tmp_path, reason, site):
+@pytest.mark.parametrize("operation", ["redact", "redact_many"])
+async def test_moderation_failure_is_terminal_before_transcript_persistence(monkeypatch, tmp_path, reason, operation):
     from unittest.mock import Mock
 
-    from tldw_Server_API.app.core.Ingestion_Media_Processing.Audio import stt_policy
     from tldw_Server_API.app.core.Moderation.execution_incidents import prepare_moderation_incident_store
+    from tldw_Server_API.app.core.Moderation.execution_runner import ModerationExecutionRunner
 
     monkeypatch.setenv("STT_REDACT_PII", "1")
     monkeypatch.setenv("MODERATION_REVIEW_DB_PATH", str(tmp_path / "review.db"))
     prepare_moderation_incident_store()
     ws = DummyWebSocket(query_params={"persist_transcript": "1", "persist_partial_transcript": "1", "media_id": "42"})
     save = Mock()
-    monkeypatch.setattr(audio_streaming, "upsert_transcript", save)
-    monkeypatch.setattr(audio_streaming, "_resolve_media_db_for_user", lambda _user: DummyMediaDB())
+    monkeypatch.setattr("tldw_Server_API.app.core.DB_Management.media_db.legacy_transcripts.upsert_transcript", save)
+    monkeypatch.setattr("tldw_Server_API.app.api.v1.API_Deps.DB_Deps._resolve_media_db_for_user", lambda _user: DummyMediaDB())
 
-    def fail(*args, **kwargs):
-        raise ModerationExecutionError(reason)
+    execute = ModerationExecutionRunner.execute
 
-    from tldw_Server_API.tests.unit.test_moderation_execution_service import make_service
+    def fail(self, request, scope):
+        if request.operation == operation:
+            raise ModerationExecutionError(reason)
+        return execute(self, request, scope)
 
-    moderation = make_service()
-    monkeypatch.setattr(moderation, "redact_text", fail)
-    monkeypatch.setattr(stt_policy, "get_moderation_service", lambda: moderation)
+    monkeypatch.setattr(ModerationExecutionRunner, "execute", fail)
 
     async def handle(socket, config, **callbacks):
-        if site == "callback":
-            await callbacks["on_transcript_result"](
-                {"type": "transcription", "text": "private transcript", "is_final": True}, "private cached snapshot"
-            )
-        else:
-            await socket.send_json(
-                {"type": "transcription", "text": "private transcript", "segments": [{"text": "private segment"}]}
-            )
+        await _emit_result(
+            socket, callbacks["on_transcript_result"],
+            {
+                "type": "transcription", "text": "private transcript", "is_final": True,
+                "segments": [{"text": "private segment"}],
+            },
+            "private cached snapshot",
+        )
         await socket.send_json({"type": "done"})
 
-    monkeypatch.setattr(audio_streaming, "handle_unified_websocket", handle)
+    monkeypatch.setattr("tldw_Server_API.app.core.Ingestion_Media_Processing.Audio.Audio_Streaming_Unified.handle_unified_websocket", handle)
     await audio_streaming.websocket_transcribe(ws, token=None)
     assert any(frame.get("code") == "moderation_unavailable" for frame in ws.sent_json)
     assert all(frame.get("type") not in {"transcription", "full_transcript", "done"} for frame in ws.sent_json)

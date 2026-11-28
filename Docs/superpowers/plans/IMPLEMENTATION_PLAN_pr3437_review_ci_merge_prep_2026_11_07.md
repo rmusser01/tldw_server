@@ -72,3 +72,18 @@ landed there, repair the Chat audit override leak and preserve the authenticated
 Rules audit introduced by dev. Refresh the canonical API fingerprint and run
 the moderation regression suites and static checks before publishing. Stage 3
 remains in progress until GitHub has evaluated the new head.
+
+## November 27 Follow-Up
+
+- Rebase and preserve current dev policy selectors and extracted Chat/Audio
+  owners: complete, base `1ed6ab3e36`.
+- Diagnose Chat and CI failures: the old CI 503 has no error code in the log;
+  reproduce capacity rejection with input moderation disabled and keep the
+  enabled-policy refusal and audit behavior. Reuse the upstream frontend guard
+  fix, scope Chat audit stubs, and satisfy the current env and patch ratchets.
+- Verify the rebased execution paths, regenerated artifacts, and independent
+  review before publishing an exact-lease update. Stage 3 remains in progress:
+  land only after checks and review are clear, through the active merge queue.
+- Regression and review coverage now includes Audio frame/snapshot settlement,
+  native Messages refusal and cancellation, and Chat finish ordering and
+  provider health. See the follow-up review for the focused results.

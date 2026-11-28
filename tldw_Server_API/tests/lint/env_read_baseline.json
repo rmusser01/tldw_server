@@ -316,6 +316,7 @@
   "core/MCP_unified/server.py": {"reads": 9, "import_time": 0, "reason": null},
   "core/Metrics/metrics_manager.py": {"reads": 7, "import_time": 0, "reason": null},
   "core/Metrics/telemetry.py": {"reads": 27, "import_time": 0, "reason": null},
+  "core/Moderation/execution_runner.py": {"reads": 1, "import_time": 0, "reason": "TASK-15477 / PR3437: copy only native Windows startup variables from the parent process into the isolated worker environment. These are OS values, not app configuration."},
   "core/Moderation/moderation_service.py": {"reads": 11, "import_time": 0, "reason": null},
   "core/Moderation/review_service.py": {"reads": 1, "import_time": 0, "reason": null},
   "core/Monitoring/notification_service.py": {"reads": 15, "import_time": 0, "reason": null},

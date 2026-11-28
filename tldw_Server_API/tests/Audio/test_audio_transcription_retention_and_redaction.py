@@ -171,7 +171,6 @@ def _setup_stubbed_audio_app(
 
 @pytest.mark.parametrize("reason", sorted(MODERATION_EXECUTION_REASONS))
 def test_transcription_moderation_failure_is_safe_http_503(monkeypatch, tmp_path, bypass_api_limits, reason):
-    from tldw_Server_API.app.api.v1.endpoints.audio import audio_transcriptions
     from tldw_Server_API.app.core.Moderation.execution_incidents import prepare_moderation_incident_store
 
     monkeypatch.setenv("STT_REDACT_PII", "1")
@@ -189,7 +188,7 @@ def test_transcription_moderation_failure_is_safe_http_503(monkeypatch, tmp_path
     monkeypatch.setattr(moderation, "redact_text", fail)
     monkeypatch.setattr(stt_policy, "get_moderation_service", lambda: moderation)
     retained = AsyncMock()
-    monkeypatch.setattr(audio_transcriptions, "retain_stt_audio_artifact", retained)
+    monkeypatch.setattr(stt_policy, "retain_stt_audio_artifact", retained)
     with bypass_api_limits(app), TestClient(app) as client:
         response = client.post(
             "/api/v1/audio/transcriptions",
@@ -286,7 +285,6 @@ def test_audio_transcriptions_redacts_text_and_segments_when_stt_redaction_enabl
 def test_http_transcript_and_segments_share_one_atomic_child_batch(monkeypatch, tmp_path, bypass_api_limits, output_cap, status):
     import re
 
-    from tldw_Server_API.app.api.v1.endpoints.audio import audio_transcriptions
     from tldw_Server_API.app.core.Ingestion_Media_Processing.Audio import stt_policy
     from tldw_Server_API.app.core.Moderation import execution_runner, moderation_service
     from tldw_Server_API.app.core.Moderation.execution_incidents import prepare_moderation_incident_store
@@ -312,7 +310,7 @@ def test_http_transcript_and_segments_share_one_atomic_child_batch(monkeypatch, 
     owner = execution_runner.ModerationExecutionRunner(ExecutionBounds(), process_factory=spawn)
     monkeypatch.setattr(execution_runner, "get_execution_runner", lambda: owner)
     retained = AsyncMock()
-    monkeypatch.setattr(audio_transcriptions, "retain_stt_audio_artifact", retained)
+    monkeypatch.setattr(stt_policy, "retain_stt_audio_artifact", retained)
     try:
         with bypass_api_limits(app), TestClient(app) as client:
             response = client.post(

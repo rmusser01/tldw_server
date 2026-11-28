@@ -960,8 +960,7 @@ async def test_audio_chat_ws_streams_llm_and_tts(monkeypatch: pytest.MonkeyPatch
 
 @pytest.mark.integration
 @pytest.mark.parametrize("reason", ["deadline_exceeded", "capacity_exhausted", "size_exceeded", "worker_unavailable", "worker_crashed", "invalid_response", "cleanup_failed"])
-@pytest.mark.parametrize("dispatch", ["chat_api_call_async", "get_tts_service"])
-async def test_audio_chat_moderation_failure_never_continues_to_llm_or_tts(monkeypatch, store, reason, dispatch):
+async def test_audio_chat_moderation_failure_never_dispatches_llm_or_emits_tts(monkeypatch, store, reason):
     from tldw_Server_API.app.core.exception_types import ModerationExecutionError
     from tldw_Server_API.app.core.Ingestion_Media_Processing.Audio import stt_policy
 
@@ -973,7 +972,7 @@ async def test_audio_chat_moderation_failure_never_continues_to_llm_or_tts(monke
         downstream_calls += 1
         raise AssertionError("failed moderation must stop downstream dispatch")
 
-    monkeypatch.setattr(audio, dispatch, forbidden_dispatch)
+    monkeypatch.setattr("tldw_Server_API.app.core.Chat.chat_service.perform_chat_api_call_async", forbidden_dispatch)
 
     def redact(text, *, policy, is_partial):
         if is_partial:
@@ -988,7 +987,7 @@ async def test_audio_chat_moderation_failure_never_continues_to_llm_or_tts(monke
     ])
     await audio.websocket_audio_chat_stream(ws, token=None)
     assert any(frame.get("code") == "moderation_unavailable" for frame in ws.sent_json)
-    assert not any(frame.get("type") in {"full_transcript", "assistant_summary", "llm_delta", "tts_done", "done"} for frame in ws.sent_json)
+    assert not any(frame.get("type") in {"full_transcript", "assistant_summary", "llm_delta", "tts_start", "tts_done", "done"} for frame in ws.sent_json)
     assert ws.sent_bytes == []
     assert ws.closed
     assert ws.close_code == 1011

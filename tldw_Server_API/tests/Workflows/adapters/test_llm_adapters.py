@@ -1307,7 +1307,7 @@ async def test_workflow_custom_template_rules_run_only_in_worker(monkeypatch, re
     from tldw_Server_API.app.core.Workflows.adapters.llm import moderation
 
     service = SimpleNamespace(
-        get_effective_policy=lambda uid: ModerationPolicy(redact_replacement=replacement),
+        get_effective_policy=lambda uid, *, surface: ModerationPolicy(redact_replacement=replacement),
         redact_text_with_count=lambda text, policy: (text, 0),
     )
     monkeypatch.setattr(moderation_service, "get_moderation_service", lambda: service)

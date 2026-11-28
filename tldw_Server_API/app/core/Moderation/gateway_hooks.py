@@ -18,19 +18,23 @@ Rules this module keeps:
 
 from __future__ import annotations
 
+import asyncio
 import contextlib
 import contextvars
 import functools
 import json
 import threading
-from collections.abc import AsyncIterator, Callable, Iterator
-from typing import Any
+from collections.abc import AsyncIterator, Awaitable, Callable, Iterator
+from typing import Any, Literal, TypeVar
 
 from loguru import logger
 
+from tldw_Server_API.app.core.exception_types import ModerationExecutionError
 from tldw_Server_API.app.core.exceptions import LLMPolicyRefusal
 from tldw_Server_API.app.core.LLM_Calls.gateway import GatewayCall, add_policy_hooks
 from tldw_Server_API.app.core.LLM_Calls.sse import sse_data, sse_done
+from tldw_Server_API.app.core.Moderation.async_execution import run_moderation_async
+from tldw_Server_API.app.core.Moderation.execution_models import FailureMetadata
 from tldw_Server_API.app.core.Moderation.moderation_service import get_moderation_service
 from tldw_Server_API.app.core.Moderation.surfaces import CALLER_MODERATED_SURFACES, EXEMPT_SURFACES
 
@@ -42,6 +46,7 @@ _DEFAULT_BUFFER_CHARS = 1024
 _SKIP = object()  # stored on the call: resolved, nothing to moderate
 _UNRESOLVED = object()
 _IN_HOOK: contextvars.ContextVar[bool] = contextvars.ContextVar("moderation_gateway_hook_active", default=False)
+_T = TypeVar("_T")
 # Chunk keys that are metadata only: a chunk with just these and an empty delta carries nothing.
 _CHUNK_METADATA_KEYS = frozenset({"choices", "id", "object", "created", "model", "system_fingerprint", "provider_response"})
 
@@ -150,6 +155,20 @@ def resolve_policy(call_or_surface: GatewayCall | str | None, user_id: int | Non
 
 def _moderate_text(text: str, policy: Any, phase: str) -> tuple[str, str]:
     """(text, action) for one string. A redact returns the redacted text; a block returns ``text`` unchanged."""
+    if threading.current_thread().daemon:
+        try:
+            loop = asyncio.get_running_loop()
+        except RuntimeError:
+            loop = None
+        # Legacy synchronous provider workers cannot own a child. The async
+        # transport admits a bounded non-daemon owner for the check.
+        if loop is None:
+            return asyncio.run(
+                run_moderation_async(
+                    functools.partial(_moderate_text, text, policy, phase),
+                    metadata=FailureMetadata("evaluate", phase, len(text)),
+                )
+            )
     service = get_moderation_service()
     with _evaluating():
         action, redacted, _pattern, _category = service.evaluate_action(text, policy, phase)
@@ -191,6 +210,18 @@ def _input_check_refusal(surface: str | None, provider: str | None, user_id: int
             type(exc).__name__, surface, provider, user_id,
         )
         raise LLMPolicyRefusal(INPUT_UNCHECKED_REFUSAL) from exc
+
+
+async def _check_async(check: Callable[[], _T], phase: str) -> _T:
+    # This dispatch has no single input string; the service reports each text's actual length.
+    return await run_moderation_async(check, metadata=FailureMetadata("evaluate", phase, 0))
+
+
+async def _check_output_async(check: Callable[[], _T], refuse: Callable[[], _T]) -> _T:
+    try:
+        return await _check_async(check, "output")
+    except ModerationExecutionError:
+        return refuse()
 
 
 def _moderate_input(
@@ -304,13 +335,34 @@ def _data_payload(item: str) -> str | None:
     return "\n".join(lines) if lines else None
 
 
+_Frame = dict[str, Any] | Literal["[DONE]"] | None
+
+
+def _parse_stream_item(item: Any) -> _Frame:
+    data = _data_payload(item) if isinstance(item, str) else None
+    if not data:
+        return None
+    if data.strip() == "[DONE]":
+        return "[DONE]"
+    try:
+        frame = json.loads(data)
+    except ValueError:
+        return None
+    return frame if isinstance(frame, dict) else None
+
+
 def _content_frame(index: int, text: str) -> str:
     return sse_data({"choices": [{"index": index, "delta": {"content": text}}]})
 
 
-def _choice_index(choice: dict) -> int:
-    index = choice.get("index", 0)
+def _stream_index(frame: dict) -> int:
+    index = frame.get("index", 0)
     return index if isinstance(index, int) and not isinstance(index, bool) else 0
+
+
+def _openai_delta_text(delta: Any) -> str | None:
+    text = delta.get("content") if isinstance(delta, dict) else None
+    return text if isinstance(text, str) and text else None
 
 
 class _StreamState:
@@ -343,22 +395,24 @@ class _StreamState:
         finish = {"choices": [{"index": index, "delta": {}, "finish_reason": "content_filter"}]}
         return [_content_frame(index, OUTPUT_REFUSAL), sse_data(finish), sse_done()]
 
-    def process(self, item: Any) -> list[Any]:
-        data = _data_payload(item) if isinstance(item, str) and not self.stopped else None
-        if data is None:
-            return [item]
-        if data.strip() == "[DONE]":
+    @staticmethod
+    def needs_moderation(frame: _Frame) -> bool:
+        choices = frame.get("choices") if isinstance(frame, dict) else None
+        return isinstance(choices, list) and any(
+            isinstance(choice, dict) and _openai_delta_text(choice.get("delta")) is not None for choice in choices
+        )
+
+    def process(self, item: Any, frame: _Frame) -> list[Any]:
+        if frame == "[DONE]":
             frames: list[Any] = self._flush_all()
             self.stopped = True
             return [*frames, item]
-        try:
-            chunk = json.loads(data)
-        except ValueError:
+        if not isinstance(frame, dict):
             return [item]
-        choices = chunk.get("choices") if isinstance(chunk, dict) else None
+        choices = frame.get("choices")
         if not isinstance(choices, list) or not any(isinstance(c, dict) for c in choices):
             return [item]
-        return self._process_chunk(item, chunk, choices)
+        return self._process_chunk(item, frame, choices)
 
     def _process_chunk(self, item: str, chunk: dict, choices: list) -> list[Any]:
         pre: list[str] = []  # held text released before a finish_reason chunk
@@ -368,10 +422,9 @@ class _StreamState:
             if not isinstance(choice, dict):
                 new_choices.append(choice)
                 continue
-            index = _choice_index(choice)
+            index = _stream_index(choice)
             delta = choice.get("delta")
-            text = delta.get("content") if isinstance(delta, dict) else None
-            text = text if isinstance(text, str) and text else None
+            text = _openai_delta_text(delta)
             moderator = self._moderator(index) if text else self._moderators.get(index)
             emit = text
             if text:
@@ -452,7 +505,7 @@ class _SyncStream:
 def _sync_stream(source: Any, state: _StreamState) -> Iterator[Any]:
     try:
         for item in source:
-            yield from state.process(item)
+            yield from state.process(item, None if state.stopped else _parse_stream_item(item))
             if state.blocked:
                 return
         yield from state.finish()
@@ -460,15 +513,32 @@ def _sync_stream(source: Any, state: _StreamState) -> Iterator[Any]:
         _close(source)
 
 
-async def _async_stream(source: Any, state: _StreamState) -> AsyncIterator[Any]:
+async def _async_stream(source: Any, state: _StreamState | _AnthropicStreamState | _RefusedState) -> AsyncIterator[Any]:
+    refusal_frames: list[str] = []
     try:
         async for item in source:
-            for out in state.process(item):
+            frame = None if state.stopped else _parse_stream_item(item)
+            if isinstance(state, _RefusedState) or not state.needs_moderation(frame):
+                frames = state.process(item, frame)
+            else:
+                # On a transport timeout the worker may still own state. Do not inspect or flush it.
+                refusal = state.refusal_snapshot() if isinstance(state, _AnthropicStreamState) else None
+                try:
+                    frames = await _check_async(functools.partial(state.process, item, frame), "output")
+                except ModerationExecutionError:
+                    if refusal is None:
+                        refusal_frames = _StreamState(None, None, None, None)._block(0)
+                    else:
+                        trigger = _stream_index(frame) if isinstance(frame, dict) and frame.get("type") == "content_block_delta" else None
+                        refusal_frames = refusal.block(trigger)
+                    break
+            for out in frames:
                 yield out
             if state.blocked:
                 return
-        for out in state.finish():
-            yield out
+        else:
+            for out in state.finish():
+                yield out
     finally:
         aclose = getattr(source, "aclose", None)
         if callable(aclose):
@@ -476,6 +546,8 @@ async def _async_stream(source: Any, state: _StreamState) -> AsyncIterator[Any]:
                 await aclose()
         else:
             _close(source)
+    for out in refusal_frames:
+        yield out
 
 
 # --------------------------------------------------------------------------- Anthropic format
@@ -517,25 +589,40 @@ def moderate_anthropic_request(payload: dict, *, surface: str | None, user_id: i
     top-level ``system``, images, ``tool_use`` and assistant messages are left alone."""
     with _input_check_refusal(surface, None, user_id):
         policy = resolve_policy(surface, user_id)
-        messages = payload.get("messages")
-        if policy is None or not policy.input_enabled or not isinstance(messages, list):
+        return _moderate_anthropic_request(payload, policy, surface, user_id)
+
+
+async def moderate_anthropic_request_async(payload: dict, *, surface: str | None, user_id: int | None) -> dict:
+    """Moderate a native request with the async execution budget."""
+    with _input_check_refusal(surface, None, user_id):
+        policy = resolve_policy(surface, user_id)
+        if policy is None or not policy.input_enabled:
             return payload
+        return await _check_async(
+            functools.partial(_moderate_anthropic_request, payload, policy, surface, user_id), "input"
+        )
 
-        def note(action: str) -> None:
-            _log_action("input", action, surface, None, user_id)
-            if action == "block":
-                raise LLMPolicyRefusal(INPUT_REFUSAL)
 
-        out: list[Any] | None = None
-        for i, message in enumerate(messages):
-            if not isinstance(message, dict) or message.get("role") != "user":
-                continue
-            content = message.get("content")
-            new = _moderate_anthropic_content(content, policy, note)
-            if new is not content:
-                out = list(messages) if out is None else out
-                out[i] = {**message, "content": new}
-        return payload if out is None else {**payload, "messages": out}
+def _moderate_anthropic_request(payload: dict, policy: Any, surface: str | None, user_id: int | None) -> dict:
+    messages = payload.get("messages")
+    if policy is None or not policy.input_enabled or not isinstance(messages, list):
+        return payload
+
+    def note(action: str) -> None:
+        _log_action("input", action, surface, None, user_id)
+        if action == "block":
+            raise LLMPolicyRefusal(INPUT_REFUSAL)
+
+    out: list[Any] | None = None
+    for i, message in enumerate(messages):
+        if not isinstance(message, dict) or message.get("role") != "user":
+            continue
+        content = message.get("content")
+        new = _moderate_anthropic_content(content, policy, note)
+        if new is not content:
+            out = list(messages) if out is None else out
+            out[i] = {**message, "content": new}
+    return payload if out is None else {**payload, "messages": out}
 
 
 def _refused_message(resp: dict) -> dict:
@@ -559,6 +646,25 @@ def moderate_anthropic_response(resp: dict, *, surface: str | None, user_id: int
     except Exception as exc:  # fail closed: moderation is on for all we know, and nothing was checked
         logger.warning("moderation policy resolution failed ({}) surface={}", type(exc).__name__, surface)
         return _refused_message(resp)
+    return _moderate_anthropic_response(resp, policy, surface, user_id)
+
+
+async def moderate_anthropic_response_async(resp: dict, *, surface: str | None, user_id: int | None) -> dict:
+    """Moderate a native reply off-loop without changing its refusal envelope."""
+    try:
+        policy = resolve_policy(surface, user_id)
+    except Exception as exc:  # noqa: BLE001 - policy resolution failures must not release unchecked output.
+        logger.warning("moderation policy resolution failed ({}) surface={}", type(exc).__name__, surface)
+        return _refused_message(resp)
+    if policy is None or not policy.output_enabled:
+        return resp
+    return await _check_output_async(
+        functools.partial(_moderate_anthropic_response, resp, policy, surface, user_id),
+        functools.partial(_refused_message, resp),
+    )
+
+
+def _moderate_anthropic_response(resp: dict, policy: Any, surface: str | None, user_id: int | None) -> dict:
     content = resp.get("content")
     if policy is None or not policy.output_enabled or not isinstance(content, list):
         return resp
@@ -601,6 +707,16 @@ def _text_delta(index: int, text: str) -> str:
     )
 
 
+def _anthropic_block_text(block: Any) -> str | None:
+    text = block.get("text") if isinstance(block, dict) and block.get("type") == "text" else None
+    return text if isinstance(text, str) and text else None
+
+
+def _anthropic_delta_text(delta: Any) -> str | None:
+    text = delta.get("text") if isinstance(delta, dict) and delta.get("type") == "text_delta" else None
+    return text if isinstance(text, str) else None
+
+
 class _AnthropicStreamState:
     """Logic of the Anthropic stream wrapper, shared by the sync and async wrappers. ``process`` maps one
     source frame to the items to yield, ``finish`` the items to yield when the source ends."""
@@ -636,6 +752,15 @@ class _AnthropicStreamState:
     def finish(self) -> list[str]:
         return [] if self.stopped else self._flush()
 
+    def refusal_snapshot(self) -> _AnthropicStreamState:
+        snapshot = _AnthropicStreamState(None, *self._context)
+        snapshot._open = self._open.copy()
+        snapshot._used = self._used.copy()
+        snapshot._start_usage = self._start_usage.copy()
+        snapshot._seen_output_tokens = self._seen_output_tokens
+        snapshot._chars = self._chars
+        return snapshot
+
     def block(self, trigger: int | None = None) -> list[str]:
         """The refusal, a closed lifecycle for every open block, then the end of the message. The refusal goes
         in the block that triggered the block; with none open it goes in a block index nothing has used."""
@@ -653,25 +778,33 @@ class _AnthropicStreamState:
         self._open.clear()
         return frames
 
-    def process(self, item: Any) -> list[Any]:
-        data = _data_payload(item) if isinstance(item, str) and not self.stopped else None
-        if data is None:
+    @staticmethod
+    def needs_moderation(frame: _Frame) -> bool:
+        if not isinstance(frame, dict):
+            return False
+        kind = frame.get("type")
+        if kind == "content_block_delta":
+            return _anthropic_delta_text(frame.get("delta")) is not None
+        if kind == "content_block_start":
+            return _anthropic_block_text(frame.get("content_block")) is not None
+        if kind == "message_start":
+            message = frame.get("message")
+            content = message.get("content") if isinstance(message, dict) else None
+            return isinstance(content, list) and any(_anthropic_block_text(block) is not None for block in content)
+        return False
+
+    def process(self, item: Any, event: _Frame) -> list[Any]:
+        if not isinstance(event, dict):
             return [item]
-        try:
-            event = json.loads(data)
-        except ValueError:
-            return [item]
-        kind = event.get("type") if isinstance(event, dict) else None
-        index = event.get("index") if isinstance(event, dict) else None
-        index = index if isinstance(index, int) and not isinstance(index, bool) else 0
+        kind = event.get("type")
+        index = _stream_index(event)
         if kind == "message_start":
             return self._process_message_start(item, event)
         if kind == "content_block_start":
             self._open.add(index)
             self._used.add(index)
-            block = event.get("content_block")
-            if isinstance(block, dict) and block.get("type") == "text" and isinstance(block.get("text"), str) and block["text"]:
-                return self._process_text(item, event, index, block["text"], start=True)
+            if (text := _anthropic_block_text(event.get("content_block"))) is not None:
+                return self._process_text(item, event, index, text, start=True)
         elif kind == "content_block_stop":
             pre = self._flush(index)
             self._open.discard(index)
@@ -686,8 +819,8 @@ class _AnthropicStreamState:
             delta = event["delta"]
             if delta.get("type") in _THINKING_DELTAS:
                 return [] if self.changed else [item]
-            if delta.get("type") == "text_delta" and isinstance(delta.get("text"), str):
-                return self._process_text(item, event, index, delta["text"])
+            if (text := _anthropic_delta_text(delta)) is not None:
+                return self._process_text(item, event, index, text)
         return [item]
 
     def _process_message_start(self, item: str, event: dict) -> list[Any]:
@@ -702,10 +835,10 @@ class _AnthropicStreamState:
             return [item]
         blocks: list[Any] | None = None
         for i, block in enumerate(content):
-            if isinstance(block, dict) and block.get("type") == "text" and isinstance(block.get("text"), str) and block["text"]:
-                self._chars += len(block["text"])
+            if (text := _anthropic_block_text(block)) is not None:
+                self._chars += len(text)
                 try:  # one-shot: this text has no later chunk, so nothing is held
-                    new, action = _moderate_text(block["text"], self._policy, "output") if self._policy.output_enabled else (block["text"], "pass")
+                    new, action = _moderate_text(text, self._policy, "output") if self._policy.output_enabled else (text, "pass")
                 except Exception as exc:  # fail closed
                     logger.warning("moderation output evaluator failed ({}); blocking stream", type(exc).__name__)
                     action = "block"
@@ -742,7 +875,7 @@ class _RefusedState:
         self._frames = frames
         self.stopped = self.blocked = True
 
-    def process(self, item: Any) -> list[str]:
+    def process(self, _item: Any, _frame: _Frame = None) -> list[str]:
         frames, self._frames = self._frames, []
         return frames
 
@@ -757,7 +890,7 @@ class _AnthropicAsyncStream:
     def __init__(self, source: Any, state: _AnthropicStreamState) -> None:
         self.defer_usage_until_terminal = getattr(source, "defer_usage_until_terminal", False)
         self._source = source
-        self._gen = _async_stream(source, state)  # type: ignore[arg-type]
+        self._gen = _async_stream(source, state)
 
     def __aiter__(self) -> _AnthropicAsyncStream:
         return self
@@ -805,14 +938,25 @@ def _policy_of(call: GatewayCall) -> Any | None:
     return None if stored is _SKIP else stored
 
 
-def pre_call(call: GatewayCall) -> None:
+def pre_call(call: GatewayCall) -> Awaitable[None] | None:
     """Resolve the policy once, store it on the call, then moderate the request's messages."""
     with _input_check_refusal(call.surface, call.provider, call.user_id):
         policy = _policy_of(call)
         messages = call.request.get("messages")
-        if policy is None or not isinstance(messages, list):
-            return
-        moderated = _moderate_input(messages, policy, call.surface, call.provider, call.user_id)
+        if policy is None or not policy.input_enabled or not isinstance(messages, list):
+            return None
+        check = functools.partial(_moderate_input, messages, policy, call.surface, call.provider, call.user_id)
+        if call.is_async:
+            return _moderate_call_input_async(call, messages, check)
+        moderated = check()
+        if moderated is not messages:
+            call.request["messages"] = moderated
+    return None
+
+
+async def _moderate_call_input_async(call: GatewayCall, messages: list[dict], check: Callable[[], list[dict]]) -> None:
+    with _input_check_refusal(call.surface, call.provider, call.user_id):
+        moderated = await _check_async(check, "input")
         if moderated is not messages:
             call.request["messages"] = moderated
 
@@ -884,6 +1028,10 @@ def post_call(call: GatewayCall, result: Any) -> Any:
         if policy is None or not policy.output_enabled:
             return result
         if isinstance(result, dict):
+            if call.is_async:
+                return _check_output_async(
+                    functools.partial(_moderate_result, call, result, policy), functools.partial(_refused, result)
+                )
             return _moderate_result(call, result, policy)
         state = _StreamState(policy, call.surface, call.provider, call.user_id)
         if hasattr(result, "__aiter__"):

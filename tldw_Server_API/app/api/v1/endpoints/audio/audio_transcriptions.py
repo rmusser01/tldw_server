@@ -43,18 +43,9 @@ from tldw_Server_API.app.core.Audio.error_payloads import _http_error_detail
 from tldw_Server_API.app.core.Audio.quota_helpers import EXPECTED_DB_EXC
 from tldw_Server_API.app.core.Audio.transcription_service import _map_openai_audio_model_to_whisper
 from tldw_Server_API.app.core.AuthNZ.principal_model import AuthPrincipal
-from tldw_Server_API.app.core.Billing.enforcement import (
-    LimitCategory,
-    enforcement_enabled,
-    get_billing_enforcer,
-)
+from tldw_Server_API.app.core.Billing.enforcement import LimitCategory
 from tldw_Server_API.app.core.exception_types import ModerationExecutionError
 from tldw_Server_API.app.core.exceptions import AudioQuotaStoreUnavailable
-from tldw_Server_API.app.core.Ingestion_Media_Processing.Audio.stt_policy import (
-    apply_transcript_payload_policy_async,
-    build_audio_retention_decision,
-    retain_stt_audio_artifact,
-)
 from tldw_Server_API.app.core.Logging.log_context import ensure_request_id
 from tldw_Server_API.app.core.Metrics.metrics_manager import increment_counter
 from tldw_Server_API.app.core.Metrics.stt_metrics import (
@@ -1089,7 +1080,7 @@ async def create_transcription(
         raw_transcribed_text = transcribed_text
         raw_timed_segments = _normalize_timed_segments(segments_for_timing)
 
-        moderated = await apply_transcript_payload_policy_async(
+        moderated = await _stt_policy.apply_transcript_payload_policy_async(
             {"type": "final", "text": raw_transcribed_text, "segments": raw_timed_segments},
             policy=effective_stt_policy,
         )
@@ -1122,10 +1113,10 @@ async def create_transcription(
             except _AUDIO_TRANSCRIPTIONS_NONCRITICAL_EXCEPTIONS:
                 pass  # fail-open
 
-        retention_decision = build_audio_retention_decision(effective_stt_policy)
+        retention_decision = _stt_policy.build_audio_retention_decision(effective_stt_policy)
         if not retention_decision.delete_after_success and canonical_path:
             try:
-                await retain_stt_audio_artifact(
+                await _stt_policy.retain_stt_audio_artifact(
                     user_id=int(current_user.id),
                     source_path=canonical_path,
                     original_filename=file.filename,

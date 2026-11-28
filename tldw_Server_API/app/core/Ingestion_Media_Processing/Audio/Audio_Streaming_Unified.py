@@ -2678,6 +2678,19 @@ def _audio_protocol_frame_for_config(
     return protocol_frame
 
 
+async def _notify_transcript_callback(
+    callback: Optional[Callable[..., Awaitable[None]]], *args: Any
+) -> None:
+    if callback is None:
+        return
+    try:
+        await callback(*args)
+    except ModerationExecutionError:
+        raise
+    except Exception as exc:  # noqa: BLE001 - observers must not break streaming.
+        logger.debug("Transcript callback failed ({})", type(exc).__name__)
+
+
 async def handle_unified_websocket(
     websocket,
     config: Optional[UnifiedStreamingConfig] = None,
@@ -2698,7 +2711,7 @@ async def handle_unified_websocket(
         on_audio_seconds (Optional[Callable[[float, int], Awaitable[None]]]): Optional callback invoked before processing each audio chunk with two arguments: computed audio duration in seconds and the sample rate in Hz.
         on_heartbeat (Optional[Callable[[], Awaitable[None]]]): Optional callback invoked on each received audio message to refresh external TTLs (e.g., Redis-based heartbeats).
         on_stream_config_resolved (Optional[Callable[[dict[str, Any], UnifiedStreamingConfig], Awaitable[None]]]): Optional callback invoked after config handling resolves, with raw config payload and resolved config object.
-        on_transcript_result (Optional[Callable[[dict[str, Any], str], Awaitable[None]]]): Optional callback invoked for each emitted partial/final transcript result, with the outgoing result payload and current full transcript snapshot.
+        on_transcript_result (Optional[Callable[[dict[str, Any], str], Awaitable[None]]]): Invoked with the outgoing payload and the full snapshot, including commits unless on_full_transcript is supplied.
         on_full_transcript (Optional[Callable[[str, bool], Awaitable[None]]]): Optional callback invoked whenever the handler emits a full transcript (manual/auto commit).
     """
     logger.info("=== handle_unified_websocket STARTED ===")
@@ -3273,12 +3286,9 @@ async def handle_unified_websocket(
                 )
             )
             if on_full_transcript is not None:
-                try:
-                    await on_full_transcript(full_transcript, auto_commit)
-                except ModerationExecutionError:
-                    raise
-                except Exception as cb_exc:  # noqa: BLE001 - callback failures must not break streaming
-                    logger.debug(f"on_full_transcript callback failed: {cb_exc}")
+                await _notify_transcript_callback(on_full_transcript, full_transcript, auto_commit)
+            else:
+                await _notify_transcript_callback(on_transcript_result, payload, full_transcript)
             await stream.send_json(payload)
             full_transcript_emitted = True
             transcript_dirty = False
@@ -3338,12 +3348,7 @@ async def handle_unified_websocket(
                     full_snapshot = transcriber.get_full_transcript() if transcriber else ""
                 except _AUDIO_UNIFIED_NONCRITICAL_EXCEPTIONS:
                     full_snapshot = ""
-                try:
-                    await on_transcript_result(result, full_snapshot)
-                except ModerationExecutionError:
-                    raise
-                except Exception as cb_exc:  # noqa: BLE001 - callback failures must not break streaming
-                    logger.debug(f"on_transcript_result callback failed: {cb_exc}")
+                await _notify_transcript_callback(on_transcript_result, result, full_snapshot)
 
             await stream.send_json(result)
             if insights_engine and result.get("is_final"):

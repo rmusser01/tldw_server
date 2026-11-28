@@ -77,7 +77,8 @@ async def test_compatibility_fallback_does_not_retry_failed_evaluation(reason):
     service = failing_service(reason)
     with pytest.raises(ModerationExecutionError):
         _evaluate_output_moderation(
-            moderation=service, eff_policy=ModerationPolicy(enabled=True), target_text="private text"
+            moderation=service, eff_policy=ModerationPolicy(enabled=True), target_text="private text",
+            require_policy_check=False,
         )
     service.check_text.assert_not_called()
 
@@ -106,7 +107,7 @@ async def test_workflow_custom_timeout_discards_base_redaction_and_stops_chainin
     from tldw_Server_API.tests.unit.test_moderation_execution_service import make_policy, make_service
 
     service = make_service()
-    service.get_effective_policy = lambda uid: make_policy()
+    service.get_effective_policy = lambda uid, *, surface: make_policy()
     monkeypatch.setattr(moderation_service, "get_moderation_service", lambda: service)
     owner = execution_runner.get_execution_runner()
     scopes = []
@@ -191,7 +192,7 @@ async def test_pathological_guardian_and_custom_rules_are_contained(mode, tmp_pa
         engine = SupervisedPolicyEngine(None)
         engine._get_compiled_policies = lambda *a, **k: [(SimpleNamespace(action="notify", phase="input"), re.compile("(a+)+$"), None)]
         moderation_service.get_moderation_service = lambda: SimpleNamespace(
-            get_effective_policy=lambda uid: ModerationPolicy(),
+            get_effective_policy=lambda uid, *, surface: ModerationPolicy(),
             redact_text_with_count=lambda text, policy: (text, 0))
         moderation.is_test_mode = lambda: mode == "simulation"
         text = "a" * 100000 + "!"

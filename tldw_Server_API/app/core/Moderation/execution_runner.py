@@ -150,7 +150,11 @@ class ModerationExecutionRunner:
             frame = encode_request(request)
             self._check_scope(scope, deadline)
             entry_path = Path(__file__).with_name("regex_worker.py").resolve()
-            environment = {key: os.environ[key] for key in ("SYSTEMROOT", "WINDIR") if key in os.environ}
+            environment = {
+                key: value
+                for key in ("SYSTEMROOT", "WINDIR")
+                if (value := os.environ.get(key)) is not None
+            }
             try:
                 # Fork preparation waits through native creation AND publication.
                 # Concurrent admitted spawns remain bounded but are not serialized.

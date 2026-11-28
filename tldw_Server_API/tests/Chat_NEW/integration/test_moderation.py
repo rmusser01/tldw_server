@@ -350,10 +350,12 @@ def test_execution_failure_never_returns_or_saves_reply(
         def __init__(self):
             super().__init__(policy)
             self.output_calls = 0
+            self.output_threads = set()
 
         def evaluate_action_with_match(self, text, policy, phase):
             if phase == "output":
                 self.output_calls += 1
+                self.output_threads.add(threading.get_ident())
             if (
                 (surface == "input" and phase == "input")
                 or (surface in {"output", "stream"} and phase == "output")
@@ -375,17 +377,19 @@ def test_execution_failure_never_returns_or_saves_reply(
             {"index": 0, "message": {"role": "assistant", "content": "private reply"}, "finish_reason": "stop"}
         ],
     }
+    service = Service()
     try:
         app.dependency_overrides[get_chacha_db_for_user] = lambda: db
         with (
-            patch("tldw_Server_API.app.api.v1.endpoints.chat.get_moderation_service", return_value=Service()),
+            patch("tldw_Server_API.app.core.Moderation.moderation_service.get_moderation_service", return_value=service),
             patch(
-                "tldw_Server_API.app.api.v1.endpoints.chat.perform_chat_api_call",
+                "tldw_Server_API.app.core.Chat.chat_service.perform_chat_api_call",
                 return_value=upstream() if surface.startswith("stream") else reply,
             ) as provider,
         ):
             with credentialed_test_client_factory(app) as client:
                 client.csrf_token = client.get("/api/v1/health").cookies.get("csrf_token", "")
+                request_thread_id = client.portal.call(threading.get_ident)
                 response = _post_with_csrf(
                     client,
                     "/api/v1/chat/completions",
@@ -402,6 +406,7 @@ def test_execution_failure_never_returns_or_saves_reply(
                     assert response.status_code == 200
                     assert '"moderation_unavailable"' in response.text
                     assert '"finish_reason": "stop"' not in response.text
+                    assert service.output_threads and request_thread_id not in service.output_threads
                 else:
                     assert response.status_code == 503
                     assert response.json()["detail"]["error_code"] == "moderation_unavailable"
@@ -945,7 +950,9 @@ def test_streaming_redaction_emits_audit_failure_and_fails_closed(
                 assert r.status_code == 200
                 text = r.text
                 assert "[REDACTED]" in text
+                assert "leak: secret" not in text
                 assert "audit_persistence_failure" in text
+                assert text.index("[REDACTED]") < text.index("audit_persistence_failure")
                 assert "[DONE]" in text
                 stream_end_payload = None
                 for block in text.split("\n\n"):

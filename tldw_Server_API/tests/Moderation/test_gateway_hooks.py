@@ -2,16 +2,21 @@
 
 from __future__ import annotations
 
+import asyncio
+import contextlib
 import json
+import threading
 import types
 
 import pytest
 from loguru import logger
 
 import tldw_Server_API.app.core.Moderation.gateway_hooks as hooks_mod
+from tldw_Server_API.app.core.exception_types import ModerationExecutionError
 from tldw_Server_API.app.core.exceptions import LLMPolicyRefusal
 from tldw_Server_API.app.core.LLM_Calls import gateway
 from tldw_Server_API.app.core.LLM_Calls.gateway import GatewayCall
+from tldw_Server_API.app.core.Moderation.execution_runner import ModerationExecutionRunner
 from tldw_Server_API.app.core.Moderation.gateway_hooks import (
     INPUT_REFUSAL,
     INPUT_UNCHECKED_REFUSAL,
@@ -292,8 +297,21 @@ def test_after_flush_text_never_leaks_through_provider_response(moderation_hooks
     assert "secret" not in "".join(out)
 
 
+@pytest.fixture
+def runner_threads(monkeypatch):
+    checks: set[tuple[str | None, int]] = set()
+    execute = ModerationExecutionRunner.execute
+
+    def observe(self, request, scope):
+        checks.add((request.phase, threading.get_ident()))
+        return execute(self, request, scope)
+
+    monkeypatch.setattr(ModerationExecutionRunner, "execute", observe)
+    return checks
+
+
 @pytest.mark.asyncio
-async def test_async_entry_stream_is_wrapped(moderation_hooks, stub_llm_registry, buffer_chars):
+async def test_async_entry_stream_is_wrapped(moderation_hooks, stub_llm_registry, buffer_chars, runner_threads):
     buffer_chars(0)
     stub_llm_registry.items = [anthropic_frame("a secret"), finish_frame(), usage_frame(), DONE]
     stream = await gateway.perform_chat_api_call_async(
@@ -302,10 +320,77 @@ async def test_async_entry_stream_is_wrapped(moderation_hooks, stub_llm_registry
     )
     out = [item async for item in stream]
     assert _text(out) == "a [X]" and out[-1] == DONE and "secret" not in "".join(out)
+    assert {(phase, tid != threading.get_ident()) for phase, tid in runner_threads} == {
+        ("input", True), ("output", True),
+    }
+
+
+async def test_async_stream_without_text_passes_through_when_moderation_is_full(
+    moderation_hooks, stub_llm_registry, monkeypatch,
+):
+    execute = hooks_mod.run_moderation_async
+
+    async def check(call, *, metadata):
+        if metadata.phase == "output":
+            raise ModerationExecutionError("capacity_exhausted")
+        return await execute(call, metadata=metadata)
+
+    monkeypatch.setattr(hooks_mod, "run_moderation_async", check)
+    tool = sse({"choices": [{"index": 0, "delta": {"tool_calls": [{"index": 0, "function": {"arguments": "{}"}}]}}]})
+    items = [tool, finish_frame("tool_calls"), usage_frame(), DONE]
+    stub_llm_registry.items = items
+    stream = await gateway.perform_chat_api_call_async(
+        api_endpoint=PROVIDER, model="m", api_key="k", messages_payload=[{"role": "user", "content": "hi"}],
+        streaming=True, llm_surface=SURFACE,
+    )
+    assert [item async for item in stream] == items
+
+
+@pytest.mark.parametrize("cancel", [False, True], ids=["admission-failure", "cancelled-check"])
+async def test_async_stream_abandoned_during_check_closes_adapter(moderation_hooks, stub_llm_registry, monkeypatch, cancel):
+    execute = hooks_mod.run_moderation_async
+    checking = asyncio.Event()
+    closed = False
+
+    async def check(call, *, metadata):
+        if metadata.phase == "output":
+            if not cancel:
+                raise ModerationExecutionError("capacity_exhausted")
+            checking.set()
+            await asyncio.Future()
+        return await execute(call, metadata=metadata)
+
+    async def source():
+        nonlocal closed
+        try:
+            yield openai_frame("provider reply")
+            yield DONE
+        finally:
+            closed = True
+
+    monkeypatch.setattr(hooks_mod, "run_moderation_async", check)
+    async with contextlib.aclosing(source()) as upstream:
+        monkeypatch.setattr(stub_llm_registry, "astream", lambda *_a, **_kw: upstream)
+        stream = await gateway.perform_chat_api_call_async(
+            api_endpoint=PROVIDER, model="m", api_key="k", messages_payload=[{"role": "user", "content": "hi"}],
+            streaming=True, llm_surface=SURFACE,
+        )
+        async with contextlib.aclosing(stream):
+            if cancel:
+                read = asyncio.create_task(anext(stream))
+                try:
+                    await asyncio.wait_for(checking.wait(), timeout=5)
+                finally:
+                    read.cancel()
+                    with pytest.raises(asyncio.CancelledError):
+                        await read
+            else:
+                assert _text([await anext(stream)]) == OUTPUT_REFUSAL
+            assert closed
 
 
 @pytest.mark.asyncio
-async def test_async_entry_input_block_and_non_stream_redact(moderation_hooks, stub_llm_registry):
+async def test_async_entry_input_block_and_non_stream_redact(moderation_hooks, stub_llm_registry, runner_threads):
     kwargs = {"api_endpoint": PROVIDER, "model": "m", "api_key": "k", "llm_surface": SURFACE}
     with pytest.raises(LLMPolicyRefusal):
         await gateway.perform_chat_api_call_async(**kwargs, messages_payload=[{"role": "user", "content": "forbidden"}])
@@ -313,6 +398,45 @@ async def test_async_entry_input_block_and_non_stream_redact(moderation_hooks, s
     stub_llm_registry.reply = reply("a secret")
     result = await gateway.perform_chat_api_call_async(**kwargs, messages_payload=[{"role": "user", "content": "hi"}])
     assert result["choices"][0]["message"]["content"] == "a [X]"
+    assert {(phase, tid != threading.get_ident()) for phase, tid in runner_threads} == {
+        ("input", True), ("output", True),
+    }
+
+
+@pytest.mark.asyncio
+async def test_async_entry_cancellation_signals_running_check(moderation_hooks, stub_llm_registry, monkeypatch):
+    loop = asyncio.get_running_loop()
+    caller_thread = threading.get_ident()
+    started, finished = asyncio.Event(), asyncio.Event()
+    release = threading.Event()
+    scopes = []
+    execute = ModerationExecutionRunner.execute
+
+    def pause(self, request, scope):
+        scopes.append(scope)
+        loop.call_soon_threadsafe(started.set)
+        try:
+            if threading.get_ident() != caller_thread:
+                release.wait(timeout=5)
+            return execute(self, request, scope)
+        finally:
+            loop.call_soon_threadsafe(finished.set)
+
+    monkeypatch.setattr(ModerationExecutionRunner, "execute", pause)
+    task = asyncio.create_task(gateway.perform_chat_api_call_async(
+        api_endpoint=PROVIDER, model="m", api_key="k", llm_surface=SURFACE,
+        messages_payload=[{"role": "user", "content": "hello"}],
+    ))
+    try:
+        await asyncio.wait_for(started.wait(), timeout=5)
+        task.cancel()
+        with pytest.raises(asyncio.CancelledError):
+            await task
+        assert scopes[0].cancelled.is_set()
+    finally:
+        release.set()
+        await asyncio.wait_for(finished.wait(), timeout=5)
+    assert stub_llm_registry.requests == []
 
 
 def test_stream_moderator_unit(moderation_hooks):

@@ -1104,6 +1104,9 @@ class StreamingResponseHandler:
         self.openai_sse_seen = False
         self.semantic_output_seen = False
         self.valid_finish_received = False
+        self.defer_provider_finish = False
+        self._deferred_frames: list[str] = []
+        self._deferred_bytes = 0
         # Accumulate tool/function call deltas for persistence once the stream completes
         self.tool_call_accumulator: dict[int, dict[str, Any]] = {}
         self.tool_call_order: list[int] = []
@@ -1307,12 +1310,76 @@ class StreamingResponseHandler:
         """Close a trailing thinking block without changing the forwarded SSE."""
         return "".join(self.full_response) + ("</think>" if self.reasoning_open else "")
 
+    def _response_size_error(self) -> str:
+        payload = {"error": {"message": "Response size limit exceeded"}}
+        self._attach_stream_metadata(payload)
+        self.error_occurred = True
+        return sse_data(payload)
+
+    def _append_provider_frame(self, data: Any, outputs: list[str]) -> bool:
+        """Keep deltas live and stage terminal frames for the local settlement verdict."""
+        if not self.defer_provider_finish or not self.valid_finish_received or not isinstance(data, dict):
+            outputs.append(sse_data(data))
+            return False
+
+        choices = data.get("choices")
+        finished = (
+            [choice for choice in choices if choice.get("finish_reason") is not None]
+            if isinstance(choices, list) else []
+        )
+        if finished:
+            live = [
+                choice if choice.get("finish_reason") is None else {**choice, "finish_reason": None}
+                for choice in choices
+                if choice.get("finish_reason") is None or choice.get("delta")
+            ]
+            if live:
+                live_data = {**data, "choices": live}
+                live_data.pop("usage", None)
+                outputs.append(sse_data(live_data))
+                data = {**data, "choices": [{**choice, "delta": {}} for choice in finished]}
+                data.pop("additional_kwargs", None)
+        elif not is_empty_choices_usage_chunk(data):
+            outputs.append(sse_data(data))
+            return False
+
+        frame = sse_data(data)
+        self._deferred_bytes += len(frame.encode("utf-8"))
+        if self._deferred_bytes > self.max_response_size:
+            outputs.append(self._response_size_error())
+            return True
+        self._deferred_frames.append(frame)
+        return False
+
+    def _save_event_frames(self, events: list[dict[str, Any]]) -> Iterator[str]:
+        for event_entry in events:
+            event_name = str(event_entry.get("event") or "").strip()
+            payload_obj = event_entry.get("data")
+            if not event_name or payload_obj is None:
+                continue
+            try:
+                if isinstance(payload_obj, dict):
+                    payload = dict(payload_obj)
+                    self._attach_stream_metadata(payload)
+                    payload_json = json.dumps(payload)
+                else:
+                    payload_json = json.dumps(payload_obj, default=str)
+                yield f"event: {event_name}\ndata: {payload_json}\n\n"
+            except _STREAMING_NONCRITICAL_EXCEPTIONS as event_err:
+                logger.debug(
+                    "Skipping extra stream event {} for {} error_type={}",
+                    event_name,
+                    self.conversation_id,
+                    type(event_err).__name__,
+                )
+
     def _stop_for_moderation_failure(self) -> None:
         """Latch before any flush or settlement can observe a successful state."""
         self._moderation_failed = True
         self.error_occurred = True
         self.provider_interrupted = False
         self.text_transform = None
+        self._deferred_frames.clear()
 
     def _moderation_error_frame(self) -> str:
         self._stop_for_moderation_failure()
@@ -1593,6 +1660,8 @@ class StreamingResponseHandler:
         sync_bridge_admitted = threading.Event()
         sync_bridge_cleanup_claimed = threading.Event()
         upstream_closed = False
+        deferred_frames = self._deferred_frames
+        response_size_error = self._response_size_error
 
         async def close_upstream() -> None:
             nonlocal upstream_closed
@@ -1638,12 +1707,6 @@ class StreamingResponseHandler:
                     or "\r\n\r\n" in raw_chunk
                     or stripped_chunk.startswith((":", "event:", "data:"))
                 )
-
-            def response_size_error() -> str:
-                payload = {"error": {"message": "Response size limit exceeded"}}
-                self._attach_stream_metadata(payload)
-                self.error_occurred = True
-                return sse_data(payload)
 
             def canonical_provider_error(value: Any) -> str:
                 err_payload = provider_stream_error_payload(value)
@@ -1919,9 +1982,9 @@ class StreamingResponseHandler:
                                         return [response_size_error()], True
                                     delta["content"] = text_piece
                             self._attach_stream_metadata(data)
-                            outputs.append(sse_data(data))
                             self.update_activity()
-                            return outputs, False
+                            should_stop = self._append_provider_frame(data, outputs)
+                            return outputs, should_stop
                     if isinstance(data, dict):
                         if self.retain_reasoning and isinstance(extra_reasoning, str) and extra_reasoning:
                             if not self._append_response_content(extra_reasoning, reasoning=True):
@@ -1936,9 +1999,9 @@ class StreamingResponseHandler:
                     elif data not in (None, "", [], {}):
                         self.semantic_output_seen = True
                         first_output_pending = True
-                    outputs.append(sse_data(data))
                     self.update_activity()
-                    return outputs, False
+                    should_stop = self._append_provider_frame(data, outputs)
+                    return outputs, should_stop
                 if not sse_framed:
                     normalized_error = _normalize_unframed_provider_stream_error(raw_line)
                     if normalized_error is not None:
@@ -2144,7 +2207,7 @@ class StreamingResponseHandler:
                                 type(finalize_err).__name__,
                             )
 
-                deferred_success_error = None
+                deferred_success_error = flush_frame = None
                 if not self.is_cancelled and not self.error_occurred and before_success_callback:
                     try:
                         maybe_before_success = before_success_callback()
@@ -2168,8 +2231,6 @@ class StreamingResponseHandler:
                         self._attach_stream_metadata(err_payload)
                         deferred_success_error = sse_data(err_payload)
 
-                # Engine failure forbids flushing; preserve the existing safe-tail
-                # behavior for ordinary policy/audit callback errors.
                 if not self.is_cancelled and not self.error_occurred and self.text_transform:
                     flush_fn = getattr(self.text_transform, "flush", None)
                     if callable(flush_fn):
@@ -2195,14 +2256,22 @@ class StreamingResponseHandler:
                                 else:
                                     content_payload = {"choices": [{"delta": {"content": flush_text}}]}
                                     self._attach_stream_metadata(content_payload)
-                                    yield sse_data(content_payload)
+                                    flush_frame = sse_data(content_payload)
+                                    if not self.defer_provider_finish:
+                                        yield flush_frame
                                     self.update_activity()
 
                 if deferred_success_error is not None and not self.error_occurred:
+                    if self.defer_provider_finish and flush_frame is not None:
+                        yield flush_frame
+                    for frame in deferred_frames:
+                        yield frame
+                    deferred_frames.clear()
                     self.error_occurred = True
                     yield deferred_success_error
 
                 # Save the full response/tool calls if callback provided (only when not cancelled)
+                extra_events: list[dict[str, Any]] = []
                 has_output = self.has_accumulated_output()
                 if (
                     not self.is_cancelled
@@ -2216,7 +2285,6 @@ class StreamingResponseHandler:
                     full_text = self._response_text()
                     aggregated_tool_calls = self.get_accumulated_tool_calls()
                     aggregated_function_call = self.get_accumulated_function_call()
-                    extra_events: list[dict[str, Any]] = []
                     generation_kwargs = self._save_callback_kwargs(save_callback)
                     try:
                         # Support flexible callback signatures (text only or extended)
@@ -2258,28 +2326,14 @@ class StreamingResponseHandler:
                         )
                         extra_events = []
 
-                    for event_entry in extra_events:
-                        event_name = str(event_entry.get("event") or "").strip()
-                        if not event_name:
-                            continue
-                        payload_obj = event_entry.get("data")
-                        if payload_obj is None:
-                            continue
-                        try:
-                            if isinstance(payload_obj, dict):
-                                payload = dict(payload_obj)
-                                self._attach_stream_metadata(payload)
-                                payload_json = json.dumps(payload)
-                            else:
-                                payload_json = json.dumps(payload_obj, default=str)
-                            yield f"event: {event_name}\ndata: {payload_json}\n\n"
-                        except _STREAMING_NONCRITICAL_EXCEPTIONS as event_err:
-                            logger.debug(
-                                "Skipping extra stream event {} for {} error_type={}",
-                                event_name,
-                                self.conversation_id,
-                                type(event_err).__name__,
-                            )
+                if not self.is_cancelled and not self.error_occurred:
+                    if self.defer_provider_finish and flush_frame is not None:
+                        yield flush_frame
+                    for frame in deferred_frames:
+                        yield frame
+
+                for frame in self._save_event_frames(extra_events):
+                    yield frame
 
                 # Keep an unfinished reply after a provider failure (D7 S3-1). The
                 # client is still connected, so wait for the write and report the
@@ -2367,6 +2421,7 @@ async def create_streaming_response_with_timeout(
     forward_usage_chunk: bool = True,
     retain_reasoning: bool = False,
     capture_provider_reasoning: bool = False,
+    defer_provider_finish: bool = False,
 ) -> AsyncIterator[str]:
     """
     Create a streaming response with timeout and error handling.
@@ -2390,6 +2445,7 @@ async def create_streaming_response_with_timeout(
         forward_usage_chunk: False keeps a usage chunk with empty ``choices`` from the client
             (it is still read for the usage record)
         retain_reasoning: Include typed thinking in the text passed to persistence callbacks.
+        defer_provider_finish: Wait for local settlement before forwarding provider finish markers.
 
     Yields:
         SSE formatted messages
@@ -2406,6 +2462,7 @@ async def create_streaming_response_with_timeout(
     handler.user_message_id = user_message_id
     handler.forward_usage_chunk = forward_usage_chunk
     handler.retain_reasoning = retain_reasoning
+    handler.defer_provider_finish = defer_provider_finish
     if capture_provider_reasoning:
         handler.provider_reasoning = []
     if isinstance(continuation_metadata, dict) and continuation_metadata:

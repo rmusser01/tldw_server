@@ -1,4 +1,4 @@
-"""With moderation off, every moderated surface makes zero evaluator calls and changes nothing
+"""With moderation off, every moderated surface makes zero execution requests and changes nothing
 (TASK-13950.27 PR C, part a). The /chat/completions variant joins in part b, with the app wiring."""
 
 from __future__ import annotations
@@ -10,7 +10,7 @@ import pytest
 import tldw_Server_API.app.core.Moderation.gateway_hooks as hooks_mod
 from tldw_Server_API.app.core.exceptions import LLMPolicyRefusal
 from tldw_Server_API.app.core.LLM_Calls import gateway
-from tldw_Server_API.app.core.Moderation.policy_evaluator import PolicyEvaluator
+from tldw_Server_API.app.core.Moderation.execution_runner import ModerationExecutionRunner
 from tldw_Server_API.app.core.Moderation.surfaces import MODERATED_SURFACES
 from tldw_Server_API.app.core.Usage.llm_call_context import llm_call_context
 from tldw_Server_API.tests.Moderation.conftest import DONE, PROVIDER, finish_frame, openai_frame, reply
@@ -21,16 +21,15 @@ SURFACES = sorted(MODERATED_SURFACES)
 
 
 @pytest.fixture
-def evaluator_spy(monkeypatch):
+def execution_requests(monkeypatch):
     calls: list[str] = []
-    for name in ("evaluate_text", "redact_text", "redact_text_with_count"):
-        real = getattr(PolicyEvaluator, name)
+    execute = ModerationExecutionRunner.execute
 
-        def spy(self, *a, _real=real, _name=name, **k):
-            calls.append(_name)
-            return _real(self, *a, **k)
+    def observe(self, request, scope):
+        calls.append(request.operation)
+        return execute(self, request, scope)
 
-        monkeypatch.setattr(PolicyEvaluator, name, spy)
+    monkeypatch.setattr(ModerationExecutionRunner, "execute", observe)
     return calls
 
 
@@ -66,8 +65,8 @@ def _call(surface: str, stream: bool):
 @pytest.mark.parametrize("surface_key", [True, None], ids=["key-on", "no-key"])
 @pytest.mark.parametrize("stream", [False, True], ids=["non-stream", "stream"])
 @pytest.mark.parametrize("surface", SURFACES)
-def test_global_off_makes_zero_evaluator_calls(
-    make_service, stub_llm_registry, evaluator_spy, surface, stream, surface_key, guardian_files
+def test_global_off_makes_zero_execution_requests(
+    make_service, stub_llm_registry, execution_requests, surface, stream, surface_key, guardian_files
 ):
     make_service(enabled=False, **({f"surface.{surface}": True} if surface_key else {}))
     hooks_mod.register_moderation_gateway_hooks()
@@ -80,18 +79,18 @@ def test_global_off_makes_zero_evaluator_calls(
     else:
         assert result == reply("forbidden secret")
     assert stub_llm_registry.requests[0]["messages"][0]["content"] == "forbidden secret"
-    assert evaluator_spy == []
+    assert execution_requests == []
     assert guardian_files.outcomes == ["missing"]  # the real resolver ran and found no DB
     assert [p for p in guardian_files.root.rglob("*") if p.suffix == ".db" or "guardian" in p.name.lower()] == []
 
 
 @pytest.mark.parametrize("stream", [False, True], ids=["non-stream", "stream"])
 @pytest.mark.parametrize("surface", SURFACES)
-def test_global_on_makes_evaluator_calls(make_service, stub_llm_registry, evaluator_spy, surface, stream):
+def test_global_on_submits_an_execution_request(make_service, stub_llm_registry, execution_requests, surface, stream):
     make_service(enabled=True)
     hooks_mod.register_moderation_gateway_hooks()
     stub_llm_registry.reply = reply("fine")
     stub_llm_registry.items = [openai_frame("fine"), finish_frame(), DONE]
     with pytest.raises(LLMPolicyRefusal):
         _call(surface, stream)  # the input holds "forbidden"
-    assert len(evaluator_spy) > 0
+    assert execution_requests == ["evaluate"]
