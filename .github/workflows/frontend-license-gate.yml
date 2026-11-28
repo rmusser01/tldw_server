@@ -1,4 +1,5 @@
 name: Frontend License Gate Audit
+run-name: "Frontend license gate: PR #${{ github.event.pull_request.number || github.event.inputs.pr }} at ${{ github.event.pull_request.head.sha || github.event.inputs.head || 'unbound' }}"
 
 on:
   pull_request_target:
@@ -13,6 +14,10 @@ on:
       pr:
         description: Pull request number to evaluate (the merge queue dispatches this on dev)
         required: true
+        type: string
+      head:
+        description: Intended PR head for queue deduplication (metadata only; policy resolves the live PR)
+        required: false
         type: string
 
 permissions:

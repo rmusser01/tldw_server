@@ -3044,6 +3044,11 @@ const NotesManagerPage: React.FC<NotesManagerPageProps> = ({ sourceNoteId = null
         title={ed.title}
         content={ed.content}
         editorDisabled={editorDisabled || ed.loadingSelection || preparingDraft}
+        saveUnavailableReason={!notesGraphAuthorityScope || !canonicalConnectionConfig
+          ? t('option:notesSearch.saveOwnerUnverified', {
+              defaultValue: 'Saving is unavailable until your account is verified'
+            })
+          : null}
         isDirty={ed.isDirty}
         isOnline={isOnline}
         notesServerUnavailable={list.isError && isNotesServerUnavailableError(list.error)}

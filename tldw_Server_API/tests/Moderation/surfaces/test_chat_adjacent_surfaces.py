@@ -156,9 +156,13 @@ def test_prompt_improvement_content_filter_not_refallen_back(moderation_hooks, s
     assert len(stub_llm_registry.requests) == 1
 
 
-def test_surface_reaches_gateway_prompt_improvement_dispatch(spy, monkeypatch):
-    """The dispatch's own provider call (not the router's) names the surface."""
-    from tldw_Server_API.app.core.Prompt_Management import prompt_improvement_dispatch as dispatch
+@pytest.fixture
+def dispatch(monkeypatch):
+    """The prompt-improvement dispatch module with routing and credentials resolved locally to the e2e-fake provider."""
+    from tldw_Server_API.app.core.Prompt_Management import prompt_improvement_dispatch as module
+
+    async def _noop():
+        return None
 
     async def route(*_a, **_k):
         return SimpleNamespace(provider="e2e-fake", model="m")
@@ -166,13 +170,15 @@ def test_surface_reaches_gateway_prompt_improvement_dispatch(spy, monkeypatch):
     async def byok(*_a, **_k):
         return SimpleNamespace(api_key="k", app_config=None, source="env", touch_last_used=_noop)
 
-    async def _noop():
-        return None
+    monkeypatch.setattr(module, "resolve_chat_route", route)
+    monkeypatch.setattr(module, "resolve_byok_credentials", byok)
+    monkeypatch.setattr(module, "is_model_known_for_provider", lambda *_a: True)
+    monkeypatch.setattr(module, "provider_requires_api_key", lambda *_a: False)
+    return module
 
-    monkeypatch.setattr(dispatch, "resolve_chat_route", route)
-    monkeypatch.setattr(dispatch, "resolve_byok_credentials", byok)
-    monkeypatch.setattr(dispatch, "is_model_known_for_provider", lambda *_a: True)
-    monkeypatch.setattr(dispatch, "provider_requires_api_key", lambda *_a: False)
+
+def test_surface_reaches_gateway_prompt_improvement_dispatch(spy, dispatch):
+    """The dispatch's own provider call (not the router's) names the surface."""
     try:
         asyncio.run(dispatch.dispatch_prompt_improvement(
             request=None, current_user=SimpleNamespace(id=1), routing_decision_store=None, selected_model="openai/gpt-4o-mini",
@@ -183,23 +189,8 @@ def test_surface_reaches_gateway_prompt_improvement_dispatch(spy, monkeypatch):
     assert spy.surfaces == ["chat.prompt_improvement"]
 
 
-def test_prompt_improvement_dispatch_input_block_propagates(moderation_hooks, stub_llm_registry, monkeypatch):
+def test_prompt_improvement_dispatch_input_block_propagates(moderation_hooks, stub_llm_registry, dispatch):
     """The dispatch's broad except maps provider errors; a refusal stays a 400."""
-    from tldw_Server_API.app.core.Prompt_Management import prompt_improvement_dispatch as dispatch
-
-    async def route(*_a, **_k):
-        return SimpleNamespace(provider="e2e-fake", model="m")
-
-    async def _noop():
-        return None
-
-    async def byok(*_a, **_k):
-        return SimpleNamespace(api_key="k", app_config=None, source="env", touch_last_used=_noop)
-
-    monkeypatch.setattr(dispatch, "resolve_chat_route", route)
-    monkeypatch.setattr(dispatch, "resolve_byok_credentials", byok)
-    monkeypatch.setattr(dispatch, "is_model_known_for_provider", lambda *_a: True)
-    monkeypatch.setattr(dispatch, "provider_requires_api_key", lambda *_a: False)
     with pytest.raises(LLMPolicyRefusal):
         asyncio.run(dispatch.dispatch_prompt_improvement(
             request=None, current_user=SimpleNamespace(id=1), routing_decision_store=None, selected_model="openai/gpt-4o-mini",

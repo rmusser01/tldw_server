@@ -258,9 +258,14 @@ def _ensure_frontend_running(repo_root: Path, base_url: str, server_url: str, ap
 
 
 def _seed_config_script(server_url: str, api_key: str) -> str:
+    """Seed the same origin-bound credential record as a configured WebUI."""
     config = {
         "serverUrl": server_url,
         "authMode": "single-user",
+        "authSource": "manual",
+        "credentialSource": "manual",
+        "apiKeyPersistence": "device",
+        "apiKeyServerOrigin": server_url,
         "apiKey": api_key,
     }
     config_json = json.dumps(config)
@@ -268,13 +273,14 @@ def _seed_config_script(server_url: str, api_key: str) -> str:
         "(() => {"
         f"const cfg = {config_json};"
         "localStorage.setItem('tldwConfig', JSON.stringify(cfg));"
+        "localStorage.setItem('isMigrated', 'true');"
         "localStorage.setItem('__tldw_first_run_complete', 'true');"
         "})();"
     )
 
 
 @pytest.fixture(scope="session")
-def server_url() -> str:
+def server_url(tmp_path_factory: pytest.TempPathFactory) -> str:
     port = _find_free_port()
     base_url = f"http://127.0.0.1:{port}"
     label = os.environ.get("SERVER_LABEL", "frontend-webui")
@@ -287,6 +293,8 @@ def server_url() -> str:
         "SINGLE_USER_API_KEY": os.getenv("SINGLE_USER_API_KEY", "sk-test-1234567890-VALID"),
         "CSRF_ENABLED": "true",
         "TEST_MODE": os.getenv("TEST_MODE", "true"),
+        "JOBS_DB_PATH": str(tmp_path_factory.mktemp("webui-jobs") / "jobs.db"),
+        "MEDIA_INGEST_JOBS_WORKER_ENABLED": "true",
         "EPHEMERAL_CLEANUP_ENABLED": "false",
         "CLAIMS_REBUILD_ENABLED": "false",
     }

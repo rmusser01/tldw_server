@@ -4,7 +4,6 @@ from typing import Any, Literal
 
 from pydantic import BaseModel, Field, field_validator
 
-
 MediaCollectionItemStatus = Literal[
     "planned",
     "processing",
@@ -84,6 +83,7 @@ class MediaCollectionItemCreateRequest(BaseModel):
 
 
 class MediaCollectionItemUpdateRequest(BaseModel):
+    source_url: str | None = Field(default=None, min_length=1, description="Correct the source of an unresolved retry using its attempt and idempotency key.")
     ordinal: int | None = Field(default=None, ge=1)
     title: str | None = None
     speaker: str | None = None

@@ -7219,5 +7219,353 @@
   },
   "header_closePageLauncher": {
     "message": "Close page launcher"
+  },
+  "quickIngest_web_draftDestination": {
+    "message": "Review drafts in this browser"
+  },
+  "quickIngest_web_saveDestination": {
+    "message": "Save to Media"
+  },
+  "quickIngest_web_extractDestination": {
+    "message": "Extract without saving"
+  },
+  "quickIngest_web_createDraft": {
+    "message": "Create 1 review draft"
+  },
+  "quickIngest_web_createDrafts": {
+    "message": "Create {{count}} review drafts"
+  },
+  "quickIngest_web_saveSource": {
+    "message": "Save 1 source"
+  },
+  "quickIngest_web_saveSources": {
+    "message": "Save {{count}} sources"
+  },
+  "quickIngest_web_extractSource": {
+    "message": "Extract 1 source"
+  },
+  "quickIngest_web_extractSources": {
+    "message": "Extract {{count}} sources"
+  },
+  "quickIngest_web_analysisOff": {
+    "message": "AI analysis off"
+  },
+  "quickIngest_web_analysisWithProvider": {
+    "message": "AI analysis with {{provider}}"
+  },
+  "quickIngest_web_providerNeeded": {
+    "message": "AI analysis needs a provider"
+  },
+  "quickIngest_web_chooseProvider": {
+    "message": "Choose analysis provider"
+  },
+  "quickIngest_web_replaceTitle": {
+    "message": "Review replacements"
+  },
+  "quickIngest_web_replaceHelp": {
+    "message": "Existing Media items that match these sources may be replaced."
+  },
+  "quickIngest_web_editSources": {
+    "message": "Back to sources"
+  },
+  "quickIngest_web_confirmSave": {
+    "message": "Confirm and save 1 source"
+  },
+  "quickIngest_web_confirmSaves": {
+    "message": "Confirm and save {{count}} sources"
+  },
+  "quickIngest_web_hideSettings": {
+    "message": "Hide settings"
+  },
+  "quickIngest_web_changeSettings": {
+    "message": "Change settings"
+  },
+  "quickIngest_web_addSourceHint": {
+    "message": "Add a source to continue."
+  },
+  "quickIngest_web_readyOnly": {
+    "message": "Only ready sources will run."
+  },
+  "quickIngest_web_reviewHint": {
+    "message": "Review before saving to Media."
+  },
+  "quickIngest_web_extractedForReview": {
+    "message": "Extracted for review"
+  },
+  "quickIngest_web_resultDraft": {
+    "message": "1 draft ready for review"
+  },
+  "quickIngest_web_resultDrafts": {
+    "message": "{{count}} drafts ready for review"
+  },
+  "quickIngest_web_resultSaved": {
+    "message": "{{count}} saved to Media"
+  },
+  "quickIngest_web_resultExtractedForReview": {
+    "message": "{{count}} extracted for review"
+  },
+  "quickIngest_web_resultExtracted": {
+    "message": "{{count}} extracted"
+  },
+  "quickIngest_web_resultFailed": {
+    "message": "{{count}} failed"
+  },
+  "quickIngest_web_resultSkipped": {
+    "message": "{{count}} skipped"
+  },
+  "quickIngest_web_resultCancelled": {
+    "message": "{{count}} cancelled"
+  },
+  "quickIngest_web_retrySource": {
+    "message": "Retry failed source"
+  },
+  "quickIngest_web_retrySources": {
+    "message": "Retry {{count}} failed sources"
+  },
+  "quickIngest_web_openDrafts": {
+    "message": "Open drafts"
+  },
+  "quickIngest_web_reviewSources": {
+    "message": "Review {{count}} saved sources"
+  },
+  "quickIngest_web_moreActions": {
+    "message": "More actions"
+  },
+  "quickIngest_web_ingestMore": {
+    "message": "Add more sources"
+  },
+  "quickIngest_web_searchReadiness": {
+    "message": "Availability in Knowledge search depends on source readiness."
+  },
+  "quickIngest_web_resultsTitle": {
+    "message": "Import results"
+  },
+  "quickIngest_web_resultActions": {
+    "message": "Result actions"
+  },
+  "quickIngest_source_title": {
+    "message": "Add sources"
+  },
+  "quickIngest_source_method": {
+    "message": "Source type"
+  },
+  "quickIngest_source_files": {
+    "message": "Files"
+  },
+  "quickIngest_source_links": {
+    "message": "Links"
+  },
+  "quickIngest_source_text": {
+    "message": "Text"
+  },
+  "quickIngest_source_fileLimits": {
+    "message": "Documents up to {{documentLimit}} · Audio and video up to {{avLimit}}"
+  },
+  "quickIngest_source_pasteLinks": {
+    "message": "Paste links, one per line"
+  },
+  "quickIngest_source_addLinks": {
+    "message": "Add links"
+  },
+  "quickIngest_source_readyCount": {
+    "message": "{{count}} ready"
+  },
+  "quickIngest_source_duplicateCount": {
+    "message": "{count, plural, one {# duplicate} other {# duplicates}}"
+  },
+  "quickIngest_source_invalidCount": {
+    "message": "{{count}} invalid"
+  },
+  "quickIngest_source_unselectedCount": {
+    "message": "{{count}} unselected"
+  },
+  "quickIngest_source_outsideCount": {
+    "message": "{{count}} outside this run"
+  },
+  "quickIngest_source_ready": {
+    "message": "Ready"
+  },
+  "quickIngest_source_duplicate": {
+    "message": "Duplicate · skipped"
+  },
+  "quickIngest_source_invalid": {
+    "message": "Invalid · skipped"
+  },
+  "quickIngest_source_unselected": {
+    "message": "Unselected · skipped"
+  },
+  "quickIngest_source_outside": {
+    "message": "Outside this run"
+  },
+  "quickIngest_source_queue": {
+    "message": "Queued sources"
+  },
+  "quickIngest_source_count": {
+    "message": "{count, plural, one {# source} other {# sources}}"
+  },
+  "quickIngest_source_counts": {
+    "message": "Source counts"
+  },
+  "quickIngest_source_edit": {
+    "message": "Edit link"
+  },
+  "quickIngest_source_includeAgain": {
+    "message": "Include again"
+  },
+  "quickIngest_source_remove": {
+    "message": "Remove {{name}}"
+  },
+  "quickIngest_source_correctLink": {
+    "message": "Correct link"
+  },
+  "quickIngest_source_linkHelp": {
+    "message": "Enter a full link starting with http:// or https://."
+  },
+  "quickIngest_source_apply": {
+    "message": "Apply link"
+  },
+  "quickIngest_source_cancelEdit": {
+    "message": "Cancel edit"
+  },
+  "quickIngest_oneScreen_skipAnalysis": {
+    "message": "Skip analysis for this import"
+  },
+  "quickIngest_oneScreen_destination": {
+    "message": "Destination"
+  },
+  "quickIngest_oneScreen_saveToMedia": {
+    "message": "Save to Media"
+  },
+  "quickIngest_oneScreen_createDrafts": {
+    "message": "Create review drafts"
+  },
+  "quickIngest_oneScreen_extractOnly": {
+    "message": "Extract without saving"
+  },
+  "quickIngest_oneScreen_reviewDraftHelp": {
+    "message": "Review extracted content in this browser before saving it to Media."
+  },
+  "quickIngest_oneScreen_preset": {
+    "message": "Processing preset"
+  },
+  "quickIngest_source_pasteAgain": {
+    "message": "Paste again"
+  },
+  "quickIngest_source_chooseFileFor": {
+    "message": "Choose file for {{name}}"
+  },
+  "quickIngest_source_applyText": {
+    "message": "Apply text"
+  },
+  "quickIngest_widget_activeWithFailures": {
+    "message": "{{active}} active · {{failed}} failed"
+  },
+  "quickIngest_widget_unknownCount": {
+    "message": "{{count}} awaiting status"
+  },
+  "quickIngest_processing_stopRequested": {
+    "message": "Stop requested. Waiting for the server to confirm each outcome."
+  },
+  "quickIngest_processing_stopUnconfirmed": {
+    "message": "Could not confirm the stop for all sources. You can try again while Quick Ingest checks their status."
+  },
+  "quickIngest_processing_status_unknown": {
+    "message": "Status unavailable"
+  },
+  "quickIngest_web_extractionUnavailable": {
+    "message": "Extracted text is unavailable in this receipt."
+  },
+  "quickIngest_web_emptyExtraction": {
+    "message": "No readable text was returned for this source."
+  },
+  "quickIngest_web_viewTextFor": {
+    "message": "View text for {{name}}"
+  },
+  "quickIngest_web_viewText": {
+    "message": "View text"
+  },
+  "quickIngest_source_chooseFile": {
+    "message": "Choose file"
+  },
+  "quickIngest_source_rejectedLink": {
+    "message": "The server could not process this link. Check the address and try again."
+  },
+  "quickIngest_source_editSettingsFor": {
+    "message": "Edit settings for {{name}}"
+  },
+  "quickIngest_source_editSettings": {
+    "message": "Edit settings"
+  },
+  "quickIngest_web_viewExtractedText": {
+    "message": "View extracted text"
+  },
+  "quickIngest_web_statusUnavailable": {
+    "message": "Status unavailable"
+  },
+  "quickIngest_web_unconfirmedHelp": {
+    "message": "The server could not confirm the outcome. Check before importing these sources again."
+  },
+  "quickIngest_web_trackedJobs": {
+    "message": "Job IDs: {{ids}}"
+  },
+  "quickIngest_web_checkStatus": {
+    "message": "Check status"
+  },
+  "quickIngest_web_checkMedia": {
+    "message": "Check Media"
+  },
+  "quickIngest_web_stopTitle": {
+    "message": "Stop the remaining import?"
+  },
+  "quickIngest_web_leaveTitle": {
+    "message": "Leave this import?"
+  },
+  "quickIngest_web_oneActive": {
+    "message": "1 source is still active."
+  },
+  "quickIngest_web_sourcesActive": {
+    "message": "{{count}} sources are still active."
+  },
+  "quickIngest_web_waitingForStatus": {
+    "message": "Waiting for the latest source status."
+  },
+  "quickIngest_web_stopHelp": {
+    "message": "Saved items stay in Media. Quick Ingest will check which jobs stopped."
+  },
+  "quickIngest_web_leaveHelp": {
+    "message": "You can keep working here while your import continues in the background."
+  },
+  "quickIngest_web_keepImporting": {
+    "message": "Keep importing"
+  },
+  "quickIngest_web_stayHere": {
+    "message": "Stay here"
+  },
+  "quickIngest_web_stopRemaining": {
+    "message": "Stop remaining sources"
+  },
+  "quickIngest_web_continueBackground": {
+    "message": "Continue in background"
+  },
+  "quickIngest_web_extractedText": {
+    "message": "Extracted text"
+  },
+  "quickIngest_web_textCopied": {
+    "message": "Text copied."
+  },
+  "quickIngest_web_textCopyFailed": {
+    "message": "Select the text and copy it manually."
+  },
+  "quickIngest_web_backToResults": {
+    "message": "Back to results"
+  },
+  "quickIngest_web_copyText": {
+    "message": "Copy text"
+  },
+  "quickIngest_web_repairSourceHint": {
+    "message": "Repair a queued source to continue."
+  },
+  "quickIngest_web_lastReported": {
+    "message": "Last reported: {{stage}}"
   }
 }

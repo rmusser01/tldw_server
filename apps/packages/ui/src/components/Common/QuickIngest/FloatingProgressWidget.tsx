@@ -108,21 +108,25 @@ export const FloatingProgressWidget: React.FC = () => {
   )
 
   // Count confirmed terminal items; elapsed time is not evidence of completion.
-  const { completedCount, totalCount, overallPercent } = useMemo(() => {
+  const { completedCount, failedCount, unknownCount, totalCount, overallPercent } = useMemo(() => {
     const items = processingState.perItemProgress
-    if (items.length === 0) return { completedCount: 0, totalCount: 0, overallPercent: 0 }
-
     let completed = 0
+    let failed = 0
+    let unknown = 0
     for (const p of items) {
       if (p.status === "complete" || p.status === "failed" || p.status === "cancelled") {
         completed++
       }
+      if (p.status === "failed") failed++
+      if (p.status === "unknown") unknown++
     }
 
     return {
       completedCount: completed,
+      failedCount: failed,
+      unknownCount: unknown,
       totalCount: items.length,
-      overallPercent: Math.round((completed / items.length) * 100),
+      overallPercent: items.length ? Math.round((completed / items.length) * 100) : 0,
     }
   }, [processingState.perItemProgress])
 
@@ -142,6 +146,7 @@ export const FloatingProgressWidget: React.FC = () => {
     const allCancelled = hasItems && items.every((item) => item.status === "cancelled")
 
     if (sessionLifecycle === "interrupted") return "interrupted"
+    if (processingState.status === "running" && !allTerminal) return null
     if (
       sessionLifecycle === "partial_failure" ||
       processingState.status === "error" ||
@@ -289,7 +294,18 @@ export const FloatingProgressWidget: React.FC = () => {
         {/* Processing description */}
         {!terminalPresentation && (
           <p className="text-[11px] leading-tight text-text-muted">
-            {qi(
+            {failedCount > 0 && <span className="block">{qi(
+              "widget.activeWithFailures", "{{active}} active · {{failed}} failed",
+              { active: totalCount - completedCount - unknownCount, failed: failedCount }
+            )}</span>}
+            {unknownCount > 0 && <span className="block">{qi(
+              "widget.unknownCount", "{{count}} awaiting status", { count: unknownCount }
+            )}</span>}
+            {processingState.bulkStop === "requested" ? qi(
+              "processing.stopRequested", "Stop requested. Waiting for the server to confirm each outcome."
+            ) : processingState.bulkStop === "unconfirmed" ? qi(
+              "processing.stopUnconfirmed", "Could not confirm the stop for all sources. You can try again while Quick Ingest checks their status."
+            ) : failedCount === 0 && unknownCount === 0 && qi(
               "widget.waitingHint",
               "Waiting for server results. Open the wizard to see elapsed time."
             )}

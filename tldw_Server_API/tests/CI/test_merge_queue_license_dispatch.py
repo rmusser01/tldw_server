@@ -143,7 +143,7 @@ def run_resolve(
     return result, github_env.read_text(encoding="utf-8"), calls.read_text(encoding="utf-8").splitlines()
 
 
-def test_dispatch_trigger_takes_one_required_pr_string_beside_the_untouched_pr_trigger() -> None:
+def test_dispatch_trigger_keeps_pr_required_and_head_metadata_optional() -> None:
     declared = triggers(load_workflow())
 
     assert set(declared) == {"pull_request_target", "workflow_dispatch"}
@@ -152,10 +152,20 @@ def test_dispatch_trigger_takes_one_required_pr_string_beside_the_untouched_pr_t
         "types": ["opened", "reopened", "synchronize", "ready_for_review", "edited"],
     }
     assert set(declared["workflow_dispatch"]) == {"inputs"}
-    assert set(declared["workflow_dispatch"]["inputs"]) == {"pr"}
+    assert set(declared["workflow_dispatch"]["inputs"]) == {"pr", "head"}
     pr_input = dict(declared["workflow_dispatch"]["inputs"]["pr"])
     assert pr_input.pop("description")
     assert pr_input == {"required": True, "type": "string"}
+    head_input = dict(declared["workflow_dispatch"]["inputs"]["head"])
+    assert head_input.pop("description")
+    assert head_input == {"required": False, "type": "string"}
+
+
+def test_run_title_identifies_the_pr_and_intended_head_before_a_runner_is_assigned() -> None:
+    assert load_workflow()["run-name"] == (
+        "Frontend license gate: PR #${{ github.event.pull_request.number || github.event.inputs.pr }} "
+        "at ${{ github.event.pull_request.head.sha || github.event.inputs.head || 'unbound' }}"
+    )
 
 
 def test_pull_request_target_job_gained_an_event_guard_and_nothing_else() -> None:
@@ -189,6 +199,8 @@ def test_pr_input_reaches_the_shell_only_through_env() -> None:
     script = resolve["run"]
 
     assert [expression for expression in EXPRESSION.findall(text) if "inputs" in expression] == [
+        "${{ github.event.pull_request.number || github.event.inputs.pr }}",
+        "${{ github.event.pull_request.head.sha || github.event.inputs.head || 'unbound' }}",
         "${{ github.event.pull_request.number || github.event.inputs.pr }}",
         "${{ inputs.pr }}",
     ]
