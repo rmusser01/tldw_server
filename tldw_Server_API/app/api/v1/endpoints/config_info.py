@@ -12,18 +12,24 @@ import shutil
 import time
 from collections import defaultdict
 from pathlib import Path
-from typing import Optional
+from typing import Annotated, Optional
 
 from fastapi import APIRouter, Depends, HTTPException, Request, Response, status
 from fastapi.responses import HTMLResponse, RedirectResponse
 from loguru import logger
 from pydantic import BaseModel, Field
 
+import tldw_Server_API.app.api.v1.API_Deps.auth_deps as _auth_deps
+import tldw_Server_API.app.core.Provider_Credentials.byok_helpers as _byok_helpers
+import tldw_Server_API.app.core.Provider_Credentials.llm_provider_overrides as _llm_provider_overrides
 from tldw_Server_API.app.api.v1.API_Deps.auth_deps import (
     RequirePermission,
     RequireRole,
     get_auth_principal,
     require_expected_user,
+)
+from tldw_Server_API.app.api.v1.API_Deps.provider_credentials_deps import (
+    require_provider_override_snapshot,
 )
 from tldw_Server_API.app.core import config as config_mod
 from tldw_Server_API.app.core.AuthNZ.permissions import SYSTEM_CONFIGURE
@@ -44,6 +50,9 @@ from tldw_Server_API.app.core.custom_openai_providers import (
 from tldw_Server_API.app.core.LLM_Calls.adapter_registry import (
     canonical_builtin_llm_provider_name,
 )
+from tldw_Server_API.app.core.LLM_Calls.provider_config_resolution import (
+    valid_provider_api_key,
+)
 from tldw_Server_API.app.core.LLM_Calls.provider_metadata import (
     provider_requires_api_key,
 )
@@ -52,6 +61,8 @@ from tldw_Server_API.app.core.Provider_Credentials.byok_config import (
     is_runtime_base_url_override,
 )
 from tldw_Server_API.app.core.Provider_Credentials.byok_runtime import (
+    ByokResolutionError,
+    ServerFallbackCredentials,
     merge_server_fallback_snapshot,
     resolve_static_server_fallback_from_snapshot,
 )
@@ -65,8 +76,6 @@ from tldw_Server_API.app.core.Provider_Credentials.provider_credential_runtime i
 from tldw_Server_API.app.core.testing import env_flag_enabled, is_truthy
 from tldw_Server_API.app.core.Utils.fastapi_routes import iter_served_routes
 from tldw_Server_API.app.services.worker_startup_policy import should_start_inprocess_worker
-import tldw_Server_API.app.api.v1.API_Deps.auth_deps as _auth_deps
-import tldw_Server_API.app.core.Provider_Credentials.byok_helpers as _byok_helpers
 
 router = APIRouter()
 _DOCS_API_KEY_PLACEHOLDER = "YOUR_API_KEY"
@@ -742,7 +751,12 @@ class ProviderValidateResponse(BaseModel):
 
 
 @router.get("/config/providers", response_model=ProvidersStatusResponse)
-async def list_configured_providers() -> ProvidersStatusResponse:
+async def list_configured_providers(
+    provider_overrides: Annotated[
+        dict[str, _llm_provider_overrides.LLMProviderOverride],
+        Depends(require_provider_override_snapshot),
+    ],
+) -> ProvidersStatusResponse:
     """List all supported LLM providers and their configuration status.
 
     Returns which providers have API keys set (from environment variables or
@@ -774,13 +788,35 @@ async def list_configured_providers() -> ProvidersStatusResponse:
     for name in cloud_providers + local_providers + custom_providers:
         requires_key = PROVIDER_REQUIRES_KEY.get(name, True)
         api_key = _resolve_provider_key(name) if requires_key else None
+        override = None
+        override_disabled = False
+        if name in cloud_providers:
+            override = provider_overrides.get(name)
+            snapshot = _llm_provider_overrides.ProviderOverrideCallSnapshot(name, override)
+            try:
+                fallback = snapshot.server_fallback(
+                    ServerFallbackCredentials(api_key=api_key, credential_fields={})
+                )
+            except ByokResolutionError as error:
+                if error.code != "invalid_provider_credentials":
+                    raise HTTPException(
+                        status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+                        detail="Provider configuration unavailable",
+                    ) from None
+                api_key = None
+            else:
+                if fallback is not None:
+                    api_key = valid_provider_api_key(fallback.api_key)
+            override_disabled = snapshot.policy_error(None) is not None
 
-        configured = bool(api_key) if requires_key else True
-        hint = _key_hint(api_key) if api_key else None
+        configured = not override_disabled and (bool(api_key) if requires_key else True)
+        # Setup status must not reveal hints or sources for encrypted overrides.
+        hint_key = api_key if override is None and configured else None
+        hint = _key_hint(hint_key) if hint_key else None
 
         # Determine source
         key_source: Optional[str] = None
-        if api_key:
+        if hint_key:
             env_var = _PROVIDER_ENV_KEY_MAP.get(name)
             custom_number = custom_openai_provider_number(name)
             has_custom_env_key = (
