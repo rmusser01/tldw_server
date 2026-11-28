@@ -5011,11 +5011,11 @@ class JobManager:
         *,
         idempotency_key: str,
         domain: str,
-        queue: str,
+        queue: str | None,
         job_type: str,
         owner_user_id: str,
     ) -> dict[str, Any] | None:
-        """Fetch one exact active/archive Job by its stable scoped idempotency key."""
+        """Fetch a unique owner-scoped receipt, across queues when queue is None."""
 
         conn = self._connect()
         try:

@@ -43,6 +43,7 @@ from tldw_Server_API.app.core.Ingestion_Media_Processing.input_sourcing import (
     TempDirManager,
 )
 from tldw_Server_API.app.core.Jobs.manager import JobManager
+from tldw_Server_API.app.core.Utils.jobs_operation_contracts import IdempotentOperationUnavailableError
 from tldw_Server_API.app.core.Logging.log_context import ensure_request_id, ensure_traceparent
 from tldw_Server_API.app.core.Streaming.streams import SSEStream
 from tldw_Server_API.app.core.exceptions import BadRequestError
@@ -90,6 +91,10 @@ class MediaIngestJobItem(BaseModel):
     collection_id: str | None = None
     planned_item_id: str | None = None
     idempotency_key: str | None = None
+
+
+class UnpublishedUploadValidationResponse(JSONResponse):
+    """A single upload was rejected while staging, before Jobs admission was attempted."""
 
 
 class SubmitMediaIngestJobsResponse(BaseModel):
@@ -239,6 +244,7 @@ def _validate_per_url_binding_list(
 def _resolve_submit_bindings(
     *,
     url_count: int,
+    single_upload: bool,
     media_collection_id: Any,
     collection_id: Any,
     media_collection_item_id: Any,
@@ -246,15 +252,16 @@ def _resolve_submit_bindings(
     idempotency_key: Any,
     idempotency_keys: Any,
 ) -> tuple[str | None, list[str], list[str]]:
-    """Normalize collection, planned-item, and idempotency bindings for URL jobs."""
+    """Bind lists to URLs, or bind singular fields to a single uploaded file."""
     collection_id_value = _coerce_form_string(media_collection_id) or _coerce_form_string(collection_id)
     planned_values = _coerce_form_string_list(planned_item_ids)
+    key_values = _coerce_form_string_list(idempotency_keys)
     single_planned = _coerce_form_string(media_collection_item_id)
+    single_key = _coerce_form_string(idempotency_key)
+    if single_upload and not (planned_values or key_values):
+        return collection_id_value, [single_planned] if single_planned else [], [single_key] if single_key else []
     if single_planned and not planned_values:
         planned_values = [single_planned]
-
-    key_values = _coerce_form_string_list(idempotency_keys)
-    single_key = _coerce_form_string(idempotency_key)
     if single_key and not key_values:
         key_values = [single_key]
 
@@ -269,6 +276,20 @@ def _resolve_submit_bindings(
         url_count=url_count,
     )
     return collection_id_value, planned_values, key_values
+
+
+def _require_unplanned_job_bindings(
+    request: Request, db: CollectionsDatabase | None, items: list[str], keys: list[str],
+) -> None:
+    """Reserve durable plan identities for the receiving route that consumed the attempt."""
+    if not (items or keys) or (request is not None and "plan_key" in request.path_params):
+        return
+    if db is None:
+        raise HTTPException(503, "Cannot verify the collection binding for this submission.")
+    if any(db.is_quick_ingest_plan_item(i) for value in items if (i := _coerce_positive_int(value))) or any(
+        db.is_quick_ingest_plan_attempt_key(key) for key in keys
+    ):
+        raise HTTPException(409, "Submit this collection plan source through its plan dispatch route.")
 
 
 def _apply_collection_binding_to_payload(
@@ -375,8 +396,13 @@ def _heavy_media_ingest_worker_available() -> bool:
     )
 
 
+def _default_media_ingest_queue() -> str:
+    """Return the queue served by the primary media worker."""
+    return (os.getenv("MEDIA_INGEST_JOBS_DEFAULT_QUEUE") or "default").strip() or "default"
+
+
 def _resolve_media_ingest_queue(form_data: AddMediaForm) -> str:
-    default_queue = (os.getenv("MEDIA_INGEST_JOBS_DEFAULT_QUEUE") or "default").strip() or "default"
+    default_queue = _default_media_ingest_queue()
     route_heavy = _is_truthy(os.getenv("MEDIA_INGEST_JOBS_ROUTE_HEAVY", "true"))
     if not route_heavy:
         return default_queue
@@ -399,6 +425,18 @@ def _create_media_ingest_job(
     request_id: str | None,
     trace_id: str | None,
 ) -> dict[str, Any]:
+    job_key = payload.get("idempotency_key")
+    if payload.get("source_kind") == "file" and job_key:
+        # Collection item IDs are local to each owner's database.
+        job_key = f"media-upload:{current_user.id}:{job_key}"
+        previous = _find_collection_retry_job(jm, str(current_user.id), job_key)
+        if previous and previous.get("archived"):
+            raise HTTPException(status_code=409, detail="The original upload job was archived.")
+        # Keep multipart admission (including cancellation) authoritative on replay.
+        selected_queue = str(previous["queue"]) if previous else _default_media_ingest_queue()
+    elif payload.get("planned_item_id") and job_key:
+        job_key = _collection_url_job_key(str(current_user.id), job_key)
+        selected_queue = _default_media_ingest_queue()
     try:
         return jm.create_job(
             domain="media_ingest",
@@ -409,7 +447,7 @@ def _create_media_ingest_job(
             owner_user_id=str(current_user.id),
             priority=5,
             max_retries=3,
-            idempotency_key=payload.get("idempotency_key"),
+            idempotency_key=job_key,
             request_id=request_id,
             trace_id=trace_id,
         )
@@ -574,6 +612,74 @@ def _resolve_batch_or_session_id(
     raise HTTPException(status_code=400, detail="Either batch_id or session_id is required")
 
 
+def _collection_url_job_key(owner: str, key: str) -> str:
+    """Scope the Jobs key while preserving the client-facing collection retry key."""
+    return f"media-collection-url:{len(owner)}:{owner}:{key}"
+
+
+def _find_collection_retry_job(jm: JobManager, owner: str, key: str) -> dict[str, Any] | None:
+    """Recover prior routing without assuming the heavy worker is still available."""
+    try:
+        return jm.get_job_or_archived_by_idempotency_key(
+            idempotency_key=key, owner_user_id=owner, domain="media_ingest", queue=None, job_type="media_ingest_item",
+        )
+    except IdempotentOperationUnavailableError as exc:
+        raise HTTPException(status_code=409, detail="Could not verify a unique stored job for this retry key.") from exc
+
+
+def _url_job_item(row: dict[str, Any], payload: dict[str, Any]) -> MediaIngestJobItem:
+    """Build the submit receipt from its confirmed URL job and collection binding."""
+    return MediaIngestJobItem(
+        id=int(row["id"]), uuid=row.get("uuid"), source=payload["source"], source_kind="url",
+        status=row["status"], collection_id=payload.get("collection_id"),
+        planned_item_id=payload.get("planned_item_id"), idempotency_key=payload.get("idempotency_key"),
+    )
+
+
+def _confirmed_url_job_batch(row: dict[str, Any], payload: dict[str, Any], owner: str) -> str:
+    """Verify the persisted owner and source before acknowledging an idempotent URL job."""
+    stored = _normalize_payload(row.get("payload"))
+    if (row.get("archived") or str(row.get("owner_user_id")) != owner or not stored.get("batch_id")
+            or any(stored.get(field) != payload.get(field) for field in
+                   ("source", "source_kind", "collection_id", "planned_item_id", "idempotency_key"))):
+        raise HTTPException(status_code=409, detail="This retry identity does not match an active job for this source.")
+    return str(stored["batch_id"])
+
+
+def _require_exact_replay_group(jm: JobManager, owner: str, batch_id: str, job_ids: set[int]) -> None:
+    """A replay receipt may cancel only its own set of jobs."""
+    members = _collect_jobs_for_batch(jm=jm, batch_id=batch_id, owner_filter=owner, limit=len(job_ids) + 1)
+    if {int(member["id"]) for member in members} != job_ids:
+        raise HTTPException(status_code=409, detail="Retry the original batch together to keep its cancellation scope.")
+
+
+def _existing_collection_url_batch(
+    jm: JobManager, owner: str, urls: list[str], collection_id: str | None,
+    planned_ids: list[str], keys: list[str], has_uploads: bool,
+) -> SubmitMediaIngestJobsResponse | None:
+    """Resolve same-owner current and legacy receipts before admitting any new source."""
+    if not urls or not planned_ids or not keys:
+        return None
+    jobs = []
+    groups = set()
+    for url, item_id, key in zip(urls, planned_ids, keys, strict=True):
+        for candidate in (_collection_url_job_key(owner, key), key):
+            row = _find_collection_retry_job(jm, owner, candidate)
+            if row is not None:
+                payload = {"source": url, "source_kind": "url", "collection_id": collection_id,
+                           "planned_item_id": item_id, "idempotency_key": key}
+                groups.add(_confirmed_url_job_batch(row, payload, owner))
+                jobs.append(_url_job_item(row, payload))
+                break
+    if not jobs:
+        return None
+    if has_uploads or len(jobs) != len(urls) or len(groups) != 1:
+        raise HTTPException(status_code=409, detail="Submit new sources separately from previously accepted jobs.")
+    batch_id = groups.pop()
+    _require_exact_replay_group(jm, owner, batch_id, {job.id for job in jobs})
+    return SubmitMediaIngestJobsResponse(batch_id=batch_id, jobs=jobs)
+
+
 @router.post(
     "/ingest/jobs",
     response_model=SubmitMediaIngestJobsResponse,
@@ -621,7 +727,7 @@ async def submit_media_ingest_jobs(
     current_user: User = Depends(get_request_user),
     jm: JobManager = Depends(get_scoped_job_manager),
     collections_db: CollectionsDatabase | None = Depends(try_get_collections_db_for_user),
-) -> SubmitMediaIngestJobsResponse:
+) -> SubmitMediaIngestJobsResponse | JSONResponse:
     rid = ensure_request_id(request) if request is not None else None
     tp = ensure_traceparent(request) if request is not None else ""
 
@@ -639,13 +745,16 @@ async def submit_media_ingest_jobs(
     batch_id = str(uuid4())
     jobs: list[MediaIngestJobItem] = []
     errors: list[str] = []
+    error_response_type = JSONResponse
     first_url_submit_exception: Exception | None = None
     url_failure_count = 0
 
-    url_list = form_data.urls or []
-    valid_url_count = len([url for url in url_list if url and str(url).strip()])
+    url_list = [str(url).strip() for url in form_data.urls or [] if url and str(url).strip()]
+    valid_url_count = len(url_list)
+    single_upload = not valid_url_count and len(files or []) == 1
     collection_id_value, planned_item_values, idempotency_key_values = _resolve_submit_bindings(
         url_count=valid_url_count,
+        single_upload=single_upload,
         media_collection_id=media_collection_id,
         collection_id=collection_id,
         media_collection_item_id=media_collection_item_id,
@@ -653,14 +762,18 @@ async def submit_media_ingest_jobs(
         idempotency_key=idempotency_key,
         idempotency_keys=idempotency_keys,
     )
+    _require_unplanned_job_bindings(request, collections_db, planned_item_values, idempotency_key_values)
+    owner = str(current_user.id)
+    replay = _existing_collection_url_batch(
+        jm, owner, url_list, collection_id_value, planned_item_values, idempotency_key_values, bool(files),
+    )
+    if replay is not None:
+        return replay
 
-    url_index = 0
-    for url in url_list:
-        if not url or not str(url).strip():
-            continue
+    for url_index, url in enumerate(url_list):
         planned_item_id = planned_item_values[url_index] if planned_item_values else None
         item_idempotency_key = idempotency_key_values[url_index] if idempotency_key_values else None
-        payload = {
+        payload: dict[str, Any] = {
             "batch_id": batch_id,
             "media_type": str(form_data.media_type),
             "source": str(url).strip(),
@@ -687,7 +800,19 @@ async def submit_media_ingest_jobs(
             row_id = row.get("id")
             if row_id is None:
                 raise ValueError(f"Job creation returned no id: {row!r}")
+            if item_idempotency_key:
+                actual_batch = _confirmed_url_job_batch(row, payload, owner)
+                if actual_batch != batch_id:
+                    if valid_url_count != 1 or files:
+                        raise HTTPException(status_code=409, detail="This source was accepted in a concurrent batch.")
+                    _require_exact_replay_group(jm, owner, actual_batch, {int(row_id)})
+                    return SubmitMediaIngestJobsResponse(batch_id=actual_batch, jobs=[_url_job_item(row, payload)])
         except Exception as exc:
+            if isinstance(exc, HTTPException) and exc.status_code == 409:
+                if not jobs:
+                    raise
+                errors.append(f"{url}: {exc.detail}")
+                continue
             url_failure_count += 1
             if first_url_submit_exception is None:
                 first_url_submit_exception = exc
@@ -698,25 +823,13 @@ async def submit_media_ingest_jobs(
                 error_summary=error_message,
             )
             errors.append(f"{payload['source']}: {error_message}")
-            url_index += 1
             continue
-        jobs.append(
-            MediaIngestJobItem(
-                id=int(row_id),
-                uuid=row.get("uuid"),
-                source=payload["source"],
-                source_kind="url",
-                status=row.get("status"),
-                collection_id=payload.get("collection_id"),
-                planned_item_id=payload.get("planned_item_id"),
-                idempotency_key=payload.get("idempotency_key"),
-            )
-        )
-        url_index += 1
+        jobs.append(_url_job_item(row, payload))
 
     if files:
         for upload in files:
             temp_dir_path = None
+            planned_item_id = planned_item_values[0] if single_upload and planned_item_values else None
             try:
                 with TempDirManager(prefix="media_ingest_job_", cleanup=False) as temp_dir:
                     temp_dir_path = str(temp_dir)
@@ -726,15 +839,13 @@ async def submit_media_ingest_jobs(
                         validator=file_validator_instance,
                         expected_media_type_key=str(form_data.media_type),
                     )
-                if file_errors:
-                    for err in file_errors:
-                        msg = err.get("error") or "Failed to stage upload"
-                        errors.append(msg)
-                    if temp_dir_path:
-                        _cleanup_dir(temp_dir_path)
-                    continue
-                if not saved_files:
-                    errors.append("Failed to stage upload")
+                if file_errors or not saved_files:
+                    if single_upload:
+                        error_response_type = UnpublishedUploadValidationResponse
+                    errors.extend([err.get("error") or "Failed to stage upload" for err in file_errors] or ["Failed to stage upload"])
+                    _mark_collection_item_submit_failed(
+                        collections_db=collections_db, planned_item_id=planned_item_id, error_summary=errors[-1],
+                    )
                     if temp_dir_path:
                         _cleanup_dir(temp_dir_path)
                     continue
@@ -755,6 +866,13 @@ async def submit_media_ingest_jobs(
                     "cleanup_temp_dir": True,
                     "options": options,
                 }
+                if single_upload:
+                    _apply_collection_binding_to_payload(
+                        payload,
+                        collection_id=collection_id_value,
+                        planned_item_id=planned_item_id,
+                        idempotency_key=idempotency_key_values[0] if idempotency_key_values else None,
+                    )
                 row = _create_media_ingest_job(
                     jm=jm,
                     selected_queue=selected_queue,
@@ -767,6 +885,16 @@ async def submit_media_ingest_jobs(
                 row_id = row.get("id")
                 if row_id is None:
                     raise ValueError(f"Job creation returned no id: {row!r}")
+                stored_payload = _normalize_payload(row.get("payload"))
+                if payload.get("idempotency_key") and stored_payload and stored_payload.get("batch_id") != batch_id:
+                    # Idempotent replay uses the first job's staged copy and cancellation batch.
+                    if (str(row.get("owner_user_id")) != str(current_user.id)
+                            or not all(stored_payload.get(key) == payload.get(key)
+                                       for key in ("source_kind", "collection_id", "planned_item_id", "idempotency_key"))):
+                        raise HTTPException(status_code=409, detail="Upload identity already in use.")
+                    _cleanup_dir(temp_dir_path)
+                    source_path = stored_payload["source"]
+                    batch_id = stored_payload["batch_id"]
                 jobs.append(
                     MediaIngestJobItem(
                         id=int(row_id),
@@ -774,13 +902,25 @@ async def submit_media_ingest_jobs(
                         source=source_path,
                         source_kind="file",
                         status=row.get("status"),
+                        collection_id=payload.get("collection_id"),
+                        planned_item_id=payload.get("planned_item_id"),
+                        idempotency_key=payload.get("idempotency_key"),
                     )
                 )
-            except HTTPException:
+            except HTTPException as exc:
+                if exc.status_code != 409:
+                    _mark_collection_item_submit_failed(
+                        collections_db=collections_db, planned_item_id=planned_item_id, error_summary=_submit_failure_message(exc),
+                    )
+                if temp_dir_path:
+                    _cleanup_dir(temp_dir_path)
                 raise
             except Exception:
                 logger.warning("Failed to stage upload for ingest jobs")
                 errors.append("Upload staging failed")
+                _mark_collection_item_submit_failed(
+                    collections_db=collections_db, planned_item_id=planned_item_id, error_summary=errors[-1],
+                )
                 if temp_dir_path:
                     _cleanup_dir(temp_dir_path)
 
@@ -788,7 +928,7 @@ async def submit_media_ingest_jobs(
         if first_url_submit_exception is not None and valid_url_count == 1 and url_failure_count == 1 and not files:
             raise first_url_submit_exception
         if errors:
-            return JSONResponse(
+            return error_response_type(
                 status_code=status.HTTP_207_MULTI_STATUS,
                 content=SubmitMediaIngestJobsResponse(
                     batch_id=batch_id,

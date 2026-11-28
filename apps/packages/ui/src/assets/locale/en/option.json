@@ -994,6 +994,21 @@
     "saveFailed": "Failed to save prompt"
   },
   "quickIngest": {
+    "metadata": {
+      "source": "Source {{number}}",
+      "include": "Include",
+      "use": "Use",
+      "title": "Title",
+      "speaker": "Speaker",
+      "track": "Track",
+      "tags": "Tags",
+      "tagExample": "tag, tag",
+      "includeItem": "Include item {{number}}",
+      "titleItem": "Title override for item {{number}}",
+      "speakerItem": "Speaker for item {{number}}",
+      "trackItem": "Track for item {{number}}",
+      "tagsItem": "Tags for item {{number}}"
+    },
     "web": {
       "draftDestination": "Review drafts in this browser",
       "saveDestination": "Save to Media",
@@ -1053,6 +1068,12 @@
       "unconfirmedHelp": "The server could not confirm the outcome. Check before importing these sources again.",
       "trackedJobs": "Job IDs: {{ids}}",
       "checkStatus": "Check status",
+      "planCheckFailed": "Could not refresh the collection source status.",
+      "resumeSetup": "Resume original collection setup",
+      "reattachToResumeSetup": "Reattach the original file to retry collection setup.",
+      "planReadyBadge": "Ready to submit",
+      "planReadyMessage": "This source can resume setup.",
+      "planReadySuggestion": "Retry to submit it to the original collection.",
       "checkMedia": "Check Media",
       "stopTitle": "Stop the remaining import?",
       "leaveTitle": "Leave this import?",

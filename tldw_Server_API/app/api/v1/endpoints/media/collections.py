@@ -1,6 +1,11 @@
 from __future__ import annotations
 
+from collections.abc import Callable
+from dataclasses import replace
+from urllib.parse import unquote
+
 from fastapi import APIRouter, Depends, HTTPException, status
+from pydantic import TypeAdapter
 
 from tldw_Server_API.app.api.v1.API_Deps.auth_deps import (
     RequirePermission,
@@ -9,6 +14,7 @@ from tldw_Server_API.app.api.v1.API_Deps.auth_deps import (
 from tldw_Server_API.app.api.v1.API_Deps.Collections_DB_Deps import (
     get_collections_db_for_user,
 )
+from tldw_Server_API.app.api.v1.endpoints.media import ingest_jobs
 from tldw_Server_API.app.api.v1.schemas.media_collections import (
     MediaCollectionCreateRequest,
     MediaCollectionItemCreateRequest,
@@ -17,15 +23,27 @@ from tldw_Server_API.app.api.v1.schemas.media_collections import (
     MediaCollectionListResponse,
     MediaCollectionResponse,
     MediaCollectionUpdateRequest,
+    PlanKey,
+    QuickIngestClaimResponse,
+    QuickIngestDispatchState,
+    QuickIngestPlanItemResponse,
+    QuickIngestPlanRequest,
+    QuickIngestPlanResponse,
+    QuickIngestRetryClaim,
+    QuickIngestSourceStatusResponse,
+    positive_quick_ingest_media_id,
 )
 from tldw_Server_API.app.core.AuthNZ.permissions import MEDIA_CREATE, MEDIA_READ
 from tldw_Server_API.app.core.DB_Management.Collections_DB import (
     CollectionsDatabase,
     MediaCollectionItemRow,
     MediaCollectionRow,
+    QuickIngestPlanConflict,
 )
+from tldw_Server_API.app.core.Jobs.manager import JobManager
 
 router = APIRouter()
+_PLAN_DISPATCH_STATE = TypeAdapter[QuickIngestDispatchState](QuickIngestDispatchState)
 
 
 def _item_response(row: MediaCollectionItemRow) -> MediaCollectionItemResponse:
@@ -73,6 +91,8 @@ def _collection_response(row: MediaCollectionRow) -> MediaCollectionResponse:
 
 
 def _raise_collection_error(exc: Exception) -> None:
+    if isinstance(exc, QuickIngestPlanConflict):
+        raise HTTPException(status_code=409, detail=str(exc)) from exc
     if isinstance(exc, KeyError):
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(exc)) from exc
     if isinstance(exc, ValueError):
@@ -81,6 +101,191 @@ def _raise_collection_error(exc: Exception) -> None:
             detail=str(exc),
         ) from exc
     raise exc
+
+
+def get_plan_job_manager_factory() -> Callable[[], JobManager]:
+    """Defer opening Jobs storage until a collection source has a Jobs receipt to reconcile."""
+    return ingest_jobs.get_job_manager
+
+
+def _recover_plan_job(
+    db: CollectionsDatabase,
+    plan_key: str,
+    source_key: str,
+    row: MediaCollectionItemRow,
+    job_manager_factory: Callable[[], JobManager],
+    *,
+    persist: bool = True,
+) -> MediaCollectionItemRow:
+    """Reconcile a Jobs commit even when its submitter lost the response before projecting its ID."""
+    if row.dispatch_state != "jobs":
+        return row
+    key = row.require_plan_attempt_key()
+    is_file = row.source_url.startswith("local://")
+    job_key = f"media-upload:{db.user_id}:{key}" if is_file else ingest_jobs._collection_url_job_key(db.user_id, key)
+    # Direct saves can plan and resume independently of Jobs availability.
+    with JobManager.scoped_rls_context(
+        is_admin=False, domain_allowlist="media_ingest", owner_user_id=db.user_id
+    ):
+        job = ingest_jobs._find_collection_retry_job(job_manager_factory(), db.user_id, job_key)
+    if job is None:
+        return row
+    payload = ingest_jobs._normalize_payload(job.get("payload"))
+    if (
+        str(job.get("owner_user_id")) != db.user_id
+        or str(payload.get("collection_id")) != str(row.collection_id)
+        or str(payload.get("planned_item_id")) != str(row.id)
+        or payload.get("idempotency_key") != key
+        or payload.get("source_kind") != ("file" if is_file else "url")
+        or (
+            payload.get("original_filename") != unquote(row.source_url[8:])
+            if is_file
+            else payload.get("source") != row.source_url
+        )
+    ):
+        raise QuickIngestPlanConflict("Stored job identity does not match this plan source.")
+    status, media_id = _plan_job_result(job)
+    job_id = str(job["id"])
+    if row.latest_job_id is not None and row.latest_job_id != job_id:
+        raise QuickIngestPlanConflict("The source has a different accepted job.")
+    if row.latest_job_id == job_id and status == "processing":
+        return row
+    if not persist:
+        current = db.get_quick_ingest_source(plan_key, source_key)
+        if current.retry_count != row.retry_count or current.dispatch_state != "jobs":
+            return current
+        return replace(
+            current,
+            latest_job_id=job_id,
+            status=status,
+            media_id=media_id,
+            dispatch_state="jobs" if status == "processing" else "settled",
+        )
+    try:
+        return db.finish_quick_ingest_dispatch(
+            plan_key,
+            source_key,
+            retry_count=row.retry_count,
+            idempotency_key=key,
+            transport="jobs",
+            status=status,
+            media_id=media_id,
+            latest_job_id=job_id,
+        )
+    except QuickIngestPlanConflict:
+        current = db.get_quick_ingest_source(plan_key, source_key)
+        if current.retry_count == row.retry_count and current.latest_job_id not in (None, job_id):
+            raise
+        return current
+
+
+def _plan_job_result(job: dict) -> tuple[str, int | None]:
+    """Only an authoritative terminal Jobs result permits a retry or confirms a media ID."""
+    status = job["status"]
+    if status in {"failed", "quarantined", "cancelled"}:
+        return ("cancelled" if status == "cancelled" else "failed"), None
+    if status != "completed":
+        return "processing", None
+    from tldw_Server_API.app.services.media_ingest_jobs_worker import _is_failed_result, _is_skipped_existing_result
+
+    result = ingest_jobs._normalize_payload(job.get("result"))
+    if _is_failed_result(result):
+        return "failed", None
+    media_id = positive_quick_ingest_media_id(result.get("media_id") or result.get("db_id"))
+    if _is_skipped_existing_result(result):
+        return "skipped_existing", media_id
+    return ("completed", media_id) if media_id is not None else ("processing", None)
+
+
+@router.put(
+    "/collections/quick-ingest-plans/{plan_key}",
+    response_model=QuickIngestPlanResponse,
+    tags=["Media Collections"],
+    dependencies=[Depends(RequirePermission(MEDIA_CREATE)), Depends(rbac_rate_limit("media.create"))],
+)
+async def put_quick_ingest_plan(
+    plan_key: PlanKey,
+    payload: QuickIngestPlanRequest,
+    db: CollectionsDatabase = Depends(get_collections_db_for_user),
+    job_manager_factory: Callable[[], JobManager] = Depends(get_plan_job_manager_factory),
+) -> QuickIngestPlanResponse:
+    """Bind selected source identities atomically and return their current user-owned rows."""
+    try:
+        collection_id, items = db.put_quick_ingest_plan(
+            plan_key,
+            payload.collection.model_dump(),
+            [(s.source_key, s.item.model_dump()) for s in payload.items],
+        )
+        items = {key: _recover_plan_job(db, plan_key, key, row, job_manager_factory) for key, row in items.items()}
+        return QuickIngestPlanResponse(
+            collection_id=collection_id,
+            items=[
+                QuickIngestPlanItemResponse(
+                    source_key=key,
+                    item=_item_response(row),
+                    dispatch_state=_PLAN_DISPATCH_STATE.validate_python(row.dispatch_state),
+                )
+                for key, row in items.items()
+            ],
+        )
+    except (KeyError, ValueError) as exc:
+        _raise_collection_error(exc)
+        raise
+
+
+@router.get(
+    "/collections/quick-ingest-plans/{plan_key}/sources/{source_key}",
+    response_model=QuickIngestSourceStatusResponse,
+    tags=["Media Collections"],
+    dependencies=[Depends(RequirePermission(MEDIA_READ)), Depends(rbac_rate_limit("media.read"))],
+)
+async def get_quick_ingest_source_status(
+    plan_key: PlanKey,
+    source_key: PlanKey,
+    db: CollectionsDatabase = Depends(get_collections_db_for_user),
+    job_manager_factory: Callable[[], JobManager] = Depends(get_plan_job_manager_factory),
+) -> QuickIngestSourceStatusResponse:
+    """Inspect the original receipt without creating a plan or reserving a source."""
+    try:
+        row = _recover_plan_job(
+            db, plan_key, source_key, db.get_quick_ingest_source(plan_key, source_key), job_manager_factory, persist=False
+        )
+        return QuickIngestSourceStatusResponse(
+            collection_id=row.collection_id,
+            source_key=source_key,
+            item=_item_response(row),
+            dispatch_state=_PLAN_DISPATCH_STATE.validate_python(row.dispatch_state),
+        )
+    except (KeyError, ValueError) as exc:
+        _raise_collection_error(exc)
+        raise
+
+
+@router.post(
+    "/collections/quick-ingest-plans/{plan_key}/sources/{source_key}/claim",
+    response_model=QuickIngestClaimResponse,
+    tags=["Media Collections"],
+    dependencies=[Depends(RequirePermission(MEDIA_CREATE)), Depends(rbac_rate_limit("media.create"))],
+)
+async def claim_quick_ingest_source(
+    plan_key: PlanKey,
+    source_key: PlanKey,
+    retry: QuickIngestRetryClaim | None = None,
+    db: CollectionsDatabase = Depends(get_collections_db_for_user),
+    job_manager_factory: Callable[[], JobManager] = Depends(get_plan_job_manager_factory),
+) -> QuickIngestClaimResponse:
+    """Claim one source attempt, preserving the previously admitted job or direct result on replay."""
+    try:
+        _recover_plan_job(db, plan_key, source_key, db.get_quick_ingest_source(plan_key, source_key), job_manager_factory)
+        claimed, row = db.claim_quick_ingest_source(plan_key, source_key, **(retry.model_dump() if retry else {}))
+        return QuickIngestClaimResponse(
+            claimed=claimed,
+            item=_item_response(row),
+            dispatch_state=_PLAN_DISPATCH_STATE.validate_python(row.dispatch_state),
+        )
+    except (KeyError, ValueError) as exc:
+        _raise_collection_error(exc)
+        raise
 
 
 @router.post(
@@ -253,6 +458,9 @@ async def update_media_collection_item(
         current = db.get_media_collection_item(item_id)
         if current.collection_id != collection_id:
             raise KeyError("media_collection_item_not_found")
+        projected = db.apply_quick_ingest_item_patch(item_id, payload.model_dump(exclude_unset=True))
+        if projected is not None:
+            return _item_response(projected)
         if "source_url" in payload.model_fields_set:
             if (
                 payload.model_fields_set != {"source_url", "retry_count", "idempotency_key"}

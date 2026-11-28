@@ -6,6 +6,8 @@ import type {
   WizardResultItem,
 } from "@/components/Common/QuickIngest/types"
 
+export const UNDISPATCHED_PLAN_SOURCE = "quick_ingest_source_not_dispatched"
+
 export type MediaCollectionItemStatus =
   | "planned"
   | "processing"
@@ -171,6 +173,8 @@ export type ConferenceCollectionItemPayload = {
 export type ConferenceCollectionItemMergeInput = {
   id: string
   url: string
+  sourceUrlEdited?: boolean
+  fileName?: string
   playlist?: PlaylistQueueMetadata
   processAgain?: boolean
   conferenceOverride?: ConferenceItemMetadataOverride
@@ -361,6 +365,17 @@ export const buildConferenceCollectionCreatePayload = (
   }
 }
 
+export const hasConferenceCollectionMetadata = (
+  metadata: ConferenceBatchMetadata | null | undefined,
+  entries: readonly { conferenceOverride?: ConferenceItemMetadataOverride }[] = [],
+): boolean => {
+  const shared = [metadata?.collectionName, metadata?.conferenceName, metadata?.sourcePlaylistUrl,
+    metadata?.eventDate, metadata?.eventYear, ...(metadata?.sharedTags ?? [])]
+  return shared.some(value => value?.trim()) || entries.some(({ conferenceOverride: item }) =>
+    [item?.title, item?.speaker, item?.track, item?.talkDate, ...(item?.tags ?? [])].some(value => value?.trim())
+  )
+}
+
 export const buildConferenceCollectionItemPayload = (
   batchMetadata: ConferenceBatchMetadata,
   item: ConferenceCollectionItemMergeInput
@@ -395,8 +410,8 @@ export const buildConferenceCollectionItemPayload = (
     ordinal,
     source_url: item.url,
     normalized_source_id: compactString(playlist?.normalizedSourceId ?? undefined) ?? null,
-    source_kind: playlistId ? "youtube_video" : null,
-    title: compactString(override?.title) ?? null,
+    source_kind: item.fileName ? "file" : playlistId ? "youtube_video" : null,
+    title: compactString(override?.title) ?? item.fileName ?? null,
     speaker: compactString(override?.speaker) ?? null,
     published_at:
       compactString(override?.talkDate) ??

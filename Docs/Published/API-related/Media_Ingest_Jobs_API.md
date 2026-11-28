@@ -20,11 +20,28 @@ Google Drive and Microsoft OneDrive source sync runs are queued through the conn
   - `repair_rescan` - scheduled replay/full-rescan recovery when a source is marked `needs_full_rescan`
 - Sync job result payloads include `processed`, `skipped`, `failed`, and, for file-hosting sync, `degraded` counts.
 
+## Resuming a Quick Ingest collection
+
+The WebUI keeps its plan key with the draft and uses a stable source key for each queue row. The authenticated account owns the plan. A fresh draft may import the same URL into a separate collection.
+
+| Request | Effect |
+| --- | --- |
+| `PUT /api/v1/media/collections/quick-ingest-plans/{plan_key}` | Atomically create or resume the collection and the requested rows. The body contains `collection` and an `items` array of `{source_key, item}`. The response contains `collection_id` and the current row and `dispatch_state` for each requested key. |
+| `GET /api/v1/media/collections/quick-ingest-plans/{plan_key}/sources/{source_key}` | Read a source receipt. An unknown source returns HTTP 404. This operation creates no collection rows or jobs. |
+| `POST /api/v1/media/collections/quick-ingest-plans/{plan_key}/sources/{source_key}/claim` | Reserve the initial source or an explicit retry of a confirmed terminal failure. A reservation can survive the browser closing before it sends the work. |
+| `POST /api/v1/media/collections/quick-ingest-plans/{plan_key}/sources/{source_key}/dispatch/{transport}` | Submit the source using `jobs`, `web`, or `add` and the source attempt's `retry_count` and `idempotency_key` query parameters. The receiver records the canonical job or Media ID before acknowledging a successful dispatch. |
+
+If the setup response is lost, repeat the `PUT` with the same keys. A completed source returns its saved Media ID. An accepted job returns its existing job ID. Replaying setup preserves edited metadata and source order. After a dispatch with an uncertain outcome, read the source receipt before taking further action. A Jobs admission rejection with HTTP 429 and the code `plan_jobs_quota_rejected` changes the source to `fallback_ready`. Only then can the client use the planned `add` fallback. A native file rejected during upload validation has a failed receipt. The user can correct it and request a new attempt on the same source. A confirmed analysis-quota refusal before processing also leaves that source eligible for an explicit retry.
+
+When a web crawl ends in failure before saving any article, the planned web endpoint returns the crawler’s HTTP error and records a failed source receipt. If the crawler confirms cancellation before the Media save begins, the receipt records the source as cancelled. Both outcomes allow an explicit retry in the same collection and source row. After a disconnect during a save, read the receipt. A source that still shows processing has an unconfirmed outcome, and the server blocks another write for that attempt.
+
 ## Endpoints
 
 - POST `/ingest/jobs` - Submit jobs (one job per item)
   - Body: multipart form-data matching `/media/add` fields plus optional `files`
   - Response: `{ batch_id, jobs: [{ id, uuid, source, source_kind, status }], errors: [] }`
+  - Retrying a full set of collection URL jobs returns the original job IDs and cancellation batch for that owner. Submit new sources separately. A known mismatch returns HTTP 409 before job creation. If two requests race after one has accepted a source, `errors` identifies the affected source and `jobs` lists the jobs accepted into the returned batch.
+  - New uploads with idempotency keys and new collection-bound URL retries use the primary media worker queue. A retry can recover an existing job from its original queue when heavy-worker availability changes.
   - Notes: `errors` contains per-item staging failures; if every item fails, response uses HTTP 207.
 
 - GET `/ingest/jobs?batch_id=...` - List jobs for a batch (owner or admin)

@@ -254,6 +254,24 @@ describe("Service Prompt scope policy", () => {
   })
 
   it.each([
+    ["", "PUT", true],
+    ["", "POST", false],
+    ["/sources/url%3A1", "GET", true],
+    ["/sources/url%3A1", "POST", false],
+    ["/sources/url%3A1/claim", "POST", true],
+    ["/sources/url%3A1/dispatch/jobs?retry_count=1", "POST", true],
+    ["/sources/url%3A1/dispatch/web", "POST", true],
+    ["/sources/file-7/dispatch/add", "POST", true],
+    ["/sources/file-7/dispatch/add", "DELETE", false],
+    ["/sources/file-7/dispatch/jobs/extra", "POST", false],
+    ["/sources/file-7/dispatch/unknown", "POST", false],
+    ["/sources/a%252fb/claim", "POST", false],
+    ["/sources//claim", "POST", false],
+  ])("limits collection plan requests to the declared paths and methods (%s %s)", (suffix, method, allowed) => {
+    expect(isServicePromptRequestPath(`/api/v1/media/collections/quick-ingest-plans/draft-42${suffix}`, method)).toBe(allowed)
+  })
+
+  it.each([
     "/api/v1/chats/%2e%2e/messages",
     "/api/v1/chats/./messages",
     "/api/v1/chats/../messages",

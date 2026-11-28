@@ -1,4 +1,5 @@
 import type { ErrorClassification } from "./types"
+import { UNDISPATCHED_PLAN_SOURCE } from "@/services/tldw/conference-collections"
 
 /**
  * Structured error category returned by `classifyError()`.
@@ -108,6 +109,12 @@ const TIMEOUT_CATEGORY: ErrorCategory = {
   suggestion: "Try again — larger files may need more time.",
 }
 
+const NOT_SUBMITTED_CATEGORY: ErrorCategory = {
+  classification: "unknown", retryable: true, badgeLabel: "Ready to submit",
+  badgeColor: "bg-gray-100 text-gray-800 dark:bg-gray-800/40 dark:text-gray-300",
+  userMessage: "This source can resume setup.", suggestion: "Retry to submit it to the original collection.",
+}
+
 const UNKNOWN_CATEGORY: ErrorCategory = {
   classification: "unknown",
   retryable: false,
@@ -194,6 +201,8 @@ export function classifyError(error: string | undefined, data?: unknown): ErrorC
   const result = data && typeof data === "object" ? data as Record<string, unknown> : null
   const payload = result?.result && typeof result.result === "object"
     ? result.result as Record<string, unknown> : result
+  if (payload?.plan_setup_http_status === 401 || payload?.plan_setup_http_status === 403) return AUTH_CATEGORY
+  if (payload?.code === UNDISPATCHED_PLAN_SOURCE) return NOT_SUBMITTED_CATEGORY
   const failures = payload?.extraction_failures
   if (Array.isArray(failures) && failures.length > 0) {
     // Extraction metadata does not cover unrelated storage or processing errors.

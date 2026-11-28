@@ -1556,6 +1556,14 @@ class IngestionSourceValidationError(ValidationError):
     """Raised when an ingestion source payload fails validation."""
 
 
+# The scraper preserves the original asyncio cancellation and attaches its verified persistence state.
+WEB_CRAWL_CANCELLED_BEFORE_SAVE = "web_crawl_cancelled_before_save"
+
+
+class WebCrawlFailedBeforeSave(HTTPException):
+    """The crawl ended with no successful article before Media persistence began."""
+
+
 class IngestionSourceSchemaError(RuntimeError):
     """Raised when the ingestion-source schema definition is incomplete."""
 
@@ -2279,3 +2287,11 @@ class LLMPolicyRefusal(HTTPException):
 
     def __init__(self, detail: str) -> None:
         super().__init__(status_code=400, detail=detail)
+
+
+class WebAnalysisRefusedBeforeSave(LLMPolicyRefusal):
+    """Web analysis was refused before the persistent scraper attempted a Media write."""
+
+    def __init__(self, refusal: LLMPolicyRefusal) -> None:
+        super().__init__(refusal.detail)
+        self.headers = refusal.headers

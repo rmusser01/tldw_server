@@ -242,6 +242,12 @@ export const isServicePromptRequestPath = (
       pathname === "/api/v1/media/" ||
       pathname === "/api/v1/media/ingest/jobs")) return true
   if (requestMethod === "POST" && (/^\/api\/v1\/media\/(?:ingest\/jobs(?:\/cancel)?|process-(?:audios|videos|pdfs|ebooks|documents|web-scraping)|search|collections)$/.test(pathname) || /^\/api\/v1\/media\/collections\/[0-9]+\/items$/.test(pathname))) return true
+  if (pathname.startsWith("/api/v1/media/collections/quick-ingest-plans/")) {
+    const plan = /^\/api\/v1\/media\/collections\/quick-ingest-plans\/[A-Za-z0-9._:-]{1,200}(\/sources\/[A-Za-z0-9._:-]{1,200}(\/(?:claim|dispatch\/(?:jobs|web|add)))?)?$/.exec(decodeURIComponent(pathname))
+    if (!plan) return false
+    if (plan[2]) return requestMethod === "POST"
+    return requestMethod === (plan[1] ? "GET" : "PUT")
+  }
   if (requestMethod === "PATCH" && /^\/api\/v1\/media\/collections\/[0-9]+\/items\/[0-9]+$/.test(pathname)) return true
   if (pathname === "/api/v1/notes/collections" || pathname === "/api/v1/notes/keywords") return ["GET", "POST"].includes(requestMethod)
   if (pathname === "/api/v1/notes/collections/keyword-links" || pathname === "/api/v1/notes/conversations/keyword-links") return requestMethod === "GET"

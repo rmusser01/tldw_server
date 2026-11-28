@@ -8,6 +8,8 @@ import { buildKnowledgeMediaScopePath } from "@/utils/knowledge-scope-handoff"
 import { tldwClient } from "@/services/tldw/TldwApiClient"
 import { type ConferenceRetryRequestItem,
   buildConferenceRetryRequestItems,
+  hasConferenceCollectionMetadata,
+  UNDISPATCHED_PLAN_SOURCE,
   resolveConferenceDuplicatePolicy,
 } from "@/services/tldw/conference-collections"
 import { resolveIngestUrlType } from "@/services/tldw/media-routing"
@@ -117,7 +119,7 @@ type QuickIngestRequestPayload = {
     id: string
     name: string
     type?: string
-    directFile: File
+    directFile?: File
     defaults?: TypeDefaults
     conferenceOverride?: ConferenceItemMetadataOverride
   }>
@@ -128,6 +130,8 @@ type QuickIngestRequestPayload = {
   fileDefaults: TypeDefaults
   conferenceBatchMetadata?: ConferenceBatchMetadata | null
   conferenceRetry?: { collectionId: string; items: ConferenceRetryRequestItem[] }
+  planKey?: string
+  expectedCollectionId?: string
   __quickIngestSessionId?: string
 }
 
@@ -1002,6 +1006,8 @@ const WizardModalContent: React.FC<WizardModalContentProps> = ({
   const activeSessionIdRef = useRef<string | null>(null)
   const resultsRef = useRef(results)
   const hasStartedRunRef = useRef(false)
+  const restoredPlanRun = useRef(currentStep === 4 && session.lifecycle === "processing" && session.tracking?.planKey
+    ? session.tracking : null)
   const runStartedAtRef = useRef<number | null>(null)
   const cancelledSessionIdsRef = useRef<Set<string>>(new Set())
   const cancelRequestedRef = useRef(false)
@@ -1051,6 +1057,9 @@ const WizardModalContent: React.FC<WizardModalContentProps> = ({
   }, [queueItems, session.tracking])
   const initialTrackedQueueItemsRef = useRef(trackedQueueItems)
   const itemProgressRef = useRef(processingState.perItemProgress)
+  const remainingPlanProgress = useRef<ItemProgress[]>([])
+  const checkingPlan = useRef<AbortController | null>(null)
+  useEffect(() => () => checkingPlan.current?.abort(), [])
   itemProgressRef.current = processingState.perItemProgress
   const initialElapsedRef = useRef(state.processingState.elapsed)
   const persistedTrackingRef = useRef(session.tracking)
@@ -1392,15 +1401,14 @@ const WizardModalContent: React.FC<WizardModalContentProps> = ({
       syncElapsed()
       const resolvedIds = new Set([...resultsRef.current, ...incomingResults].map(item => item.id))
       applyResults([...incomingResults, ...buildFailureResults(validQueueItems.filter(item => !resolvedIds.has(item.id)), "The server returned no result for this input. Review the source and try again.", "failed", retryRequestsRef.current.length ? retryRequestsRef.current : persistedTrackingRef.current?.retryItems)])
-      updateProcessingState({
-        status: nextStatus,
-        estimatedRemaining: 0,
-      })
+      const unconfirmed = remainingPlanProgress.current.some(item => !resultsRef.current.some(result => result.id === item.id))
+      if (unconfirmed) markInterrupted(INGEST_JOB_STATUS_INTERRUPTED)
+      updateProcessingState({ status: unconfirmed ? "error" : nextStatus, estimatedRemaining: 0 })
       hasStartedRunRef.current = false
       activeSessionIdRef.current = null
       goNext()
     },
-    [applyResults, goNext, syncElapsed, updateProcessingState, validQueueItems]
+    [applyResults, goNext, markInterrupted, syncElapsed, updateProcessingState, validQueueItems]
   )
 
   const finalizeFailure = useCallback(
@@ -1495,10 +1503,10 @@ const WizardModalContent: React.FC<WizardModalContentProps> = ({
 
   const markRunActive = useCallback(() => {
     runStartedAtRef.current = Date.now()
-    updateProcessingState({ bulkStop: undefined, perItemProgress: validQueueItems.map(item => ({
-      id: item.id, status: "processing", progressPercent: 0,
+    updateProcessingState({ bulkStop: undefined, perItemProgress: [...remainingPlanProgress.current, ...validQueueItems.map(item => ({
+      id: item.id, status: "processing" as const, progressPercent: 0,
       currentStage: "Waiting for server result", estimatedRemaining: 0,
-    })) })
+    }))] })
   }, [updateProcessingState, validQueueItems])
 
   const handleRuntimeMessage = useCallback(
@@ -1615,6 +1623,13 @@ const WizardModalContent: React.FC<WizardModalContentProps> = ({
         requestPayload.conferenceRetry = { collectionId: retryCollectionIdRef.current, items: retryRequestsRef.current }
       }
 
+      const resumedPlan = session.tracking?.planKey === session.id
+      if (oneScreen && requestPayload.storeRemote && !requestPayload.processOnly && (resumedPlan ||
+          (!requestPayload.conferenceRetry && hasConferenceCollectionMetadata(state.conferenceBatchMetadata, validQueueItems)))) {
+        requestPayload.planKey = session.id
+        if (resumedPlan) requestPayload.expectedCollectionId = session.tracking?.collectionId
+      }
+
       const providerWarning = getQuickIngestAnalysisProviderWarning({
         common: requestPayload.common,
         advancedValues: requestPayload.advancedValues,
@@ -1673,6 +1688,8 @@ const WizardModalContent: React.FC<WizardModalContentProps> = ({
       markProcessingTracking({
         mode: sessionId.startsWith("qi-direct-") ? "webui-direct" : "extension-runtime",
         sessionId,
+        planKey: requestPayload.planKey,
+        collectionId: requestPayload.expectedCollectionId,
         ...(requestPayload.conferenceRetry
           ? {
               collectionId: requestPayload.conferenceRetry.collectionId,
@@ -1774,6 +1791,10 @@ const WizardModalContent: React.FC<WizardModalContentProps> = ({
     presetConfig.storeRemote,
     presetConfig.typeDefaults,
     state.conferenceBatchMetadata,
+    oneScreen,
+    session.id,
+    session.tracking?.planKey,
+    session.tracking?.collectionId,
     goToStep,
     restore,
     showSession,
@@ -1793,13 +1814,22 @@ const WizardModalContent: React.FC<WizardModalContentProps> = ({
       if (session.tracking.mode !== "webui-direct" || canReattachDirectJobs) {
         return
       }
+      if (restoredPlanRun.current && !hasStartedRunRef.current) {
+        // Let hydration publish its initial running snapshot before recording the interruption.
+        queueMicrotask(() => {
+          if (!restoredPlanRun.current || !operation.isCurrent()) return
+          restoredPlanRun.current = null
+          finalizeStatusInterruption([])
+        })
+        return
+      }
       if (processingState.bulkStop && !hasStartedRunRef.current) {
         finalizeStatusInterruption([])
         return
       }
     }
     void startRun()
-  }, [currentStep, processingState.status, processingState.bulkStop, session.lifecycle, session.tracking, startRun, finalizeStatusInterruption])
+  }, [currentStep, processingState.status, processingState.bulkStop, session.lifecycle, session.tracking, startRun, finalizeStatusInterruption, operation])
 
   // Modal title with item count
   const modalTitle = useMemo(() => {
@@ -1871,7 +1901,11 @@ const WizardModalContent: React.FC<WizardModalContentProps> = ({
 
   const beginRetry = useCallback((ids: string[]) => {
     if (!ids.length) return
+    checkingPlan.current?.abort()
+    checkingPlan.current = null
     setRetryIds(ids)
+    remainingPlanProgress.current = session.lifecycle === "interrupted" && session.tracking?.planKey
+      ? itemProgressRef.current.filter(item => !ids.includes(item.id) && !resultsRef.current.some(result => result.id === item.id)) : []
     const selected = resultsRef.current.filter(item => ids.includes(item.id))
     const requests = session.tracking?.durableMode === "durable_collection"
       ? buildConferenceRetryRequestItems(selected) : []
@@ -1888,6 +1922,8 @@ const WizardModalContent: React.FC<WizardModalContentProps> = ({
     markProcessingTracking({
       mode: "webui-direct",
       sessionId: `qi-direct-retry-${crypto.randomUUID()}`,
+      planKey: session.tracking?.planKey,
+      ...(session.tracking?.planKey ? { collectionId: retryCollectionIdRef.current } : {}),
       startedAt: Date.now(),
       ...(retryCollectionIdRef.current && requests.length ? {
         collectionId: retryCollectionIdRef.current, retryItems: requests, durableMode: "durable_collection" as const,
@@ -1897,14 +1933,14 @@ const WizardModalContent: React.FC<WizardModalContentProps> = ({
       status: "running",
       bulkStop: undefined,
       correctionItemIds: undefined,
-      perItemProgress: ids.map(id => ({
-        id, status: "queued", progressPercent: 0, currentStage: "", estimatedRemaining: 0,
-      })),
+      perItemProgress: [...remainingPlanProgress.current, ...ids.map(id => ({
+        id, status: "queued" as const, progressPercent: 0, currentStage: "", estimatedRemaining: 0,
+      }))],
       elapsed: 0,
       estimatedRemaining: 0,
     })
     goToStep(4)
-  }, [goToStep, markProcessingTracking, session.tracking, setResults, updateProcessingState])
+  }, [goToStep, markProcessingTracking, session.lifecycle, session.tracking, setResults, updateProcessingState])
 
   // Quick-process callback for AddContentStep (skip to processing with defaults)
   const handleQuickProcess = useCallback(() => {
@@ -2161,6 +2197,57 @@ const WizardModalContent: React.FC<WizardModalContentProps> = ({
     [navigate, operation]
   )
 
+  const [planCheckFailed, setPlanCheckFailed] = useState(false)
+  const [missingPlanSources, setMissingPlanSources] = useState<string[]>([])
+  const checkInterruptedPlan = useCallback(async (ids: string[]) => {
+    if (checkingPlan.current || !operation.isCurrent() || session.tracking?.planKey !== session.id) return
+    const controller = new AbortController()
+    const isCurrentCheck = () => {
+      const live = useQuickIngestSessionStore.getState().session
+      return !controller.signal.aborted && operation.isCurrent() && live?.id === session.id && live.lifecycle === "interrupted" &&
+        live.tracking?.sessionId === session.tracking?.sessionId
+    }
+    checkingPlan.current = controller
+    setPlanCheckFailed(false)
+    setMissingPlanSources([])
+    try {
+      const selected = queueItems.filter(item => ids.includes(item.id))
+      const payload = buildQuickIngestPayload(selected, state.conferenceBatchMetadata, {
+        ...presetConfig.common, storeRemote: true, reviewBeforeStorage: false, typeDefaults: presetConfig.typeDefaults,
+      })
+      // A receipt lookup needs only the stable source identity, including after native bytes were released.
+      for (const item of selected) {
+        if (!item.url && !payload.files.some(file => file.id === item.id)) payload.files.push({ id: item.id,
+          name: item.fileName || "upload", type: item.mimeType, conferenceOverride: item.conferenceOverride })
+      }
+      const trackingUpdates: PersistedQuickIngestTracking[] = []
+      const response = await submitQuickIngestBatch({ ...payload, planKey: session.id, checkPlanOnly: true, expectedCollectionId: session.tracking.collectionId,
+        __quickIngestSessionId: session.tracking.sessionId, requestScope: operation.requestScope,
+        signal: AbortSignal.any([operation.signal, controller.signal]), assertCurrent: operation.assertCurrent,
+        onTrackingMetadata: tracking => { trackingUpdates.push(tracking) },
+      })
+      if (!isCurrentCheck()) return
+      setMissingPlanSources(response.missingPlanSourceIds ?? [])
+      setPlanCheckFailed(Boolean(response.statusCheckUnavailable || !response.ok))
+      for (const tracking of trackingUpdates) markProcessingTracking(tracking)
+      const confirmed = (response.results ?? []).map(item => normalizeWizardResult(
+        (item.data as { code?: string } | undefined)?.code === UNDISPATCHED_PLAN_SOURCE
+          ? { ...item, error: qi("web.planReadySuggestion", "Retry to submit it to the original collection.") } : item
+      )).filter((item): item is WizardResultItem => Boolean(item))
+      applyResults(confirmed)
+      if (response.ok && !response.interruptedItemIds?.length && !response.interruptedJobIds?.length) {
+        updateProcessingState({ status: "complete", estimatedRemaining: 0 })
+      } else {
+        markInterrupted(INGEST_JOB_STATUS_INTERRUPTED)
+      }
+    } catch {
+      if (isCurrentCheck()) setPlanCheckFailed(true)
+    } finally {
+      if (checkingPlan.current === controller) checkingPlan.current = null
+    }
+  }, [applyResults, markProcessingTracking, markInterrupted, operation, presetConfig, qi, queueItems, session.id, session.tracking,
+    state.conferenceBatchMetadata, updateProcessingState])
+
   const interruption = useMemo(() => {
     if (!oneScreen || session.lifecycle !== "interrupted") return
     const activeIds = new Set([
@@ -2177,10 +2264,25 @@ const WizardModalContent: React.FC<WizardModalContentProps> = ({
       lastProgress: processingState.perItemProgress.find(progress => progress.id === item.id),
     }))
     const tracking = session.tracking
+    const setupSources = !tracking?.collectionId ? sources : sources.filter(source => missingPlanSources.includes(source.id))
     return {
       sources,
       onCheckMedia: () => navigate("/media"),
-      onCheckStatus: tracking?.mode === "webui-direct" && sources.some(source => source.jobIds.length > 0)
+      checkError: planCheckFailed ? qi("web.planCheckFailed", "Could not refresh the collection source status.") : null,
+      onResumeSetup: tracking?.planKey === session.id && setupSources.length ? () => {
+        if (!operation.isCurrent() || checkingPlan.current) return
+        setPlanCheckFailed(false)
+        const ids = new Set(setupSources.map(source => source.id))
+        const eligible = getEligibleQueueItems(queueItems).filter(item => ids.has(item.id))
+        const missing = queueItems.filter(item => ids.has(item.id) && !eligible.some(ready => ready.id === item.id))
+        if (missing.length) applyResults(buildFailureResults(missing, qi("web.reattachToResumeSetup", "Reattach the original file to retry collection setup."), "failed")
+          .map(item => ({ ...item, data: { code: UNDISPATCHED_PLAN_SOURCE } })))
+        if (eligible.length) beginRetry(eligible.map(item => item.id))
+        else if (setupSources.length === sources.length) updateProcessingState({ status: "complete", estimatedRemaining: 0 })
+      } : undefined,
+      onCheckStatus: tracking?.planKey === session.id && sources.length
+        ? () => { void checkInterruptedPlan(sources.map(source => source.id)) }
+        : tracking?.mode === "webui-direct" && sources.some(source => source.jobIds.length > 0)
         ? () => {
           if (!operation.isCurrent()) return
           markProcessingTracking(tracking)
@@ -2189,7 +2291,8 @@ const WizardModalContent: React.FC<WizardModalContentProps> = ({
         } : undefined,
     }
   }, [oneScreen, session.lifecycle, session.tracking, trackedJobIdsByItem, processingState.perItemProgress,
-    queueItems, results, navigate, operation, markProcessingTracking, updateProcessingState, goToStep])
+    queueItems, results, navigate, operation, markProcessingTracking, updateProcessingState, goToStep, session.id, checkInterruptedPlan,
+    planCheckFailed, missingPlanSources, applyResults, beginRetry, qi])
 
   // Render the current step
   const stepContent = useMemo(() => {

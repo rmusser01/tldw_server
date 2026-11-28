@@ -1,4 +1,43 @@
 {
+  "quickIngest_metadata_source": {
+    "message": "Source {{number}}"
+  },
+  "quickIngest_metadata_include": {
+    "message": "Include"
+  },
+  "quickIngest_metadata_use": {
+    "message": "Use"
+  },
+  "quickIngest_metadata_title": {
+    "message": "Title"
+  },
+  "quickIngest_metadata_speaker": {
+    "message": "Speaker"
+  },
+  "quickIngest_metadata_track": {
+    "message": "Track"
+  },
+  "quickIngest_metadata_tags": {
+    "message": "Tags"
+  },
+  "quickIngest_metadata_tagExample": {
+    "message": "tag, tag"
+  },
+  "quickIngest_metadata_includeItem": {
+    "message": "Include item {{number}}"
+  },
+  "quickIngest_metadata_titleItem": {
+    "message": "Title override for item {{number}}"
+  },
+  "quickIngest_metadata_speakerItem": {
+    "message": "Speaker for item {{number}}"
+  },
+  "quickIngest_metadata_trackItem": {
+    "message": "Track for item {{number}}"
+  },
+  "quickIngest_metadata_tagsItem": {
+    "message": "Tags for item {{number}}"
+  },
   "quickIngest_invalidUrl": {
     "message": "Invalid URL format. Enter one HTTP(S) URL per line. Separate pasted URLs with a comma and a space."
   },
@@ -7540,6 +7579,24 @@
   },
   "quickIngest_web_checkStatus": {
     "message": "Check status"
+  },
+  "quickIngest_web_planCheckFailed": {
+    "message": "Could not refresh the collection source status."
+  },
+  "quickIngest_web_resumeSetup": {
+    "message": "Resume original collection setup"
+  },
+  "quickIngest_web_reattachToResumeSetup": {
+    "message": "Reattach the original file to retry collection setup."
+  },
+  "quickIngest_web_planReadyBadge": {
+    "message": "Ready to submit"
+  },
+  "quickIngest_web_planReadyMessage": {
+    "message": "This source can resume setup."
+  },
+  "quickIngest_web_planReadySuggestion": {
+    "message": "Retry to submit it to the original collection."
   },
   "quickIngest_web_checkMedia": {
     "message": "Check Media"

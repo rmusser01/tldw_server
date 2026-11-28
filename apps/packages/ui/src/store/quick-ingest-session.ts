@@ -41,6 +41,7 @@ export type PersistedQuickIngestTracking = {
   batchId?: string
   batchIds?: string[]
   collectionId?: string
+  planKey?: string
   plannedItemIds?: string[]
   retryItems?: ConferenceRetryRequestItem[]
   jobIds?: number[]
@@ -308,6 +309,7 @@ const sanitizeTracking = (
       (batchIds.length > 0 ? batchIds[batchIds.length - 1] : undefined),
     batchIds: batchIds.length > 0 ? batchIds : undefined,
     collectionId: tracking.collectionId?.trim() || undefined,
+    planKey: typeof tracking.planKey === "string" ? tracking.planKey.trim() || undefined : undefined,
     plannedItemIds: plannedItemIds.length > 0 ? plannedItemIds : undefined,
     retryItems: Array.isArray(tracking.retryItems)
       ? tracking.retryItems.map((item) => ({
@@ -362,6 +364,7 @@ const mergeTracking = (
     batchId: next.batchId || base.batchId,
     batchIds: [...(base.batchIds || []), ...(next.batchIds || [])],
     collectionId: next.collectionId || base.collectionId,
+    planKey: next.planKey || base.planKey,
     retryItems: next.retryItems || base.retryItems,
     plannedItemIds: [
       ...(base.plannedItemIds || []),

@@ -202,3 +202,49 @@ async def test_trusted_media_worker_completes_other_owners_and_restores_ambient_
     with JobManager.scoped_rls_context(is_admin=False, domain_allowlist="other", owner_user_id="11"):
         untouched = manager.get_job(sentinel["id"])
     assert untouched == sentinel  # nosec B101 # Worker capability remains limited to its configured domain.
+
+
+def test_bound_plan_recovers_only_the_owners_published_job_without_writing(owned_jobs, pg_restricted_backend, monkeypatch):
+    """A lost submit ACK on PostgreSQL reads the original job under the ordinary user's FORCE policy."""
+    from tldw_Server_API.app.api.v1.endpoints.media.collections import _recover_plan_job
+    from tldw_Server_API.app.core.DB_Management.Collections_DB import CollectionsDatabase
+    from tldw_Server_API.app.core.DB_Management.scope_context import reset_scope, set_scope
+
+    manager, _ = owned_jobs
+    monkeypatch.setenv("JOBS_DB_URL", manager.db_url)
+    backend = pg_restricted_backend
+    token = set_scope(user_id=11)
+    try:
+        db = CollectionsDatabase.from_backend("11", backend)
+        _, rows = db.put_quick_ingest_plan(
+            "draft", {"name": "Talks", "kind": "conference"}, [("talk", {"source_url": "https://example.test/talk"})]
+        )
+        item = rows["talk"]
+        key = item.idempotency_key
+        db.claim_quick_ingest_source("draft", "talk")
+        _, row = db.begin_quick_ingest_dispatch("draft", "talk", transport="jobs", retry_count=0, idempotency_key=key)
+        payload = {
+            "collection_id": str(item.collection_id),
+            "planned_item_id": str(item.id),
+            "idempotency_key": key,
+            "source_kind": "url",
+            "source": item.source_url,
+        }
+        for owner, queue in (("22", "low"), ("11", "default")):
+            with JobManager.scoped_rls_context(is_admin=False, domain_allowlist="media_ingest", owner_user_id=owner):
+                job = manager.create_job(
+                    domain="media_ingest",
+                    queue=queue,
+                    job_type="media_ingest_item",
+                    owner_user_id=owner,
+                    payload=payload,
+                    idempotency_key=f"media-collection-url:2:11:{key}",
+                )
+        with JobManager.scoped_rls_context(is_admin=False, domain_allowlist="other", owner_user_id="22"):
+            observed = _recover_plan_job(db, "draft", "talk", row, ingest_jobs.get_job_manager, persist=False)
+        assert observed.latest_job_id == str(job["id"])
+        assert db.get_quick_ingest_source("draft", "talk").latest_job_id is None
+        assert _recover_plan_job(db, "draft", "talk", row, ingest_jobs.get_job_manager).latest_job_id == str(job["id"])
+    finally:
+        reset_scope(token)
+        CollectionsDatabase._bootstrapped_backend_targets.discard(CollectionsDatabase._backend_target_key(backend))

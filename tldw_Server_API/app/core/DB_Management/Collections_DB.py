@@ -63,6 +63,11 @@ from .backends.factory import (
     is_factory_managed_backend,
     release_managed_backend,
 )
+from .backends.pg_rls_policies import (
+    QUICK_INGEST_PLAN_OWNER,
+    QUICK_INGEST_PLAN_TABLES,
+    build_quick_ingest_plan_rls_sql,
+)
 from .backends.query_utils import prepare_backend_statement
 from .db_path_utils import DatabasePaths, normalize_output_storage_filename
 
@@ -259,6 +264,10 @@ class ContentItemRow:
     content_changed: bool = False
 
 
+class QuickIngestPlanConflict(ValueError):
+    """A stale source attempt or transport cannot change the current receipt."""
+
+
 @dataclass
 class MediaCollectionItemRow:
     id: int
@@ -286,6 +295,13 @@ class MediaCollectionItemRow:
     tags: list[str]
     created_at: str
     updated_at: str
+    dispatch_state: str | None = None
+
+    def require_plan_attempt_key(self) -> str:
+        """Return the processing key required for every durable plan source."""
+        if not self.idempotency_key:
+            raise QuickIngestPlanConflict("The plan source is missing its processing key.")
+        return self.idempotency_key
 
 
 @dataclass
@@ -648,6 +664,9 @@ _COLLECTIONS_REQUIRED_TABLES = (
     "reminder_tasks",
     "file_artifacts",
     "audio_studio_idempotency_keys",
+    "quick_ingest_plans",
+    "quick_ingest_plan_sources",
+    "quick_ingest_plan_attempts",
 )
 
 
@@ -764,6 +783,9 @@ _POSTGRES_COLLECTIONS_SCHEMA = {
         "source_id read_at created_at updated_at",
         "id",
     ),
+    "quick_ingest_plan_attempts": ("user_id attempt_key item_id retry_count", "user_id attempt_key"),
+    "quick_ingest_plans": ("user_id plan_key collection_id", "user_id plan_key"),
+    "quick_ingest_plan_sources": ("user_id plan_key source_key item_id claimed_attempt attempt_key dispatch_state", "user_id plan_key source_key"),
     "media_collections": (
         "id user_id name kind description source_url metadata_json default_tags_json deleted created_at updated_at",
         "id",
@@ -785,7 +807,7 @@ _POSTGRES_COLLECTIONS_SCHEMA = {
     "saved_searches": ("id user_id name query_json sort created_at updated_at", "id"),
     "content_item_note_links": ("user_id item_id note_id created_at", "user_id item_id note_id"),
 }
-_POSTGRES_COLLECTIONS_UNIQUE_KEYS = {"collection_tags": ["user_id name"], "content_item_tags": ["item_id tag_id"]}
+_POSTGRES_COLLECTIONS_UNIQUE_KEYS = {"quick_ingest_plan_attempts": ["user_id item_id retry_count"], "quick_ingest_plan_sources": ["user_id item_id"], "collection_tags": ["user_id name"], "content_item_tags": ["item_id tag_id"]}
 _POSTGRES_COLLECTIONS_UNIQUE_INDEXES = {
     "ux_output_templates_user_name": ("output_templates", "user_id name", None),
     "ux_reminder_task_runs_slot": ("reminder_task_runs", "task_id run_slot_key", None),
@@ -829,6 +851,63 @@ def _postgres_predicate_matches(actual: str | None, expected: str | None) -> boo
     except (ParseError, ValueError, TypeError):
         return False
 
+
+
+def _validate_postgres_plan_policies(backend: DatabaseBackend, connection: Any = None) -> None:
+    """Require one enforced owner policy per ledger, including its write predicate."""
+    rows = backend.execute(
+        """
+        SELECT c.relname, c.relrowsecurity AND c.relforcerowsecurity AS enforced,
+               p.polname, p.polcmd, p.polpermissive, p.polroles = ARRAY[0::oid] AS public_role,
+               pg_get_expr(p.polqual, c.oid) AS read_predicate,
+               pg_get_expr(p.polwithcheck, c.oid) AS write_predicate
+        FROM pg_catalog.pg_class c JOIN pg_catalog.pg_policy p ON p.polrelid = c.oid
+        WHERE c.relnamespace = 'public'::regnamespace AND c.relname IN (?, ?, ?)
+        """,
+        QUICK_INGEST_PLAN_TABLES,
+        connection=connection,
+    ).rows
+    protected = {
+        row["relname"] for row in rows
+        if row["enforced"] and row["polname"] == "quick_ingest_owner" and row["polcmd"] == "*"
+        and row["polpermissive"] and row["public_role"]
+        and _postgres_predicate_matches(row["read_predicate"], QUICK_INGEST_PLAN_OWNER)
+        and _postgres_predicate_matches(row["write_predicate"], QUICK_INGEST_PLAN_OWNER)
+    }
+    if len(rows) != len(QUICK_INGEST_PLAN_TABLES) or protected != set(QUICK_INGEST_PLAN_TABLES):
+        raise DatabaseError("Collections PostgreSQL plan owner policies require owner migration")
+
+
+QUICK_INGEST_PLAN_DDL = """
+CREATE TABLE IF NOT EXISTS quick_ingest_plans (
+    user_id TEXT NOT NULL,
+    plan_key TEXT NOT NULL,
+    collection_id BIGINT REFERENCES media_collections(id),
+    PRIMARY KEY (user_id, plan_key)
+);
+CREATE TABLE IF NOT EXISTS quick_ingest_plan_sources (
+    user_id TEXT NOT NULL,
+    plan_key TEXT NOT NULL,
+    source_key TEXT NOT NULL,
+    item_id BIGINT NOT NULL REFERENCES media_collection_items(id),
+    claimed_attempt INTEGER NOT NULL DEFAULT -1,
+    attempt_key TEXT NOT NULL,
+    dispatch_state TEXT NOT NULL DEFAULT 'unclaimed'
+        CHECK(dispatch_state IN ('unclaimed','reserved','jobs','web','fallback_ready','add','settled')),
+    PRIMARY KEY (user_id, plan_key, source_key),
+    UNIQUE (user_id, item_id),
+    FOREIGN KEY (user_id, plan_key) REFERENCES quick_ingest_plans(user_id, plan_key)
+);
+CREATE TABLE IF NOT EXISTS quick_ingest_plan_attempts (
+    user_id TEXT NOT NULL,
+    attempt_key TEXT NOT NULL,
+    item_id BIGINT NOT NULL,
+    retry_count INTEGER NOT NULL CHECK(retry_count >= 0),
+    PRIMARY KEY(user_id, attempt_key),
+    UNIQUE(user_id, item_id, retry_count),
+    FOREIGN KEY(user_id, item_id) REFERENCES quick_ingest_plan_sources(user_id, item_id)
+);
+"""
 
 POSTGRES_CONTENT_DDL = """
             CREATE TABLE IF NOT EXISTS collection_tags (
@@ -1136,6 +1215,17 @@ SQLITE_CONTENT_DDL = """
             """
 
 
+def _create_collection_content_tables(backend: DatabaseBackend) -> None:
+    """Give new or existing PostgreSQL ledgers enforced owner policies before committing schema setup."""
+    if backend.backend_type == BackendType.POSTGRESQL:
+        schema = POSTGRES_CONTENT_DDL + QUICK_INGEST_PLAN_DDL + "\n".join(build_quick_ingest_plan_rls_sql())
+        with backend.transaction() as conn:
+            backend.create_tables(schema, connection=conn)
+            _validate_postgres_plan_policies(backend, connection=conn)
+    else:
+        backend.create_tables(SQLITE_CONTENT_DDL + QUICK_INGEST_PLAN_DDL)
+
+
 @_decorate_collections_public_operations
 class CollectionsDatabase:
     """Adapter for Collections tables stored in the per-user Media DB."""
@@ -1255,7 +1345,8 @@ class CollectionsDatabase:
 
     @staticmethod
     def _validate_postgres_runtime_schema(backend: DatabaseBackend) -> None:
-        """Admit only readable canonical columns and immediate valid unique arbiters."""
+        """Admit only tenant-isolated ledgers, readable canonical columns and valid unique arbiters."""
+        _validate_postgres_plan_policies(backend)
         columns = backend.execute(
             "SELECT table_name,column_name, "
             "has_column_privilege(current_user,format('%I.%I',table_schema,table_name),column_name,'SELECT') "
@@ -1335,7 +1426,7 @@ class CollectionsDatabase:
         """
         rows = self._backend.execute(
             "SELECT name FROM sqlite_master WHERE type='table' AND name IN "
-            "(?, ?, ?, ?, ?)",
+            "(?, ?, ?, ?, ?, ?, ?, ?)",
             _COLLECTIONS_REQUIRED_TABLES,
         )
         # QueryResult yields dict rows, so the column has to be named:
@@ -2836,12 +2927,8 @@ class CollectionsDatabase:
         self._backfill_audiobook_project_ids()
         # Collections layer tables
         fts_available = self.backend.backend_type == BackendType.SQLITE
-        if self.backend.backend_type == BackendType.POSTGRESQL:
-            content_ddl = POSTGRES_CONTENT_DDL
-        else:
-            content_ddl = SQLITE_CONTENT_DDL
         try:
-            self.backend.create_tables(content_ddl)
+            _create_collection_content_tables(self.backend)
         except _COLLECTIONS_NONCRITICAL_EXCEPTIONS as e:
             logger.bind(error_type=type(e).__name__[:80]).error(
                 "Collections content_items schema init failed"
@@ -3513,7 +3600,7 @@ class CollectionsDatabase:
             updated_at=str(row.get("updated_at")),
         )
 
-    def _fetch_media_collection_items(self, collection_id: int) -> list[MediaCollectionItemRow]:
+    def _fetch_media_collection_items(self, collection_id: int, connection: Any = None) -> list[MediaCollectionItemRow]:
         rows = self.backend.execute(
             """
             SELECT id, user_id, collection_id, ordinal, source_url, normalized_source_id,
@@ -3526,6 +3613,7 @@ class CollectionsDatabase:
             ORDER BY ordinal ASC, id ASC
             """,
             (collection_id, self.user_id),
+            connection=connection,
         ).rows
         return [self._row_to_media_collection_item(row) for row in rows]
 
@@ -3534,6 +3622,7 @@ class CollectionsDatabase:
         row: dict[str, Any],
         *,
         include_items: bool = True,
+        connection: Any = None,
     ) -> MediaCollectionRow:
         collection_id = int(row.get("id"))
         return MediaCollectionRow(
@@ -3548,8 +3637,390 @@ class CollectionsDatabase:
             deleted=bool(row.get("deleted", 0)),
             created_at=str(row.get("created_at")),
             updated_at=str(row.get("updated_at")),
-            items=self._fetch_media_collection_items(collection_id) if include_items else [],
+            items=self._fetch_media_collection_items(collection_id, connection) if include_items else [],
         )
+
+    def put_quick_ingest_plan(
+        self,
+        plan_key: str,
+        collection: dict[str, Any],
+        items: list[tuple[str, dict[str, Any]]],
+    ) -> tuple[int, dict[str, MediaCollectionItemRow]]:
+        """Create missing immutable bindings and read each current item in one transaction."""
+        with self.transaction() as conn:
+            binding = self.backend.execute(
+                "INSERT INTO quick_ingest_plans (user_id, plan_key) VALUES (?, ?) "
+                "ON CONFLICT (user_id, plan_key) DO UPDATE SET plan_key=excluded.plan_key RETURNING collection_id",
+                (self.user_id, plan_key),
+                connection=conn,
+            ).first
+            if binding is None:
+                raise DatabaseError("Failed to bind the Quick Ingest plan")
+            collection_id = binding["collection_id"]
+            if collection_id is None:
+                collection_id = self.create_media_collection(**collection, connection=conn).id
+                self.backend.execute(
+                    "UPDATE quick_ingest_plans SET collection_id=? WHERE user_id=? AND plan_key=?",
+                    (collection_id, self.user_id, plan_key),
+                    connection=conn,
+                )
+            else:
+                self.get_media_collection(collection_id, connection=conn, include_items=False)
+            result = {}
+            for key, fields in items:
+                previous = self._read_quick_ingest_source(plan_key, key, connection=conn)
+                if previous:
+                    result[key] = previous
+                    continue
+                # A previously edited row can now occupy a playlist's original ordinal.
+                ordinal = fields.get("ordinal")
+                if (
+                    ordinal
+                    and self.backend.execute(
+                        "SELECT id FROM media_collection_items WHERE user_id=? AND collection_id=? AND ordinal=?",
+                        (self.user_id, collection_id, ordinal),
+                        connection=conn,
+                    ).first
+                ):
+                    fields = {**fields, "ordinal": None}
+                attempt_key = "quick-ingest-" + uuid4().hex
+                row = self.add_media_collection_item(
+                    **{**fields, "idempotency_key": attempt_key},
+                    collection_id=collection_id,
+                    connection=conn,
+                )
+                self.backend.execute(
+                    "INSERT INTO quick_ingest_plan_sources (user_id, plan_key, source_key, item_id, attempt_key) VALUES (?, ?, ?, ?, ?)",
+                    (self.user_id, plan_key, key, row.id, attempt_key),
+                    connection=conn,
+                )
+                self._record_quick_ingest_attempt(conn, row.id, 0, attempt_key)
+                result[key] = self._project_plan_state(row, "unclaimed")
+            return int(collection_id), result
+
+    @staticmethod
+    def _project_plan_state(row: MediaCollectionItemRow, state: str) -> MediaCollectionItemRow:
+        terminal = row.status in {"completed", "skipped_existing", "failed", "cancelled", "submit_failed"}
+        row.dispatch_state = (
+            "settled" if terminal or row.media_id is not None or row.content_item_id is not None else state
+        )
+        return row
+
+    def _record_quick_ingest_attempt(self, conn: Any, item_id: int, retry_count: int, key: str) -> None:
+        """Keep each owner's Jobs key bound to exactly one historical source attempt."""
+        result = self.backend.execute(
+            "INSERT INTO quick_ingest_plan_attempts (user_id, item_id, retry_count, attempt_key) "
+            "VALUES (?, ?, ?, ?) ON CONFLICT DO NOTHING",
+            (self.user_id, item_id, retry_count, key),
+            connection=conn,
+        )
+        if not result.rowcount:
+            raise QuickIngestPlanConflict("This processing key already belongs to a source attempt.")
+
+    def _locked_quick_ingest_source(
+        self,
+        conn: Any,
+        plan_key: str,
+        source_key: str,
+    ) -> tuple[dict[str, Any], MediaCollectionItemRow]:
+        binding = self.backend.execute(
+            "UPDATE quick_ingest_plan_sources SET claimed_attempt=claimed_attempt WHERE user_id=? AND plan_key=? "
+            "AND source_key=? RETURNING item_id, claimed_attempt, attempt_key, dispatch_state",
+            (self.user_id, plan_key, source_key),
+            connection=conn,
+        ).first
+        if binding is None:
+            raise KeyError("quick_ingest_plan_source_not_found")
+        # Synchronize generic item updates and worker completion with the source ledger.
+        if self.backend.backend_type == BackendType.POSTGRESQL:
+            self.backend.execute(
+                "SELECT id FROM media_collection_items WHERE user_id=? AND id=? FOR UPDATE",
+                (self.user_id, binding["item_id"]),
+                connection=conn,
+            )
+        row = self.get_media_collection_item(binding["item_id"], connection=conn)
+        self.get_media_collection(row.collection_id, connection=conn, include_items=False)
+        return binding, self._project_plan_state(row, binding["dispatch_state"])
+
+    def _read_quick_ingest_source(
+        self, plan_key: str, source_key: str, *, connection: Any = None,
+    ) -> MediaCollectionItemRow | None:
+        row = self.backend.execute(
+            """SELECT item.*, source.dispatch_state
+               FROM quick_ingest_plan_sources source
+               JOIN media_collection_items item ON item.user_id=source.user_id AND item.id=source.item_id
+               JOIN media_collections parent ON parent.user_id=source.user_id AND parent.id=item.collection_id
+               WHERE source.user_id=? AND source.plan_key=? AND source.source_key=? AND NOT parent.deleted""",
+            (self.user_id, plan_key, source_key), connection=connection,
+        ).first
+        return self._project_plan_state(self._row_to_media_collection_item(row), row["dispatch_state"]) if row else None
+
+    def get_quick_ingest_source(self, plan_key: str, source_key: str) -> MediaCollectionItemRow:
+        """Inspect an existing owner-bound source without writing, locking, or admitting work."""
+        row = self._read_quick_ingest_source(plan_key, source_key)
+        if row is None:
+            raise KeyError("quick_ingest_plan_source_not_found")
+        return row
+
+    def claim_quick_ingest_source(
+        self,
+        plan_key: str,
+        source_key: str,
+        retry_count: int = 0,
+        idempotency_key: str | None = None,
+        source_url: str | None = None,
+    ) -> tuple[bool, MediaCollectionItemRow]:
+        """Admit at most one dispatch for an initial source or a confirmed terminal retry."""
+        with self.transaction() as conn:
+            binding, row = self._locked_quick_ingest_source(conn, plan_key, source_key)
+            if row.media_id is not None or row.content_item_id is not None or binding["claimed_attempt"] >= retry_count:
+                return False, row
+            if retry_count:
+                if (
+                    row.status not in {"submit_failed", "failed", "cancelled"}
+                    or not idempotency_key
+                    or retry_count != row.retry_count + 1
+                    or idempotency_key == row.idempotency_key
+                ):
+                    return False, row
+            elif row.status != "planned" or row.latest_job_id is not None or row.retry_count != 0:
+                return False, row
+            attempt_key = idempotency_key or row.require_plan_attempt_key()
+            applied = self.backend.execute(
+                "UPDATE media_collection_items SET status='processing', retry_count=?, idempotency_key=?, "
+                "source_url=?, latest_job_id=NULL, latest_run_id=NULL, error_summary=NULL, updated_at=? "
+                "WHERE user_id=? AND id=? AND status=? AND retry_count=? AND media_id IS NULL AND content_item_id IS NULL",
+                (
+                    retry_count,
+                    attempt_key,
+                    source_url or row.source_url,
+                    _utcnow_iso(),
+                    self.user_id,
+                    row.id,
+                    row.status,
+                    row.retry_count,
+                ),
+                connection=conn,
+            )
+            if applied.rowcount:
+                if retry_count:
+                    self._record_quick_ingest_attempt(conn, row.id, retry_count, attempt_key)
+                if source_url and row.source_url != source_url:
+                    metadata = {
+                        k: v
+                        for k, v in row.metadata.items()
+                        if k not in {"playlist_id", "playlist_title", "duplicate_policy"}
+                    }
+                    self.backend.execute(
+                        "UPDATE media_collection_items SET normalized_source_id=NULL, source_kind=NULL, "
+                        "duplicate_status='unknown', metadata_json=? WHERE user_id=? AND id=?",
+                        (self._json_dumps_or_none(metadata), self.user_id, row.id),
+                        connection=conn,
+                    )
+                self.backend.execute(
+                    "UPDATE quick_ingest_plan_sources SET claimed_attempt=?, attempt_key=?, dispatch_state='reserved' "
+                    "WHERE user_id=? AND plan_key=? AND source_key=?",
+                    (retry_count, attempt_key, self.user_id, plan_key, source_key),
+                    connection=conn,
+                )
+            return bool(applied.rowcount), self._project_plan_state(
+                self.get_media_collection_item(row.id, connection=conn),
+                "reserved" if applied.rowcount else binding["dispatch_state"],
+            )
+
+    def begin_quick_ingest_dispatch(
+        self,
+        plan_key: str,
+        source_key: str,
+        *,
+        retry_count: int,
+        idempotency_key: str,
+        transport: str,
+    ) -> tuple[bool, MediaCollectionItemRow]:
+        """Consume a reservation at the receiving endpoint before the first provider call."""
+        if transport not in {"jobs", "web", "add"}:
+            raise ValueError("Unknown Quick Ingest transport")
+        with self.transaction() as conn:
+            binding, row = self._locked_quick_ingest_source(conn, plan_key, source_key)
+            required_state = "fallback_ready" if transport == "add" else "reserved"
+            if (
+                row.dispatch_state != required_state
+                or binding["claimed_attempt"] != retry_count
+                or binding["attempt_key"] != idempotency_key
+                or row.latest_job_id is not None
+            ):
+                return False, row
+            self.backend.execute(
+                "UPDATE quick_ingest_plan_sources SET dispatch_state=? WHERE user_id=? AND plan_key=? AND source_key=?",
+                (transport, self.user_id, plan_key, source_key),
+                connection=conn,
+            )
+            return True, self._project_plan_state(row, transport)
+
+    def finish_quick_ingest_dispatch(
+        self,
+        plan_key: str,
+        source_key: str,
+        *,
+        retry_count: int,
+        idempotency_key: str,
+        transport: str,
+        status: str,
+        media_id: int | None = None,
+        latest_job_id: str | None = None,
+        error_summary: str | None = None,
+    ) -> MediaCollectionItemRow:
+        """Write the receiver's receipt only for the exact consumed source attempt."""
+        if status not in {"processing", "completed", "skipped_existing", "failed", "cancelled", "fallback_ready"}:
+            raise ValueError("Unsupported Quick Ingest receipt")
+        if error_summary is not None and (status != "failed" or len(error_summary) > 1000):
+            raise ValueError("Only a failed receipt can record a bounded error summary.")
+        if status == "completed" and media_id is None:
+            raise ValueError("A saved receipt requires its original positive media ID.")
+        if media_id is not None and (
+            status not in {"completed", "skipped_existing"}
+            or type(media_id) is not int
+            or not 0 < media_id <= 2**63 - 1
+        ):
+            raise ValueError("This receipt cannot attach the supplied media ID.")
+        if latest_job_id is not None and transport != "jobs":
+            raise ValueError("Only a Jobs receiver may attach a queued identity.")
+        if status == "processing" and (transport != "jobs" or not latest_job_id):
+            raise ValueError("A queued receipt requires its original Jobs ID")
+        if status == "fallback_ready" and transport != "jobs":
+            raise ValueError("Only a rejected Jobs submission may select the direct fallback")
+        with self.transaction() as conn:
+            binding, row = self._locked_quick_ingest_source(conn, plan_key, source_key)
+            if (
+                binding["claimed_attempt"] != retry_count
+                or binding["attempt_key"] != idempotency_key
+                or binding["dispatch_state"] != transport
+            ):
+                raise QuickIngestPlanConflict("The original source attempt no longer owns this receipt")
+            if row.latest_job_id and (
+                status == "fallback_ready" or row.latest_job_id != latest_job_id
+            ):
+                raise QuickIngestPlanConflict("The source has a different accepted job")
+            if row.media_id and media_id and row.media_id != media_id:
+                raise QuickIngestPlanConflict("The source already has a different saved media ID")
+            if (
+                row.status in {"completed", "skipped_existing"}
+                or row.media_id is not None
+                or row.content_item_id is not None
+            ):
+                return row
+            state = (
+                "fallback_ready" if status == "fallback_ready" else transport if status == "processing" else "settled"
+            )
+            self.backend.execute(
+                "UPDATE media_collection_items SET status=?, media_id=COALESCE(?, media_id), "
+                "latest_job_id=COALESCE(?, latest_job_id), error_summary=COALESCE(?, error_summary), "
+                "updated_at=? WHERE user_id=? AND id=?",
+                (
+                    "processing" if status == "fallback_ready" else status,
+                    media_id,
+                    latest_job_id,
+                    error_summary,
+                    _utcnow_iso(),
+                    self.user_id,
+                    row.id,
+                ),
+                connection=conn,
+            )
+            self.backend.execute(
+                "UPDATE quick_ingest_plan_sources SET dispatch_state=? WHERE user_id=? AND plan_key=? AND source_key=?",
+                (state, self.user_id, plan_key, source_key),
+                connection=conn,
+            )
+            return self._project_plan_state(self.get_media_collection_item(row.id, connection=conn), state)
+
+    def _plan_source_for_item(self, item_id: int) -> dict[str, Any] | None:
+        return self.backend.execute(
+            "SELECT plan_key, source_key FROM quick_ingest_plan_sources WHERE user_id=? AND item_id=?",
+            (self.user_id, item_id),
+        ).first
+
+    def is_quick_ingest_plan_attempt_key(self, key: str) -> bool:
+        """Identify an owner-scoped key permanently reserved by a plan source."""
+        return (
+            self.backend.execute(
+                "SELECT 1 AS found FROM quick_ingest_plan_attempts WHERE user_id=? AND attempt_key=?",
+                (self.user_id, key),
+            ).first
+            is not None
+        )
+
+    def is_quick_ingest_plan_item(self, item_id: int) -> bool:
+        """Identify sources that must be submitted through their reserved receiver."""
+        return self._plan_source_for_item(item_id) is not None
+
+    def apply_quick_ingest_item_patch(
+        self,
+        item_id: int,
+        fields: dict[str, Any],
+    ) -> MediaCollectionItemRow | None:
+        """Fence client receipt projections and let ordinary metadata edits use the usual route."""
+        protected = {
+            "status",
+            "retry_count",
+            "idempotency_key",
+            "media_id",
+            "content_item_id",
+            "latest_job_id",
+            "latest_run_id",
+            "source_url",
+            "error_summary",
+            "warnings",
+        }
+        if not (protected & fields.keys()) or not (binding := self._plan_source_for_item(item_id)):
+            return None
+        with self.transaction() as conn:
+            _, row = self._locked_quick_ingest_source(conn, **binding)
+            if fields.get("retry_count") != row.retry_count or fields.get("idempotency_key") != row.idempotency_key:
+                raise QuickIngestPlanConflict("This projection does not identify the current source attempt.")
+            if "source_url" in fields:
+                raise QuickIngestPlanConflict("Claim the corrected source with its next attempt.")
+            changes = {key: value for key, value in fields.items() if getattr(row, key) != value}
+            # Only the receiver and its known job can establish a result. The client
+            # can stop an unsent reservation before a receiver acquires the same lock.
+            cancel_reserved = changes.get("status") == "cancelled" and row.dispatch_state in {"reserved", "unclaimed"}
+            allowed = {"status", "error_summary"} if cancel_reserved else set()
+            if changes.keys() & (protected - allowed):
+                raise QuickIngestPlanConflict("This projection conflicts with the stored processing receipt.")
+            if cancel_reserved:
+                self.backend.execute(
+                    "UPDATE quick_ingest_plan_sources SET dispatch_state='settled' WHERE user_id=? AND item_id=?",
+                    (self.user_id, item_id),
+                    connection=conn,
+                )
+            return self.update_media_collection_item(item_id, connection=conn, **changes)
+
+    def _project_known_plan_job(
+        self,
+        item_id: int,
+        status: str,
+        job_id: str | None,
+        media_id: int | None = None,
+    ) -> MediaCollectionItemRow | None:
+        """Ignore old/unknown workers; Jobs owns retryable failure until its terminal transition."""
+        binding = self._plan_source_for_item(item_id)
+        if binding is None:
+            return None
+        row = self.get_quick_ingest_source(**binding)
+        if not job_id or row.latest_job_id != job_id or row.dispatch_state != "jobs" or media_id is None:
+            return row
+        try:
+            return self.finish_quick_ingest_dispatch(
+                **binding,
+                retry_count=row.retry_count,
+                idempotency_key=row.require_plan_attempt_key(),
+                transport="jobs",
+                status=status,
+                media_id=media_id,
+                latest_job_id=job_id,
+            )
+        except QuickIngestPlanConflict:
+            return self.get_quick_ingest_source(**binding)
 
     def create_media_collection(
         self,
@@ -3560,6 +4031,7 @@ class CollectionsDatabase:
         source_url: str | None = None,
         metadata: dict[str, Any] | None = None,
         default_tags: Iterable[str] | None = None,
+        connection: Any = None,
     ) -> MediaCollectionRow:
         """Create a stable, user-owned media collection."""
         name_value = str(name or "").strip()
@@ -3591,13 +4063,14 @@ class CollectionsDatabase:
                 now,
                 now,
             ),
+            connection=connection,
         )
         collection_id = self._extract_lastrowid(result)
         if not collection_id:
             raise DatabaseError("Failed to insert media collection")
-        return self.get_media_collection(collection_id)
+        return self.get_media_collection(collection_id, connection=connection)
 
-    def get_media_collection(self, collection_id: int) -> MediaCollectionRow:
+    def get_media_collection(self, collection_id: int, *, connection: Any = None, include_items: bool = True) -> MediaCollectionRow:
         """Return collection metadata plus ordered membership."""
         row = self.backend.execute(
             """
@@ -3611,10 +4084,11 @@ class CollectionsDatabase:
                 self.user_id,
                 self._coerce_bool_flag(False, postgres=self.backend.backend_type == BackendType.POSTGRESQL),
             ),
+            connection=connection,
         ).first
         if not row:
             raise KeyError("media_collection_not_found")
-        return self._row_to_media_collection(row)
+        return self._row_to_media_collection(row, connection=connection, include_items=include_items)
 
     def list_media_collections(
         self,
@@ -3721,7 +4195,7 @@ class CollectionsDatabase:
         )
         return True
 
-    def _next_media_collection_ordinal(self, collection_id: int) -> int:
+    def _next_media_collection_ordinal(self, collection_id: int, connection: Any = None) -> int:
         row = self.backend.execute(
             """
             SELECT COALESCE(MAX(ordinal), 0) + 1 AS next_ordinal
@@ -3729,6 +4203,7 @@ class CollectionsDatabase:
             WHERE collection_id = ? AND user_id = ?
             """,
             (int(collection_id), self.user_id),
+            connection=connection,
         ).first
         if not row:
             return 1
@@ -3740,6 +4215,7 @@ class CollectionsDatabase:
         collection_id: int,
         ordinal: int,
         exclude_item_id: int | None = None,
+        connection: Any = None,
     ) -> None:
         if exclude_item_id is None:
             row = self.backend.execute(
@@ -3750,6 +4226,7 @@ class CollectionsDatabase:
                 LIMIT 1
                 """,
                 (int(collection_id), self.user_id, int(ordinal)),
+                connection=connection,
             ).first
         else:
             row = self.backend.execute(
@@ -3760,6 +4237,7 @@ class CollectionsDatabase:
                 LIMIT 1
                 """,
                 (int(collection_id), self.user_id, int(ordinal), int(exclude_item_id)),
+                connection=connection,
             ).first
         if row:
             raise ValueError("media_collection_item_ordinal_duplicate")
@@ -3788,21 +4266,22 @@ class CollectionsDatabase:
         warnings: Iterable[str] | None = None,
         metadata: dict[str, Any] | None = None,
         tags: Iterable[str] | None = None,
+        connection: Any = None,
     ) -> MediaCollectionItemRow:
         """Add an unresolved planned/source item to a media collection."""
-        self.get_media_collection(collection_id)
+        self.get_media_collection(collection_id, connection=connection, include_items=False)
         source_url_value = str(source_url or "").strip()
         if not source_url_value:
             raise ValueError("media_collection_item_source_url_required")
         if metadata is not None and not isinstance(metadata, dict):
             raise ValueError("media_collection_item_metadata_must_be_object")
         status_value = self._normalize_collection_status(status)
-        ordinal_value = int(ordinal) if ordinal is not None else self._next_media_collection_ordinal(collection_id)
+        ordinal_value = int(ordinal) if ordinal is not None else self._next_media_collection_ordinal(collection_id, connection)
         if ordinal_value < 1:
             raise ValueError("media_collection_item_ordinal_invalid")
         self._ensure_media_collection_ordinal_available(
             collection_id=collection_id,
-            ordinal=ordinal_value,
+            ordinal=ordinal_value, connection=connection,
         )
 
         now = _utcnow_iso()
@@ -3842,6 +4321,7 @@ class CollectionsDatabase:
                 now,
                 now,
             ),
+            connection=connection,
         )
         item_id = self._extract_lastrowid(result)
         if not item_id:
@@ -3849,10 +4329,11 @@ class CollectionsDatabase:
         self.backend.execute(
             "UPDATE media_collections SET updated_at = ? WHERE id = ? AND user_id = ?",
             (now, int(collection_id), self.user_id),
+            connection=connection,
         )
-        return self.get_media_collection_item(item_id)
+        return self.get_media_collection_item(item_id, connection=connection)
 
-    def get_media_collection_item(self, item_id: int) -> MediaCollectionItemRow:
+    def get_media_collection_item(self, item_id: int, *, connection: Any = None) -> MediaCollectionItemRow:
         row = self.backend.execute(
             """
             SELECT id, user_id, collection_id, ordinal, source_url, normalized_source_id,
@@ -3864,6 +4345,7 @@ class CollectionsDatabase:
             WHERE id = ? AND user_id = ?
             """,
             (int(item_id), self.user_id),
+            connection=connection,
         ).first
         if not row:
             raise KeyError("media_collection_item_not_found")
@@ -3921,9 +4403,10 @@ class CollectionsDatabase:
         warnings: Iterable[str] | None = None,
         metadata: dict[str, Any] | None = None,
         tags: Iterable[str] | None = None,
+        connection: Any = None,
     ) -> MediaCollectionItemRow:
         """Update a planned/resolved collection item without touching content_items."""
-        existing = self.get_media_collection_item(item_id)
+        existing = self.get_media_collection_item(item_id, connection=connection)
         fields: list[str] = []
         params: list[Any] = []
 
@@ -3939,6 +4422,7 @@ class CollectionsDatabase:
                 collection_id=existing.collection_id,
                 ordinal=ordinal_value,
                 exclude_item_id=existing.id,
+                connection=connection,
             )
             add_field("ordinal", ordinal_value)
         if title is not None:
@@ -3981,13 +4465,13 @@ class CollectionsDatabase:
         add_field("updated_at", now)
         self.backend.execute(
             f"UPDATE media_collection_items SET {', '.join(fields)} WHERE id = ? AND user_id = ?",  # nosec B608
-            (*params, int(item_id), self.user_id),
+            (*params, int(item_id), self.user_id), connection=connection,
         )
         self.backend.execute(
             "UPDATE media_collections SET updated_at = ? WHERE id = ? AND user_id = ?",
-            (now, existing.collection_id, self.user_id),
+            (now, existing.collection_id, self.user_id), connection=connection,
         )
-        return self.get_media_collection_item(item_id)
+        return self.get_media_collection_item(item_id, connection=connection)
 
     def update_media_collection_item_status(
         self,
@@ -4000,6 +4484,8 @@ class CollectionsDatabase:
         latest_run_id: int | None = None,
     ) -> MediaCollectionItemRow:
         """Update processing status without losing source metadata."""
+        if projected := self._project_known_plan_job(item_id, status, latest_job_id):
+            return projected
         return self.update_media_collection_item(
             item_id,
             status=status,
@@ -4020,6 +4506,8 @@ class CollectionsDatabase:
         latest_run_id: int | None = None,
     ) -> MediaCollectionItemRow:
         """Resolve a planned item to an existing or newly created media row."""
+        if projected := self._project_known_plan_job(item_id, status, latest_job_id, media_id):
+            return projected
         return self.update_media_collection_item(
             item_id,
             status=status,

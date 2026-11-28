@@ -5,6 +5,7 @@ import pytest
 from tldw_Server_API.app.core.DB_Management.backends.base import DatabaseError
 from tldw_Server_API.app.core.DB_Management.backends.factory import DatabaseBackendFactory
 from tldw_Server_API.app.core.DB_Management.Collections_DB import CollectionsDatabase
+from tldw_Server_API.app.core.DB_Management.scope_context import scoped_context
 
 
 @pytest.fixture
@@ -279,3 +280,100 @@ def test_nonowner_collections_reconciles_templates_and_projects_per_user(migrate
     assert count == 1 and rows[0].user_id == "1"  # nosec B101 -- second tenant also receives its own template.
     assert alice.get_audiobook_project(old[0].id).project_id == "x01-project-1"  # nosec B101 -- per-user backfill survives schema separation.
     assert bob.get_audiobook_project(old[1].id).project_id == "x01-project-2"  # nosec B101 -- later reconciliation preserves the other user.
+
+
+def test_pre_plan_postgres_migrates_before_serving_role_reuses_bindings(migrated_collections_serving):
+    from psycopg import sql
+
+    owner_backend, server_backend, retained = migrated_collections_serving
+    owner = CollectionsDatabase.from_backend("1", owner_backend)
+    old = owner.create_media_collection(name="Original", kind="conference")
+    for statement in ("DROP TABLE quick_ingest_plan_attempts", "DROP TABLE quick_ingest_plan_sources",
+                      "DROP TABLE quick_ingest_plans"):
+        owner_backend.execute(statement)
+    CollectionsDatabase._bootstrapped_backend_targets.clear()
+    with pytest.raises(DatabaseError):
+        CollectionsDatabase.from_backend("1", server_backend)
+    owner.ensure_schema()
+    with owner_backend.transaction() as conn:
+        conn.execute(sql.SQL("GRANT SELECT, INSERT, UPDATE, DELETE ON ALL TABLES IN SCHEMA public TO {}").format(
+            sql.Identifier(server_backend.config.pg_user)))
+    serving = CollectionsDatabase.from_backend("1", server_backend)
+    assert serving.get_media_collection(old.id).name == "Original"
+    args = ("draft", {"name": "Original", "kind": "conference"}, [("one", {"source_url": "url"})])
+    with scoped_context(user_id=1):
+        collection, rows = serving.put_quick_ingest_plan(*args)
+        assert collection != old.id and serving.put_quick_ingest_plan(*args)[1]["one"].id == rows["one"].id
+        assert serving.claim_quick_ingest_source("draft", "one")[0]
+    assert serving.list_output_templates(q=retained.name, limit=1, offset=0)[1] == 1
+
+
+@pytest.mark.parametrize("table", ["quick_ingest_plans", "quick_ingest_plan_sources", "quick_ingest_plan_attempts"])
+def test_plan_ledger_isolates_serving_role_reads_and_writes(migrated_collections_serving, table):
+    """Even an unfiltered statement sees only the authenticated owner's ledger rows."""
+    from psycopg import errors, sql
+
+    _, backend, _ = migrated_collections_serving
+    select_owners = sql.SQL("SELECT user_id FROM {}").format(sql.Identifier(table))
+    change_owner = sql.SQL("UPDATE {} SET user_id=%s WHERE user_id=%s").format(sql.Identifier(table))
+    for user_id in (1, 2):
+        with scoped_context(user_id=user_id):
+            db = CollectionsDatabase.from_backend(user_id, backend)
+            db.put_quick_ingest_plan("shared-key", {"name": "Shared", "kind": "conference"}, [("source", {"source_url": "url"})])
+    for user_id in (1, 2):
+        with scoped_context(user_id=user_id):
+            with backend.transaction() as conn:
+                assert [row["user_id"] for row in conn.execute(select_owners)] == [str(user_id)]
+            with pytest.raises(errors.InsufficientPrivilege), backend.transaction() as conn:
+                conn.execute(change_owner, ("99", str(user_id)))
+    with scoped_context(user_id=None), backend.transaction() as conn:
+        assert conn.execute(select_owners).fetchall() == []
+
+
+def test_plan_policy_upgrade_preserves_preexisting_bindings(migrated_collections_serving):
+    """Migrate populated ledgers in place and refuse a DML-only startup before that migration."""
+    from psycopg import sql
+
+    owner, backend, _ = migrated_collections_serving
+    args = ("draft", {"name": "Original", "kind": "conference"}, [("source", {"source_url": "url"})])
+    with scoped_context(user_id=1):
+        serving = CollectionsDatabase.from_backend(1, backend)
+        collection, rows = serving.put_quick_ingest_plan(*args)
+    with owner.transaction() as conn:
+        for table in ("quick_ingest_plans", "quick_ingest_plan_sources", "quick_ingest_plan_attempts"):
+            conn.execute(sql.SQL("ALTER TABLE {} DISABLE ROW LEVEL SECURITY").format(sql.Identifier(table)))
+            conn.execute(sql.SQL("DROP POLICY IF EXISTS quick_ingest_owner ON {}").format(sql.Identifier(table)))
+    with pytest.raises(DatabaseError, match="owner migration"):
+        CollectionsDatabase.from_backend(1, backend)
+    CollectionsDatabase.from_backend(1, owner).ensure_schema()
+    with scoped_context(user_id=1):
+        serving = CollectionsDatabase.from_backend(1, backend)
+        recovered, same = serving.put_quick_ingest_plan(*args)
+        assert (recovered, same["source"].id, same["source"].idempotency_key) == (
+            collection, rows["source"].id, rows["source"].idempotency_key,
+        )
+
+
+@pytest.mark.parametrize("ddl", [
+    "ALTER TABLE quick_ingest_plan_sources NO FORCE ROW LEVEL SECURITY",
+    "ALTER POLICY quick_ingest_owner ON quick_ingest_plan_attempts WITH CHECK (true)",
+    "ALTER POLICY quick_ingest_owner ON quick_ingest_plan_sources USING (true)",
+    "CREATE POLICY unscoped_read ON quick_ingest_plans FOR SELECT USING (true)",
+])
+def test_serving_role_requires_enforced_owner_plan_policies(migrated_collections_serving, ddl):
+    owner, backend, _ = migrated_collections_serving
+    owner.execute(ddl)
+    with pytest.raises(DatabaseError, match="owner migration"):
+        CollectionsDatabase.from_backend(1, backend)
+
+
+def test_owner_migration_refuses_an_unexpected_permissive_plan_policy(pg_restricted_backend):
+    """A single migration-and-serving role needs the same check as a split-role deployment."""
+    owner = CollectionsDatabase.from_backend(1, pg_restricted_backend)
+    with scoped_context(user_id=1):
+        owner.put_quick_ingest_plan("draft", {"name": "Owned", "kind": "conference"}, [("source", {"source_url": "url"})])
+    with scoped_context(user_id=2):
+        assert pg_restricted_backend.execute("SELECT user_id FROM quick_ingest_plans").rows == []
+    pg_restricted_backend.execute("CREATE POLICY custom_read ON quick_ingest_plans FOR SELECT USING (true)")
+    with pytest.raises(DatabaseError, match="owner migration"):
+        owner.ensure_schema()

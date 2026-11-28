@@ -91,7 +91,7 @@ for (const [device, width, height] of [['desktop', 1280, 800], ['mobile', 390, 8
     await dialog.getByRole('button', { name: 'Confirm and save 2 sources' }).click();
     await expect(dialog.getByRole('heading', { name: '2 saved to Media' })).toBeVisible();
     expect([...fixture.jobs.values()].map(job => job.source_url)).toEqual(items.map(item => item.source_url));
-    const submissions = fixture.requests.filter(request => request.method === 'POST' && request.path === '/api/v1/media/ingest/jobs');
+    const submissions = fixture.requests.filter(request => request.method === 'POST' && (request.path === '/api/v1/media/ingest/jobs' || request.path.endsWith('/dispatch/jobs')));
     expect(submissions.map(request => request.body.overwrite_existing)).toEqual([true, false]);
   });
 }
@@ -282,3 +282,129 @@ test('checks an interrupted job without uploading it again', async ({ page }) =>
   await expect(dialog.getByRole('heading', { name: '1 saved to Media' })).toBeVisible();
   expect(fixture.jobs.size).toBe(1);
 });
+
+for (const width of [320, 390, 1280]) {
+  test(`edits batch metadata within the modal at ${width}px`, async ({ page }, info) => {
+    const phone = width < 600;
+    await page.setViewportSize({ width, height: phone ? 844 : 800 });
+    const fixture = await installBrowserFixture(page, { webUrl, processingPolls: 0 });
+    const dialog = await openIngest(page);
+    const urls = [
+      'https://archive.example.org/workshop/shoreline.mp4',
+      'https://archive.example.org/workshop/interviews.mp4' + (width === 320 ? '?record=' + 'b'.repeat(100) : ''),
+    ];
+    await addLinks(dialog, urls);
+    await useQuickPreset(dialog);
+    await dialog.getByRole('button', { name: 'Hide settings' }).click();
+    const batch = dialog.getByRole('region', { name: 'Conference batch metadata' });
+    await batch.getByLabel('Collection name').fill('Coastal oral histories');
+    await batch.getByLabel('Conference name').fill('Field Recording Forum');
+    await batch.getByLabel('Event year').fill('2026');
+    await batch.getByLabel('Shared tags').fill('workshop');
+    const first = batch.getByRole('group', { name: 'Source 1', exact: true });
+    const second = batch.getByRole('group', { name: 'Source 2', exact: true });
+    const secondToggle = second.getByRole('button');
+    if (phone) {
+      await expect(first.getByRole('button')).toHaveAttribute('aria-expanded', 'true');
+      await expect(second.getByRole('textbox')).toHaveCount(0);
+      await secondToggle.focus();
+      await secondToggle.press('Enter');
+      await expect(secondToggle).toBeFocused();
+      expect(await second.evaluate(el => el.scrollWidth - el.clientWidth)).toBeLessThanOrEqual(1);
+    }
+    await second.getByLabel('Title override for item 2').fill('Interview techniques');
+    await second.getByLabel('Speaker for item 2').fill('Sam Rivera');
+    if (phone) await secondToggle.click();
+    await second.getByRole('checkbox').uncheck();
+    await expect(batch.getByText('1 selected')).toBeVisible();
+    const title = first.getByLabel('Title override for item 1');
+    const speaker = first.getByLabel('Speaker for item 1');
+    const track = first.getByLabel('Track for item 1');
+    const tags = first.getByLabel('Tags for item 1');
+    await title.fill('Listening to tides');
+    await speaker.fill('Maya Chen');
+    await track.fill('Fieldwork');
+    await tags.fill('coast, audio');
+    await tags.press('Enter');
+
+    const editorBox = (await batch.boundingBox())!;
+    for (const control of [title, speaker, track, tags, first.getByRole('checkbox'), second.getByRole('checkbox')]) {
+      const box = (await control.boundingBox())!;
+      expect(box.x).toBeGreaterThanOrEqual(Math.max(0, editorBox.x));
+      expect(box.x + box.width).toBeLessThanOrEqual(Math.min(width, editorBox.x + editorBox.width) + 1);
+    }
+    const scrollAreas = dialog.locator('.qi-web-scroll:visible, .qi-metadata-editor, .qi-metadata-list, .qi-metadata-row');
+    for (const area of await scrollAreas.all()) {
+      expect(await area.evaluate(el => el.scrollWidth - el.clientWidth)).toBeLessThanOrEqual(1);
+    }
+    if (phone) {
+      expect((await track.boundingBox())!.y).toBeGreaterThan((await speaker.boundingBox())!.y);
+      for (const field of [title, speaker, track, tags]) expect((await field.boundingBox())!.height).toBeGreaterThanOrEqual(44);
+    } else {
+      await expect(first.getByRole('button')).toHaveCount(0);
+      expect((await track.boundingBox())!.y).toBe((await speaker.boundingBox())!.y);
+    }
+    const target = phone ? batch.locator('.qi-metadata-editor') : batch;
+    await target.evaluate(el => el.scrollIntoView({ block: 'center' }));
+    if (width !== 320) await capture(page, info, 'batch-metadata-' + (phone ? 'mobile' : 'desktop'));
+
+    // A partially typed tag and keyboard focus must follow the source when columns reflow.
+    if (!phone) {
+      const secondTags = second.getByLabel('Tags for item 2');
+      await secondTags.fill('archive, ');
+      await page.setViewportSize({ width: 390, height: 844 });
+      await expect(secondTags).toBeFocused();
+      await expect(secondTags).toHaveValue('archive, ');
+      await expect(second.getByRole('checkbox')).not.toBeChecked();
+      await expect(second.getByLabel('Speaker for item 2')).toHaveValue('Sam Rivera');
+    }
+
+    await dialog.getByRole('button', { name: 'Save 1 source' }).click();
+    await expect(dialog.getByRole('heading', { name: '1 saved to Media' })).toBeVisible();
+    expect(fixture.collectionPlans.size).toBe(1);
+    const [plan] = fixture.collectionPlans.values();
+    expect([...plan.items.values()]).toEqual([expect.objectContaining({
+      source_url: urls[0], title: 'Listening to tides', speaker: 'Maya Chen',
+      track: 'Fieldwork', tags: ['workshop', 'coast', 'audio'],
+    })]);
+    expect([...fixture.jobs.values()].map(job => job.source_url)).toEqual([urls[0]]);
+  });
+}
+
+for (const [device, width] of [['desktop', 1280], ['mobile', 390]] as const) {
+  test(`reuses the same two collection sources after a lost setup response on ${device}`, async ({ page }, info) => {
+    await page.setViewportSize({ width, height: width < 600 ? 844 : 800 });
+    const fixture = await installBrowserFixture(page, { webUrl, processingPolls: 0 });
+    fixture.interruptPlanResponse = true;
+    const dialog = await openIngest(page);
+    const links = ['https://archive.example.org/talks/tides.mp4', 'https://archive.example.org/talks/birds.mp4'];
+    await addLinks(dialog, links);
+    await useQuickPreset(dialog);
+    await dialog.getByRole('button', { name: 'Hide settings' }).click();
+    await dialog.getByLabel('Collection name').fill('Coastal oral histories');
+    const titles = ['Estuary tides', 'Marsh birds'];
+    for (const [index, title] of titles.entries()) {
+      const group = dialog.getByRole('group', { name: 'Source ' + (index + 1), exact: true });
+      if (width < 600 && index > 0) await group.getByRole('button').click();
+      await group.getByLabel('Title override for item ' + (index + 1)).fill(title);
+    }
+    await dialog.getByRole('button', { name: 'Save 2 sources' }).click();
+    await expect.poll(() => fixture.collectionPlans.size).toBe(1);
+    const [original] = fixture.collectionPlans.values();
+    const originalSources = [...original.items].map(([key, item]) => [key, item.id, item.source_url]);
+    expect(originalSources).toHaveLength(2);
+    expect([...original.items.values()].map(item => item.title)).toEqual(titles);
+    await expect(dialog.getByRole('button', { name: 'Retry 2 failed sources' })).toBeVisible();
+    expect(fixture.jobs.size).toBe(0);
+    await capture(page, info, `collection-setup-interrupted-${device}`);
+
+    fixture.interruptPlanResponse = false;
+    await dialog.getByRole('button', { name: 'Retry 2 failed sources' }).click();
+    await expect(dialog.getByRole('heading', { name: '2 saved to Media' })).toBeVisible();
+    expect(fixture.collectionPlans.size).toBe(1);
+    expect([...original.items].map(([key, item]) => [key, item.id, item.source_url])).toEqual(originalSources);
+    expect([...fixture.jobs.values()].map(job => job.source_url).sort()).toEqual([...links].sort());
+    for (const title of titles) await expect(dialog.getByText(title, { exact: true })).toBeVisible();
+    await capture(page, info, `collection-setup-recovered-${device}`);
+  });
+}

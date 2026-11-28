@@ -328,11 +328,11 @@ def _controls(
     )
 
 
-def _live_controls(*, deadline_s: float) -> PreflightRuntimeControls:
+def _live_controls(*, deadline_s: float | None = None) -> PreflightRuntimeControls:
     loop = asyncio.get_running_loop()
     return PreflightRuntimeControls(
         RuntimeRequestContext(source="preflight", stage="preflight"),
-        deadline=loop.time() + deadline_s,
+        deadline=None if deadline_s is None else loop.time() + deadline_s,
         clock=loop.time,
     )
 
@@ -1553,7 +1553,7 @@ async def test_operations_without_playwright_timeout_are_deadline_bounded(
             assert selector == "a"
             return BlockingLocator()
 
-    controls = _live_controls(deadline_s=0.02)
+    controls = _live_controls()
     launcher = FakePlaywrightLauncher(
         context_factory=lambda events: FakeBrowserContext(
             events,
@@ -1575,6 +1575,8 @@ async def test_operations_without_playwright_timeout_are_deadline_bounded(
         }[operation]
         with pytest.raises(PreflightDeadlineExceeded):
             async with asyncio_timeout(0.2):
+                # Bound the blocking operation after the fake page is ready.
+                controls.deadline = asyncio.get_running_loop().time() + 0.02
                 await call()
     await controls.close(grace_s=0.02)
 

@@ -94,7 +94,8 @@ async def process_web_scraping_endpoint(
                         "warnings": [DUPLICATE_ANALYSIS_WARNING],
                     }
             # Summaries may use a default provider. Admit analysis before any page is fetched.
-            await usage_quota_deps.enforce_llm_quota(current_user.id)
+            with usage_quota_deps.media_analysis_quota_before_save():
+                await usage_quota_deps.enforce_llm_quota(current_user.id)
 
         # Usage logging is best-effort; never fail the request.
         with contextlib.suppress(Exception):

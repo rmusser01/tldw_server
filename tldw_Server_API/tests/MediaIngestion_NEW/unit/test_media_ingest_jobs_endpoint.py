@@ -93,6 +93,7 @@ def test_submit_media_ingest_jobs_creates_one_job_per_item(
     data = {
         "media_type": "document",
         "urls": "https://example.com/doc1",
+        "planned_item_ids": json.dumps(["101"]),
     }
     files = [
         ("files", ("sample.txt", upload_path.read_bytes(), "text/plain")),
@@ -114,6 +115,8 @@ def test_submit_media_ingest_jobs_creates_one_job_per_item(
     file_payload = next(item for item in payloads if item.get("source_kind") == "file")
 
     assert url_payload["source"] == "https://example.com/doc1"
+    assert url_payload["planned_item_id"] == "101"
+    assert "planned_item_id" not in file_payload
     assert file_payload["original_filename"] == "sample.txt"
     assert file_payload.get("temp_dir")
     assert Path(file_payload["source"]).exists()
@@ -128,11 +131,12 @@ async def test_uploaded_txt_worker_and_detail_preserve_exact_source(
     monkeypatch,
     tmp_path,
 ):
-    """Keep the source body intact through real upload, Jobs, chunking, and storage."""
+    """Keep uploaded bytes and the collection binding through retries, Jobs, and storage."""
     import tldw_Server_API.app.services.media_ingest_jobs_worker as worker
     from tldw_Server_API.app.api.v1.schemas.media_response_models import (
         MediaDetailResponse,
     )
+    from tldw_Server_API.app.core.DB_Management.Collections_DB import CollectionsDatabase
     from tldw_Server_API.app.core.DB_Management.media_db.api import (
         get_full_media_details_rich,
         get_media_by_id,
@@ -151,26 +155,33 @@ async def test_uploaded_txt_worker_and_detail_preserve_exact_source(
     )
     monkeypatch.setenv("USER_DB_BASE_DIR", str(tmp_path / "user_databases"))
 
-    response = media_ingest_jobs_client.post(
-        "/api/v1/media/ingest/jobs",
-        data={
-            "media_type": "document",
-            "perform_analysis": "false",
-            "overwrite_existing": "false",
-            "perform_chunking": "true",
-            "chunking_mode": "manual",
-            "generate_embeddings": "false",
-        },
-        files=[("files", ("F-SOURCE.txt", source, "text/plain"))],
-        headers=auth_headers,
-    )
+    with CollectionsDatabase.for_user("1") as db:
+        collection = db.create_media_collection(name="Talks", kind="conference")
+        item = db.add_media_collection_item(
+            collection_id=collection.id, source_url="local://F-SOURCE.txt", source_kind="file",
+            title="Observatory", speaker="Mira", track="Astronomy", tags=["stars"],
+        )
+    data = {
+        "media_type": "document", "perform_analysis": "false", "overwrite_existing": "false",
+        "perform_chunking": "true", "chunking_mode": "manual", "generate_embeddings": "false",
+        "media_collection_id": str(collection.id), "media_collection_item_id": str(item.id),
+        "idempotency_key": f"conference-retry-{item.id}-1",
+    }
+    files = [("files", ("F-SOURCE.txt", source, "text/plain"))]
+    response = media_ingest_jobs_client.post("/api/v1/media/ingest/jobs", data=data, files=files, headers=auth_headers)
     assert response.status_code == 200, response.text  # nosec B101 # pytest regression assertion.
     jm = JobManager()
     job = jm.get_job(response.json()["jobs"][0]["id"])
     try:
+        replay = media_ingest_jobs_client.post("/api/v1/media/ingest/jobs", data=data, files=files, headers=auth_headers)
+        assert replay.json() == response.json()
         assert Path(job["payload"]["source"]).read_bytes() == source  # nosec B101 # pytest regression assertion.
         result = await worker._handle_job(job, jm, worker._ProgressState())
         assert result["status"] == "Success", result  # nosec B101 # pytest regression assertion.
+        with CollectionsDatabase.for_user(job["owner_user_id"]) as db:
+            persisted = db.get_media_collection_item(item.id)
+            assert (persisted.status, persisted.media_id) == ("completed", result["media_id"])
+            assert (persisted.title, persisted.speaker, persisted.track, persisted.tags) == ("Observatory", "Mira", "Astronomy", ["stars"])
         with scoped_context(user_id=int(job["owner_user_id"]), is_admin=False):
             db = worker._create_db(job["owner_user_id"])
             try:
@@ -191,10 +202,12 @@ async def test_uploaded_txt_worker_and_detail_preserve_exact_source(
         shutil.rmtree(job["payload"]["temp_dir"], ignore_errors=True)
 
 
+@pytest.mark.parametrize("source_kind", ["url", "file"])
 def test_submit_media_ingest_jobs_preserves_collection_item_binding(
     media_ingest_jobs_client,
     monkeypatch,
     tmp_path,
+    source_kind,
 ):
     monkeypatch.setenv("JOBS_DB_PATH", str(tmp_path / "jobs.db"))
 
@@ -207,10 +220,12 @@ def test_submit_media_ingest_jobs_preserves_collection_item_binding(
         *,
         payload,
         batch_group=None,
+        owner_user_id,
         **_kwargs,
     ):
         captured.append({"payload": payload, "batch_group": batch_group})
-        return {"id": len(captured), "uuid": f"u{len(captured)}", "status": "queued"}
+        return {"id": len(captured), "uuid": f"u{len(captured)}", "status": "queued",
+                "payload": payload, "owner_user_id": owner_user_id}
 
     def fake_get_job(self, job_id):
         payload = captured[int(job_id) - 1]["payload"]
@@ -235,15 +250,18 @@ def test_submit_media_ingest_jobs_preserves_collection_item_binding(
     monkeypatch.setattr(jobs_manager.JobManager, "create_job", fake_create_job, raising=True)
     monkeypatch.setattr(jobs_manager.JobManager, "get_job", fake_get_job, raising=True)
 
+    data = {"media_type": "document", "media_collection_id": "42"}
+    files = None
+    if source_kind == "url":
+        data.update(urls="https://example.com/talk.pdf", planned_item_ids=json.dumps(["101"]),
+                    idempotency_keys=json.dumps(["conference-42-101-0"]))
+    else:
+        data.update(media_collection_item_id="101", idempotency_key="conference-42-101-0")
+        files = [("files", ("talk.txt", b"conference talk", "text/plain"))]
     resp = media_ingest_jobs_client.post(
         "/api/v1/media/ingest/jobs",
-        data={
-            "media_type": "video",
-            "urls": "https://www.youtube.com/watch?v=talk-1",
-            "media_collection_id": "42",
-            "planned_item_ids": json.dumps(["101"]),
-            "idempotency_keys": json.dumps(["conference-42-101-0"]),
-        },
+        data=data,
+        files=files,
         headers={"X-API-KEY": "test-api-key-12345"},
     )
 
@@ -267,6 +285,8 @@ def test_submit_media_ingest_jobs_preserves_collection_item_binding(
     assert status_body["collection_id"] == "42"
     assert status_body["planned_item_id"] == "101"
     assert status_body["idempotency_key"] == "conference-42-101-0"
+    if source_kind == "file":
+        shutil.rmtree(captured[0]["payload"]["temp_dir"])
 
 
 def test_submit_media_ingest_jobs_rejects_mismatched_collection_item_bindings(
@@ -299,6 +319,175 @@ def test_submit_media_ingest_jobs_rejects_mismatched_collection_item_bindings(
 
     assert resp.status_code == 422, resp.text
     assert "planned_item_ids must match the number of URL items" in resp.text
+
+
+def test_collection_url_retries_respect_owner_cancellation_batch_and_legacy_rows(media_ingest_jobs_client, auth_headers):
+    from tldw_Server_API.app.core.Jobs.manager import JobManager
+
+    jm = JobManager()
+    client = media_ingest_jobs_client
+    owner = 1
+    client.app.dependency_overrides[get_request_user] = lambda: User(id=owner, username=f"owner-{owner}")
+    urls = ["https://example.test/one.pdf", "https://example.test/two.pdf"]
+    keys = ["conference-retry-11-1", "conference-retry-12-1"]
+
+    def submit(sources, item_ids, item_keys, files=None):
+        return client.post("/api/v1/media/ingest/jobs", headers=auth_headers, files=files, data={
+            "media_type": "pdf", "urls": sources, "media_collection_id": "7",
+            "planned_item_ids": json.dumps(item_ids), "idempotency_keys": json.dumps(item_keys),
+        })
+
+    first = submit(urls, ["11", "12"], keys)
+    assert first.status_code == 200, first.text
+    original = first.json()
+    assert submit(urls, ["11", "12"], keys).json() == original
+    owner = 2
+    other = submit(urls, ["11", "12"], keys)
+    assert other.status_code == 200, other.text
+    assert {job["id"] for job in original["jobs"]}.isdisjoint(job["id"] for job in other.json()["jobs"])
+    assert all(jm.get_job(job["id"])["owner_user_id"] == "2" for job in other.json()["jobs"])
+    assert submit(urls, ["11", "12"], keys).json() == other.json()
+
+    before = len(jm.list_jobs(domain="media_ingest", owner_user_id="2"))
+    mixed = submit(["https://example.test/new.pdf", urls[0]], ["13", "11"], ["new-13", keys[0]])
+    assert mixed.status_code == 409, mixed.text
+    assert len(jm.list_jobs(domain="media_ingest", owner_user_id="2")) == before
+    cancelled = client.post("/api/v1/media/ingest/jobs/cancel", params={"batch_id": other.json()["batch_id"]}, headers=auth_headers)
+    assert cancelled.json()["cancelled"] == 2
+    assert all(jm.get_job(job["id"])["status"] == "queued" for job in original["jobs"])
+
+    legacy_key = "conference-retry-21-1"
+    legacy = jm.create_job(
+        domain="media_ingest", queue="default", job_type="media_ingest_item", owner_user_id="1",
+        idempotency_key=legacy_key, batch_group="older-batch",
+        payload={"source_kind": "url", "source": urls[0], "batch_id": "older-batch", "collection_id": "7",
+                 "planned_item_id": "21", "idempotency_key": legacy_key},
+    )
+    owner = 1
+    replay = submit([urls[0]], ["21"], [legacy_key]).json()
+    assert (replay["batch_id"], replay["jobs"][0]["id"]) == ("older-batch", legacy["id"])
+    owner = 2
+    assert submit([urls[0]], ["21"], [legacy_key]).json()["jobs"][0]["id"] != legacy["id"]
+
+    unbound = client.post("/api/v1/media/ingest/jobs", headers=auth_headers, data={
+        "media_type": "pdf", "urls": urls[0], "idempotency_key": "unbound-client-key",
+    })
+    assert unbound.status_code == 200, unbound.text
+    assert jm.get_job(unbound.json()["jobs"][0]["id"])["idempotency_key"] == "unbound-client-key"
+
+
+def test_collection_url_admission_race_keeps_each_acknowledged_job_in_its_batch(media_ingest_jobs_client, auth_headers, monkeypatch):
+    from tldw_Server_API.app.core.Jobs.manager import JobManager
+
+    jm = JobManager()
+    client = media_ingest_jobs_client
+    urls = ["https://example.test/first.pdf", "https://example.test/second.pdf"]
+    data = {"media_type": "pdf", "media_collection_id": "7", "urls": urls[1],
+            "planned_item_ids": json.dumps(["12"]), "idempotency_keys": json.dumps(["second"])}
+    original = client.post("/api/v1/media/ingest/jobs", headers=auth_headers, data=data).json()
+    # Model another request winning admission after our lookup completed.
+    monkeypatch.setattr(JobManager, "get_job_or_archived_by_idempotency_key", lambda *_args, **_kwargs: None)
+    assert client.post("/api/v1/media/ingest/jobs", headers=auth_headers, data=data).json() == original
+    data.update(urls=urls, planned_item_ids=json.dumps(["11", "12"]), idempotency_keys=json.dumps(["first", "second"]))
+    raced = client.post("/api/v1/media/ingest/jobs", headers=auth_headers, data=data).json()
+    assert [job["source"] for job in raced["jobs"]] == urls[:1]
+    assert len(raced["errors"]) == 1
+    assert jm.get_job(raced["jobs"][0]["id"])["batch_group"] == raced["batch_id"]
+    assert raced["batch_id"] != original["batch_id"]
+
+    def mismatched_admission(*_args, payload, **_kwargs):
+        return {"id": 999, "uuid": "another-owner", "owner_user_id": "2", "status": "queued", "payload": payload}
+    monkeypatch.setattr(JobManager, "create_job", mismatched_admission)
+    conflict = client.post("/api/v1/media/ingest/jobs", headers=auth_headers, data=data)
+    assert conflict.status_code == 409
+    assert "another-owner" not in conflict.text
+
+
+@pytest.mark.parametrize("kind", ["url", "file"])
+def test_collection_retry_survives_heavy_worker_routing_changes(kind, media_ingest_jobs_client, auth_headers, monkeypatch):
+    from tldw_Server_API.app.core.Jobs.manager import JobManager
+
+    jm = JobManager()
+    monkeypatch.setenv("MEDIA_INGEST_HEAVY_JOBS_WORKER_ENABLED", "false")
+    monkeypatch.setenv("MEDIA_INGEST_JOBS_ROUTE_HEAVY", "true")
+    data = {"media_type": "document", "enable_ocr": "true", "media_collection_id": "7",
+            "media_collection_item_id": "11", "idempotency_key": "conference-retry-11-1"}
+    files = None
+    if kind == "url":
+        data["urls"] = "https://example.test/talk.txt"
+    else:
+        files = [("files", ("talk.txt", b"conference talk", "text/plain"))]
+
+    def submit():
+        result = media_ingest_jobs_client.post("/api/v1/media/ingest/jobs", headers=auth_headers, data=data, files=files)
+        assert result.status_code == 200, result.text
+        return result.json()
+
+    first = submit()
+    first_job = jm.get_job(first["jobs"][0]["id"])
+    try:
+        monkeypatch.setenv("MEDIA_INGEST_HEAVY_JOBS_WORKER_ENABLED", "true")
+        assert submit() == first
+        with monkeypatch.context() as concurrent:
+            # Both contenders saw an empty receipt slot before either insert committed.
+            concurrent.setattr(JobManager, "get_job_or_archived_by_idempotency_key", lambda *_args, **_kwargs: None)
+            assert submit() == first
+        # A pre-cutover row can live on a queue that this deployment no longer selects.
+        data["media_collection_item_id"] = "22"
+        data["idempotency_key"] = legacy_key = "conference-retry-22-1"
+        payload = {**first_job["payload"], "batch_id": "older-heavy-batch", "planned_item_id": "22",
+                   "idempotency_key": legacy_key}
+        legacy = jm.create_job(
+            domain="media_ingest", queue="low", job_type="media_ingest_item", owner_user_id="1",
+            idempotency_key=legacy_key if kind == "url" else f"media-upload:1:{legacy_key}",
+            batch_group="older-heavy-batch", payload=payload,
+        )
+        monkeypatch.setenv("MEDIA_INGEST_HEAVY_JOBS_WORKER_ENABLED", "false")
+        restored = submit()
+        assert (restored["batch_id"], restored["jobs"][0]["id"]) == ("older-heavy-batch", legacy["id"])
+    finally:
+        if kind == "file":
+            shutil.rmtree(first_job["payload"]["temp_dir"], ignore_errors=True)
+
+
+def test_conflicting_native_receipt_preserves_existing_collection_status(
+    media_ingest_jobs_client, auth_headers, monkeypatch, tmp_path
+):
+    from tldw_Server_API.app.core.DB_Management.Collections_DB import CollectionsDatabase
+    from tldw_Server_API.app.core.Jobs.manager import JobManager
+
+    monkeypatch.setenv("USER_DB_BASE_DIR", str(tmp_path))
+    monkeypatch.setenv("JOBS_ARCHIVE_BEFORE_DELETE", "1")
+    manager = JobManager()
+    with CollectionsDatabase.for_user("1") as db:
+        collection = db.create_media_collection(name="Talks", kind="conference")
+        item = db.add_media_collection_item(
+            collection_id=collection.id, source_url="local://talk.txt", status="completed", media_id=42
+        )
+        job = manager.create_job(
+            owner_user_id="1",
+            domain="media_ingest",
+            queue="default",
+            job_type="media_ingest_item",
+            idempotency_key="media-upload:1:retry",
+            payload={"source_kind": "file"},
+        )
+        assert manager.cancel_job(job["id"])
+        assert manager.prune_jobs(statuses=["cancelled"], older_than_days=0, domain="media_ingest") == 1
+        response = media_ingest_jobs_client.post(
+            "/api/v1/media/ingest/jobs",
+            headers=auth_headers,
+            data={
+                "media_type": "document",
+                "media_collection_id": str(collection.id),
+                "media_collection_item_id": str(item.id),
+                "idempotency_key": "retry",
+            },
+            files=[("files", ("talk.txt", b"conference talk", "text/plain"))],
+        )
+        assert response.status_code == 409, response.text
+        assert "archived" in response.json()["detail"].lower()
+        assert db.get_media_collection_item(item.id) == item
 
 
 def test_submit_media_ingest_jobs_sanitizes_upload_staging_failure(
@@ -536,6 +725,9 @@ def test_submit_media_ingest_jobs_marks_planned_item_submit_failed_on_job_error(
     status_updates: list[dict] = []
 
     class _FakeCollectionsDatabase:
+        def is_quick_ingest_plan_item(self, item_id):
+            return False
+
         def update_media_collection_item_status(self, item_id, **kwargs):
             status_updates.append({"item_id": item_id, **kwargs})
 
@@ -593,6 +785,9 @@ def test_submit_media_ingest_jobs_keeps_created_url_jobs_when_later_url_fails(
     status_updates: list[dict] = []
 
     class _FakeCollectionsDatabase:
+        def is_quick_ingest_plan_item(self, item_id):
+            return False
+
         def update_media_collection_item_status(self, item_id, **kwargs):
             status_updates.append({"item_id": item_id, **kwargs})
 

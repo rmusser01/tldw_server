@@ -155,7 +155,9 @@ class FakePGConn:
 @pytest.fixture(autouse=True)
 def _stub_pg_bootstrap(monkeypatch):
     import tldw_Server_API.app.core.Jobs.manager as mgr
+    from tldw_Server_API.app.core.Jobs import pg_util
 
+    monkeypatch.setattr(pg_util, "negotiate_pg_dsn", lambda dsn: dsn)
     monkeypatch.setattr(mgr, "ensure_jobs_tables_pg", lambda dsn: dsn)
     monkeypatch.setattr(mgr, "ensure_job_counters_pg", lambda dsn: dsn, raising=False)
 
