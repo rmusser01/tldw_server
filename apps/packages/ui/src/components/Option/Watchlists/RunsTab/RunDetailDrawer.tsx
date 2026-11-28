@@ -19,7 +19,15 @@ import { useTranslation } from "react-i18next"
 import { LOADING_STATE_LABEL } from "@/design-system"
 import { Alert } from "@/components/ui"
 import { RecoveryCallout, type RecoveryState } from "@/components/ui/state"
-import { useInvalidateWatchlists, useSetWatchlistsQueryData, useWatchlistsQuery } from "@/hooks/useWatchlistsQuery"
+import {
+  useCancelWatchlistsQuery,
+  useInvalidateWatchlists,
+  useIsCurrentWatchlistsAccount,
+  useRefreshWatchlistsQuery,
+  useSetWatchlistsQueryData,
+  useWatchlistsAccountGeneration,
+  useWatchlistsQuery
+} from "@/hooks/useWatchlistsQuery"
 import { useWatchlistsStore } from "@/store/watchlists"
 import {
   cancelWatchlistRun,
@@ -39,12 +47,13 @@ import {
   buildWatchlistsRunWebSocketUrl,
   parseWatchlistsRunStreamPayload
 } from "@/services/watchlists-stream"
+import { isHostedTldwDeployment } from "@/services/tldw/deployment-mode"
 import { tldwClient } from "@/services/tldw/TldwApiClient"
 import type { PaginatedResponse, RunDetailResponse, RunStatus, ScrapedItem, WatchlistRunAudioStatus } from "@/types/watchlists"
 import { formatRelativeTime } from "@/utils/dateFormatters"
 import { safeExternalUrl } from "@/utils/safe-external-url"
 import { StatusTag } from "../shared"
-import { isWatchlistRunTerminal } from "../shared/runStatus"
+import { isWatchlistRunActive, isWatchlistRunTerminal } from "../shared/runStatus"
 import { mapWatchlistsError } from "../shared/watchlists-error"
 import { classifyRunFailure, getRunFailureHint } from "./run-notifications"
 import { usePatchRunLists } from "./usePatchRunLists"
@@ -73,6 +82,7 @@ type StreamConnectionState =
   | "error"
 
 const SOURCE_LOOKUP_LIMIT = 200
+const RUN_DETAILS_POLL_INTERVAL_MS = 5_000
 
 /** Maps failure kind → [i18n key, fallback] pairs for the "Common causes" section */
 const COMMON_CAUSES_BY_KIND: Record<string, [string, string][]> = {
@@ -126,6 +136,7 @@ export const RunDetailDrawer: React.FC<RunDetailDrawerProps> = ({
 }) => {
   const { t } = useTranslation(["watchlists", "common"])
   const { isConstrained } = useWatchlistsViewport()
+  const hostedMode = isHostedTldwDeployment()
   const outputMetadataLabels = useMemo(() => createOutputMetadataLabels(t), [t])
   const [itemsPagination, setItemsPagination] = useState({ runId, page: 1, size: 20 })
   const itemsPage = itemsPagination.runId === runId ? itemsPagination.page : 1
@@ -147,6 +158,8 @@ export const RunDetailDrawer: React.FC<RunDetailDrawerProps> = ({
   const reconnectAttemptRef = useRef(0)
   const manuallyClosedRef = useRef(false)
   const currentStatusRef = useRef<string | null>(null)
+  const runViewRef = useRef<symbol | null>(null)
+  const lastHostedRunRef = useRef<{ id: number; status: string; generation: number } | null>(null)
   const restoreFocusTargetRef = useRef<HTMLElement | null>(null)
   const wasOpenRef = useRef(false)
   const setActiveTab = useWatchlistsStore((s) => s.setActiveTab)
@@ -155,20 +168,31 @@ export const RunDetailDrawer: React.FC<RunDetailDrawerProps> = ({
   const openJobForm = useWatchlistsStore((s) => s.openJobForm)
 
   const invalidateWatchlists = useInvalidateWatchlists()
+  const cancelWatchlistsQuery = useCancelWatchlistsQuery()
+  const refreshWatchlistsQuery = useRefreshWatchlistsQuery()
+  const isCurrentWatchlistsAccount = useIsCurrentWatchlistsAccount()
+  const accountGeneration = useWatchlistsAccountGeneration()
   const setQueryData = useSetWatchlistsQueryData()
   const patchRunLists = usePatchRunLists()
   const runOpen = open && runId != null
+  const hostedLiveUpdates =
+    hostedMode && runOpen && streamingEnabled && cancelState !== "cancelling"
   const detailsQuery = useWatchlistsQuery("run-detail", runId, ({ signal }) => getRunDetails(runId!, signal), {
-    enabled: runOpen
+    enabled: runOpen,
+    refetchInterval: (query) =>
+      hostedLiveUpdates && isWatchlistRunActive(query.state.data?.status)
+        ? RUN_DETAILS_POLL_INTERVAL_MS
+        : false
   })
   const data = runOpen ? detailsQuery.data : undefined
   const loading = runOpen && detailsQuery.isLoading
-  const error = detailsQuery.error ? mapWatchlistsError(detailsQuery.error, {
+  const detailsError = detailsQuery.error ? mapWatchlistsError(detailsQuery.error, {
     t,
     context: t("watchlists:runs.detail.context", "run details"),
     fallbackMessage: t("watchlists:runs.detail.loadError", "Failed to load details"),
     operationLabel: t("watchlists:errors.operation.load", "load")
   }) : null
+  const error = hostedMode && data ? null : detailsError
 
   const sourceParams = { page: 1, size: SOURCE_LOOKUP_LIMIT }
   const { data: sources } = useWatchlistsQuery("sources", sourceParams, ({ signal }) => fetchWatchlistSources(sourceParams, signal), {
@@ -356,6 +380,7 @@ export const RunDetailDrawer: React.FC<RunDetailDrawerProps> = ({
   }, [open])
 
   useEffect(() => {
+    runViewRef.current = open && runId != null ? Symbol() : null
     setCancelState("idle")
     setStreamError(null)
     setLastStreamEventAt(null)
@@ -363,7 +388,40 @@ export const RunDetailDrawer: React.FC<RunDetailDrawerProps> = ({
       setItemsPagination({ runId, page: 1, size: 20 })
       setStreamState("disconnected")
     }
+    return () => {
+      runViewRef.current = null
+    }
   }, [open, runId])
+
+  const pollingRunDetails = hostedLiveUpdates && isWatchlistRunActive(data?.status)
+  useEffect(() => {
+    if (!pollingRunDetails || runId == null) return
+    return () => {
+      void cancelWatchlistsQuery("run-detail", runId)
+    }
+  }, [pollingRunDetails, runId, cancelWatchlistsQuery])
+
+  useEffect(() => {
+    if (!hostedLiveUpdates || !data || data.id !== runId) {
+      lastHostedRunRef.current = null
+      return
+    }
+    const previousRun = lastHostedRunRef.current
+    lastHostedRunRef.current = { id: runId, status: data.status, generation: accountGeneration }
+    const statusChanged = previousRun?.id === runId &&
+      previousRun.generation === accountGeneration && previousRun.status !== data.status
+    patchRunLists(data.id, {
+      status: data.status as RunStatus,
+      started_at: data.started_at,
+      finished_at: data.finished_at,
+      stats: data.stats,
+      error_msg: data.error_msg,
+      log_path: data.log_path
+    }, { statusChanged })
+    if (statusChanged && isWatchlistRunActive(previousRun.status) && isWatchlistRunTerminal(data.status)) {
+      void refreshWatchlistsQuery("items", { run_id: runId, page: itemsPage, size: itemsPageSize })
+    }
+  }, [accountGeneration, data, hostedLiveUpdates, itemsPage, itemsPageSize, patchRunLists, refreshWatchlistsQuery, runId])
 
   const itemsError = itemsQuery.error
   useEffect(() => {
@@ -374,7 +432,7 @@ export const RunDetailDrawer: React.FC<RunDetailDrawerProps> = ({
   }, [itemsError, runOpen])
 
   useEffect(() => {
-    if (!open || !runId || !streamingEnabled) {
+    if (!open || !runId || !streamingEnabled || hostedMode) {
       manuallyClosedRef.current = true
       closeStream()
       return
@@ -516,7 +574,7 @@ export const RunDetailDrawer: React.FC<RunDetailDrawerProps> = ({
       closeStream()
       setStreamState("disconnected")
     }
-  }, [open, runId, streamingEnabled, t, patchRunLists, setData])
+  }, [open, runId, streamingEnabled, hostedMode, t, patchRunLists, setData])
 
   // Calculate duration
   const calculateDuration = (): string => {
@@ -587,32 +645,43 @@ export const RunDetailDrawer: React.FC<RunDetailDrawerProps> = ({
   }
 
   const handleCancelRun = async () => {
-    if (!runId || cancelState === "cancelling") return
+    const runView = runViewRef.current
+    if (!runView || !runId || data?.id !== runId || cancelState === "cancelling") return
+    const isCurrentRun = () => runViewRef.current === runView && isCurrentWatchlistsAccount()
     setCancelState("cancelling")
     try {
       const result = await cancelWatchlistRun(runId)
       if (!result?.cancelled) {
+        if (!isCurrentRun()) return
         setCancelState("failed-to-cancel")
         message.error(t("watchlists:runs.cancelRunError", "Failed to cancel run"))
         return
       }
       const finishedAt = new Date().toISOString()
-      setData((prev) =>
-        prev
-          ? {
-              ...prev,
-              status: "cancelled",
-              finished_at: prev.finished_at || finishedAt,
-              error_msg: prev.error_msg || "cancelled_by_user"
-            }
-          : prev
-      )
+      if (hostedMode) await cancelWatchlistsQuery("run-detail", runId)
+      if (!hostedMode || isCurrentRun()) {
+        setData((prev) =>
+          prev
+            ? {
+                ...prev,
+                status: "cancelled",
+                finished_at: prev.finished_at || finishedAt,
+                error_msg: prev.error_msg || "cancelled_by_user"
+              }
+            : prev
+        )
+      }
       patchRunLists(runId, {
         status: "cancelled",
         finished_at: finishedAt,
         error_msg: "cancelled_by_user"
       })
       void invalidateWatchlists("runs", "jobs", "overview")
+      if (hostedMode) {
+        void refreshWatchlistsQuery("run-detail", runId)
+        void refreshWatchlistsQuery("items", { run_id: runId }, { exact: false })
+      }
+      if (!isCurrentRun()) return
       setCancelState("idle")
       message.success(t("watchlists:runs.cancelRunSuccess", "Run cancelled"))
       manuallyClosedRef.current = true
@@ -620,6 +689,7 @@ export const RunDetailDrawer: React.FC<RunDetailDrawerProps> = ({
       setStreamState("disconnected")
     } catch (err) {
       console.error("Failed to cancel run:", err)
+      if (!isCurrentRun()) return
       setCancelState("failed-to-cancel")
       message.error(t("watchlists:runs.cancelRunError", "Failed to cancel run"))
     }
@@ -1381,9 +1451,15 @@ export const RunDetailDrawer: React.FC<RunDetailDrawerProps> = ({
         <div>
           <div className="mb-3 flex flex-wrap items-center justify-between gap-2">
             <div className="flex items-center gap-2">
-              <Tag color={streamStateColorMap[streamState]}>
-                {t("watchlists:runs.detail.stream", "Live stream")}: {streamStateLabelMap[streamState]}
-              </Tag>
+              {hostedMode ? (
+                hostedLiveUpdates && !detailsError && isWatchlistRunActive(data?.status) && (
+                  <Tag color="green">{t("watchlists:runs.autoRefreshing", "Auto-refreshing")}</Tag>
+                )
+              ) : (
+                <Tag color={streamStateColorMap[streamState]}>
+                  {t("watchlists:runs.detail.stream", "Live stream")}: {streamStateLabelMap[streamState]}
+                </Tag>
+              )}
               {lastStreamEventAt && (
                 <span className="text-xs text-text-muted">
                   {t("watchlists:runs.detail.lastStreamEvent", "Last event {{time}}", {
@@ -1529,7 +1605,14 @@ export const RunDetailDrawer: React.FC<RunDetailDrawerProps> = ({
           }}
         />
       ) : data ? (
-        <Tabs items={tabItems} />
+        <>
+          {hostedMode && detailsError && (
+            <Alert variant="warning" className="mb-3" title={detailsError.title}>
+              {detailsError.description}
+            </Alert>
+          )}
+          <Tabs items={tabItems} />
+        </>
       ) : null}
     </Drawer>
   )

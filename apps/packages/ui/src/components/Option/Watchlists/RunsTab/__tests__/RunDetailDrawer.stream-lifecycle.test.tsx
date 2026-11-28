@@ -5,9 +5,12 @@ import { act, cleanup, fireEvent, screen, waitFor } from "@testing-library/react
 import { render } from "../../shared/__tests__/render-with-watchlists-query"
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest"
 import { useWatchlistsQuery } from "@/hooks/useWatchlistsQuery"
+import { tldwRequest, type TldwRequestPayload } from "@/services/tldw/request-core"
+import type { RunDetailResponse } from "@/types/watchlists"
 import { RunDetailDrawer } from "../RunDetailDrawer"
 
 const mocks = vi.hoisted(() => ({
+  getConfigMock: vi.fn(),
   getRunDetailsMock: vi.fn(),
   fetchScrapedItemsMock: vi.fn(),
   fetchWatchlistSourcesMock: vi.fn(),
@@ -79,7 +82,7 @@ vi.mock("antd", () => {
     </div>
   )
 
-  const Table = ({ dataSource = [], columns = [] }: any) => (
+  const Table = ({ dataSource = [], columns = [], pagination }: any) => (
     <table>
       <tbody>
         {dataSource.map((record: any, rowIndex: number) => (
@@ -95,6 +98,15 @@ vi.mock("antd", () => {
           </tr>
         ))}
       </tbody>
+      {pagination && pagination.total > pagination.pageSize && (
+        <tfoot>
+          <tr><td>
+            <button type="button" onClick={() => pagination.onChange(2, pagination.pageSize)}>
+              Next scraped items page
+            </button>
+          </td></tr>
+        </tfoot>
+      )}
     </table>
   )
 
@@ -174,11 +186,7 @@ vi.mock("@/services/watchlists", () => ({
 
 vi.mock("@/services/tldw/TldwApiClient", () => ({
   tldwClient: {
-    getConfig: vi.fn(async () => ({
-      serverUrl: "http://127.0.0.1:8000",
-      authMode: "single_user",
-      apiKey: "test-key"
-    }))
+    getConfig: mocks.getConfigMock
   }
 }))
 
@@ -267,6 +275,7 @@ describe("RunDetailDrawer stream lifecycle", () => {
   beforeEach(() => {
     vi.clearAllMocks()
     MockWebSocket.reset()
+    vi.stubEnv("NEXT_PUBLIC_TLDW_DEPLOYMENT_MODE", "self_host")
     vi.stubGlobal("WebSocket", MockWebSocket as unknown as typeof WebSocket)
     vi.spyOn(HTMLAnchorElement.prototype, "click").mockImplementation(() => undefined)
     mocks.translateMock.mockImplementation(
@@ -280,7 +289,12 @@ describe("RunDetailDrawer stream lifecycle", () => {
       }
     )
 
-    mocks.getRunDetailsMock.mockResolvedValue(baseRunDetails)
+    mocks.getConfigMock.mockResolvedValue({
+      serverUrl: "http://127.0.0.1:8000",
+      authMode: "single-user",
+      apiKey: "test-key"
+    })
+    mocks.getRunDetailsMock.mockReset().mockResolvedValue(baseRunDetails)
     mocks.fetchScrapedItemsMock.mockResolvedValue({
       items: [],
       total: 0,
@@ -335,8 +349,10 @@ describe("RunDetailDrawer stream lifecycle", () => {
   afterEach(() => {
     cleanup()
     vi.useRealTimers()
+    vi.unstubAllEnvs()
     vi.unstubAllGlobals()
     vi.restoreAllMocks()
+    vi.doUnmock("@/services/background-proxy")
   })
 
   const waitForFirstSocket = async (): Promise<MockWebSocket> => {
@@ -351,6 +367,406 @@ describe("RunDetailDrawer stream lifecycle", () => {
       await Promise.resolve()
     }
   }
+
+  it("polls hosted run details with a session cookie and no browser access token", async () => {
+    vi.stubEnv("NEXT_PUBLIC_TLDW_DEPLOYMENT_MODE", "hosted")
+    const hostedConfig = { serverUrl: window.location.origin, authMode: "multi-user" }
+    mocks.getConfigMock.mockResolvedValue(hostedConfig)
+    mocks.fetchScrapedItemsMock.mockResolvedValueOnce({ items: [], total: 0 })
+      .mockResolvedValueOnce({
+        items: [{ id: 1, title: "Fresh scraped item", url: "https://example.org/article", source_id: 1 }],
+        total: 1
+      })
+
+    const completedRun = {
+      ...baseRunDetails,
+      status: "completed",
+      finished_at: "2026-02-18T10:01:00Z",
+      log_text: "Morning Brief generated"
+    }
+    const snapshots = [
+      baseRunDetails,
+      { ...baseRunDetails, log_text: "Collected two items" },
+      null,
+      completedRun
+    ]
+    const cookies = new Map([[window.location.origin, "tldw_session=test-session"]])
+    const fetchRunDetails = vi.fn<typeof fetch>(async (input, init) => {
+      // Model the browser attaching the session cookie to a same-origin fetch.
+      const origin = new URL(String(input), window.location.origin).origin
+      const cookie = init?.credentials === "omit" ? undefined : cookies.get(origin)
+      if (!cookie || new Headers(init?.headers).has("Authorization")) {
+        return Response.json({ detail: "Not authenticated" }, { status: 401 })
+      }
+      expect(input).toBe("/api/proxy/watchlists/runs/10/details?include_tallies=true")
+      expect(init?.method).toBe("GET")
+      const snapshot = snapshots.shift()
+      if (snapshot === null) return Response.json({ detail: "Unavailable" }, { status: 503 })
+      return Response.json(snapshot ?? completedRun)
+    })
+
+    vi.doMock("@/services/background-proxy", () => ({
+      bgRequest: async (payload: TldwRequestPayload) => {
+        const response = await tldwRequest(payload, {
+          getConfig: mocks.getConfigMock,
+          fetchFn: fetchRunDetails
+        })
+        if (!response.ok) throw new Error(response.error)
+        return response.data
+      }
+    }))
+    const { getRunDetails } = await vi.importActual<typeof import("@/services/watchlists")>(
+      "@/services/watchlists"
+    )
+    mocks.getRunDetailsMock.mockImplementation(getRunDetails)
+    vi.useFakeTimers()
+
+    await act(async () => {
+      render(
+        <>
+          <CachedRunStatus />
+          <RunDetailDrawer open runId={10} onClose={vi.fn()} />
+        </>
+      )
+    })
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(1)
+    })
+    expect(screen.getByText("Running")).toBeInTheDocument()
+
+    expect(screen.getByText("No items found")).toBeInTheDocument()
+
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(5_001)
+    })
+    expect(screen.getByText("Collected two items")).toBeInTheDocument()
+
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(5_001)
+    })
+    expect(screen.getByText("Collected two items")).toBeInTheDocument()
+
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(5_001)
+    })
+    expect(screen.getByText("Completed")).toBeInTheDocument()
+    expect(screen.getByText("Morning Brief generated")).toBeInTheDocument()
+    expect(screen.queryByText("Stream error")).not.toBeInTheDocument()
+    expect(MockWebSocket.instances).toHaveLength(0)
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(15_000)
+    })
+    expect(screen.getByTestId("cached-run-status")).toHaveTextContent("completed")
+    expect(screen.getByText("Fresh scraped item")).toBeInTheDocument()
+    expect(mocks.fetchScrapedItemsMock).toHaveBeenCalledTimes(2)
+    expect(fetchRunDetails).toHaveBeenCalledTimes(4)
+  })
+
+  it.each([
+    ["global", (status: string) => ({ q: status })],
+    ["job-scoped", (status: string) => ({ job_id: 1, status })]
+  ] as const)("refreshes %s status-filtered pages when a hosted run completes", async (_label, filter) => {
+    vi.stubEnv("NEXT_PUBLIC_TLDW_DEPLOYMENT_MODE", "hosted")
+    vi.useFakeTimers()
+    let persistedRun = baseRunDetails
+    mocks.getRunDetailsMock.mockResolvedValueOnce(baseRunDetails).mockImplementationOnce(async () => {
+      persistedRun = { ...baseRunDetails, status: "succeeded" }
+      return persistedRun
+    })
+
+    const FilteredRunList = ({ status }: { status: string }) => {
+      const { data } = useWatchlistsQuery("runs", { page: 1, size: 20, ...filter(status) }, async () => {
+        const matches = persistedRun.status === status
+        return { items: matches ? [persistedRun] : [], total: matches ? 1 : 0 }
+      })
+      return <span data-testid={`filtered-${status}`}>{data?.total}:{data?.items[0]?.status}</span>
+    }
+
+    render(
+      <>
+        <FilteredRunList status="running" />
+        <FilteredRunList status="succeeded" />
+        <RunDetailDrawer open runId={10} onClose={vi.fn()} />
+      </>
+    )
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(1)
+    })
+    expect(screen.getByTestId("filtered-running")).toHaveTextContent("1:running")
+    expect(screen.getByTestId("filtered-succeeded")).toHaveTextContent("0:")
+
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(5_001)
+    })
+    expect(screen.getByText("Completed")).toBeInTheDocument()
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(1)
+    })
+    expect(screen.getByTestId("filtered-running")).toHaveTextContent("0:")
+    expect(screen.getByTestId("filtered-succeeded")).toHaveTextContent("1:succeeded")
+  })
+
+  it.each(["closing the drawer", "turning off Live"])(
+    "ignores an in-flight hosted refresh after %s",
+    async (action) => {
+      vi.stubEnv("NEXT_PUBLIC_TLDW_DEPLOYMENT_MODE", "hosted")
+      vi.useFakeTimers()
+      let finishRefresh!: (details: typeof baseRunDetails) => void
+      const inFlight = new Promise<typeof baseRunDetails>((resolve) => {
+        finishRefresh = resolve
+      })
+      mocks.getRunDetailsMock.mockResolvedValueOnce(baseRunDetails).mockReturnValueOnce(inFlight)
+      const onClose = vi.fn()
+      const { rerender } = render(<RunDetailDrawer open runId={10} onClose={onClose} />)
+
+      await act(async () => {
+        await flushMicrotasks()
+      })
+      await act(async () => {
+        await vi.advanceTimersByTimeAsync(15_000)
+      })
+      expect(mocks.getRunDetailsMock).toHaveBeenCalledTimes(2)
+
+      if (action === "closing the drawer") {
+        rerender(<RunDetailDrawer open={false} runId={10} onClose={onClose} />)
+      } else {
+        fireEvent.click(screen.getByRole("button", { name: "Live" }))
+      }
+      await act(async () => {
+        finishRefresh({ ...baseRunDetails, status: "completed" })
+        await vi.advanceTimersByTimeAsync(15_000)
+      })
+
+      expect(screen.queryByText("Completed")).not.toBeInTheDocument()
+      expect(mocks.getRunDetailsMock).toHaveBeenCalledTimes(2)
+    }
+  )
+
+  it("keeps polling the current hosted run when an earlier run loads late", async () => {
+    vi.stubEnv("NEXT_PUBLIC_TLDW_DEPLOYMENT_MODE", "hosted")
+    vi.useFakeTimers()
+    let finishEarlierRun!: (details: typeof baseRunDetails) => void
+    const earlierRun = new Promise<typeof baseRunDetails>((resolve) => {
+      finishEarlierRun = resolve
+    })
+    const currentRun = { ...baseRunDetails, id: 11, log_text: "Current run started" }
+    mocks.getRunDetailsMock
+      .mockReturnValueOnce(earlierRun)
+      .mockResolvedValueOnce(currentRun)
+      .mockResolvedValueOnce({
+        ...currentRun,
+        status: "completed",
+        log_text: "Current run finished"
+      })
+    const onClose = vi.fn()
+    const { rerender } = render(<RunDetailDrawer open runId={10} onClose={onClose} />)
+
+    await act(async () => {
+      rerender(<RunDetailDrawer open runId={11} onClose={onClose} />)
+    })
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(1)
+    })
+    expect(screen.getByText("Current run started")).toBeInTheDocument()
+
+    await act(async () => {
+      finishEarlierRun(baseRunDetails)
+      await vi.advanceTimersByTimeAsync(0)
+    })
+    expect(screen.getByText("Current run started")).toBeInTheDocument()
+
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(5_001)
+    })
+    expect(screen.getByText("Current run finished")).toBeInTheDocument()
+    expect(mocks.getRunDetailsMock).toHaveBeenLastCalledWith(11, expect.any(AbortSignal))
+  })
+
+  it("keeps polling the current hosted run when a previous cancellation finishes", async () => {
+    vi.stubEnv("NEXT_PUBLIC_TLDW_DEPLOYMENT_MODE", "hosted")
+    vi.useFakeTimers()
+    let finishCancellation!: (result: { cancelled: boolean }) => void
+    const cancellation = new Promise<{ cancelled: boolean }>((resolve) => {
+      finishCancellation = resolve
+    })
+    mocks.cancelWatchlistRunMock.mockReturnValueOnce(cancellation)
+    const currentRun = { ...baseRunDetails, id: 11 }
+    let finishCurrentRun!: (details: typeof currentRun) => void
+    const currentDetails = new Promise<typeof currentRun>((resolve) => {
+      finishCurrentRun = resolve
+    })
+    mocks.getRunDetailsMock
+      .mockResolvedValueOnce(baseRunDetails)
+      .mockReturnValueOnce(currentDetails)
+      .mockResolvedValueOnce({ ...currentRun, status: "completed" })
+    const onClose = vi.fn()
+    const { rerender } = render(<RunDetailDrawer open runId={10} onClose={onClose} />)
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(1)
+    })
+    fireEvent.click(screen.getByRole("button", { name: "Cancel run" }))
+    expect(mocks.cancelWatchlistRunMock).toHaveBeenCalledWith(10)
+    await act(async () => {
+      rerender(<RunDetailDrawer open runId={11} onClose={onClose} />)
+    })
+    expect(screen.queryByRole("button", { name: "Cancel run" })).not.toBeInTheDocument()
+
+    await act(async () => {
+      finishCurrentRun(currentRun)
+      finishCancellation({ cancelled: true })
+      await vi.advanceTimersByTimeAsync(1)
+    })
+    expect(screen.getByText("Running")).toBeInTheDocument()
+
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(5_001)
+    })
+    expect(screen.getByText("Completed")).toBeInTheDocument()
+  })
+
+  it("refreshes the persisted hosted snapshot and items after cancelling the open run", async () => {
+    vi.stubEnv("NEXT_PUBLIC_TLDW_DEPLOYMENT_MODE", "hosted")
+    mocks.getRunDetailsMock.mockResolvedValueOnce(baseRunDetails)
+      .mockResolvedValueOnce({ ...baseRunDetails, status: "cancelled", log_text: "Collection cancelled after the first item" })
+    mocks.fetchScrapedItemsMock.mockResolvedValueOnce({ items: [], total: 0 })
+      .mockResolvedValueOnce({
+        items: [{ id: 1, title: "Item collected before cancel", url: "https://example.org/article", source_id: 1 }],
+        total: 1
+      })
+    render(<RunDetailDrawer open runId={10} onClose={vi.fn()} />)
+    expect(await screen.findByText("No items found")).toBeInTheDocument()
+    fireEvent.click(screen.getByRole("button", { name: "Cancel run" }))
+
+    expect(await screen.findByText("Collection cancelled after the first item")).toBeInTheDocument()
+    expect(await screen.findByText("Item collected before cancel")).toBeInTheDocument()
+    expect(mocks.getRunDetailsMock).toHaveBeenCalledTimes(2)
+  })
+
+  it("preserves a terminal list row when an older active hosted snapshot arrives", async () => {
+    vi.stubEnv("NEXT_PUBLIC_TLDW_DEPLOYMENT_MODE", "hosted")
+    vi.useFakeTimers()
+    let finishDetails!: (details: RunDetailResponse) => void
+    const delayed = new Promise<RunDetailResponse>((resolve) => {
+      finishDetails = resolve
+    })
+    const completed = { ...baseRunDetails, status: "succeeded", finished_at: "2026-02-18T10:03:00Z" }
+    let persisted: RunDetailResponse = baseRunDetails
+    mocks.getRunDetailsMock.mockResolvedValueOnce(baseRunDetails).mockReturnValueOnce(delayed)
+
+    const Runs = () => {
+      const { data } = useWatchlistsQuery("runs", { page: 1, size: 20 },
+        async () => ({ items: [persisted], total: 1 }),
+        { refetchInterval: (query) => query.state.data?.items[0]?.status === "running" ? 2_000 : false })
+      return <span data-testid="unfiltered-status">{data?.items[0]?.status}</span>
+    }
+
+    render(<><Runs /><RunDetailDrawer open runId={10} onClose={vi.fn()} /></>)
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(5_002)
+    })
+    expect(mocks.getRunDetailsMock).toHaveBeenCalledTimes(2)
+    expect(screen.getByTestId("unfiltered-status")).toHaveTextContent("running")
+
+    persisted = completed
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(2_001)
+    })
+    expect(screen.getByTestId("unfiltered-status")).toHaveTextContent("succeeded")
+
+    await act(async () => {
+      finishDetails({ ...baseRunDetails, log_text: "Delayed active snapshot" })
+      await vi.advanceTimersByTimeAsync(1)
+    })
+    expect(screen.getByText("Delayed active snapshot")).toBeInTheDocument()
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(1)
+    })
+    expect(screen.getByTestId("unfiltered-status")).toHaveTextContent("succeeded")
+  })
+
+  it("reconciles persisted hosted details after reopening the run during cancellation", async () => {
+    vi.stubEnv("NEXT_PUBLIC_TLDW_DEPLOYMENT_MODE", "hosted")
+    vi.useFakeTimers()
+    let finishCancellation!: (result: { cancelled: boolean }) => void
+    const cancellation = new Promise<{ cancelled: boolean }>((resolve) => {
+      finishCancellation = resolve
+    })
+    let finishReopenedPoll!: (details: RunDetailResponse) => void
+    const reopenedPoll = new Promise<RunDetailResponse>((resolve) => {
+      finishReopenedPoll = resolve
+    })
+    const cancelled = { ...baseRunDetails, status: "cancelled", log_text: "Persisted cancellation details" }
+    mocks.cancelWatchlistRunMock.mockReturnValueOnce(cancellation)
+    mocks.getRunDetailsMock.mockResolvedValueOnce(baseRunDetails)
+      .mockReturnValueOnce(reopenedPoll).mockResolvedValue(cancelled)
+    const onClose = vi.fn()
+    const { rerender } = render(<RunDetailDrawer open runId={10} onClose={onClose} />)
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(1)
+    })
+    fireEvent.click(screen.getByRole("button", { name: "Cancel run" }))
+    rerender(<RunDetailDrawer open={false} runId={null} onClose={onClose} />)
+    rerender(<RunDetailDrawer open runId={10} onClose={onClose} />)
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(5_002)
+    })
+    expect(mocks.getRunDetailsMock).toHaveBeenCalledTimes(2)
+
+    await act(async () => {
+      finishCancellation({ cancelled: true })
+      await vi.advanceTimersByTimeAsync(1)
+    })
+    await act(async () => {
+      finishReopenedPoll({ ...baseRunDetails, log_text: "Pre-cancellation log" })
+      await vi.advanceTimersByTimeAsync(10_001)
+    })
+    expect(mocks.getRunDetailsMock).toHaveBeenCalledTimes(3)
+    expect(screen.getByText("Persisted cancellation details")).toBeInTheDocument()
+    expect(screen.queryByText("Pre-cancellation log")).not.toBeInTheDocument()
+  })
+
+  it("refreshes the hosted items page selected during cancellation", async () => {
+    vi.stubEnv("NEXT_PUBLIC_TLDW_DEPLOYMENT_MODE", "hosted")
+    vi.useFakeTimers()
+    let finishCancellation!: (result: { cancelled: boolean }) => void
+    const cancellation = new Promise<{ cancelled: boolean }>((resolve) => {
+      finishCancellation = resolve
+    })
+    let persistedCancellation = false
+    mocks.cancelWatchlistRunMock.mockReturnValueOnce(cancellation)
+    mocks.getRunDetailsMock.mockResolvedValueOnce(baseRunDetails)
+      .mockResolvedValue({ ...baseRunDetails, status: "cancelled" })
+    mocks.fetchScrapedItemsMock.mockImplementation(async ({ page }) => {
+      const title = page === 1 ? "First items page"
+        : persistedCancellation ? "Second items page after cancel" : "Old second items page"
+      return { items: [{ id: 1, title, url: "https://example.org/article", source_id: 1 }], total: 21 }
+    })
+
+    render(<RunDetailDrawer open runId={10} onClose={vi.fn()} />)
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(1)
+    })
+    fireEvent.click(screen.getByRole("button", { name: "Cancel run" }))
+    fireEvent.click(screen.getByRole("button", { name: "Next scraped items page" }))
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(1)
+    })
+    expect(screen.getByText("Old second items page")).toBeInTheDocument()
+
+    persistedCancellation = true
+    await act(async () => {
+      finishCancellation({ cancelled: true })
+      await vi.advanceTimersByTimeAsync(1)
+    })
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(1)
+    })
+    expect(screen.getByText("Second items page after cancel")).toBeInTheDocument()
+    expect(mocks.fetchScrapedItemsMock).toHaveBeenLastCalledWith(
+      { run_id: 10, page: 2, size: 20 },
+      expect.any(AbortSignal)
+    )
+  })
 
   it("applies stream updates and transitions active run to completed without refetch", async () => {
     render(

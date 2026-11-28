@@ -49,6 +49,27 @@ export const useSetWatchlistsQueryData = () => {
   }, [client, generation])
 }
 
+export const useCancelWatchlistsQuery = () => {
+  const client = useQueryClient()
+  const generation = useWatchlistsAccountGeneration()
+  return useCallback((resource: string, params: unknown) => {
+    if (generation !== getWatchlistsAccountGeneration()) return
+    return client.cancelQueries({ queryKey: queryKey(generation, resource, params), exact: true })
+  }, [client, generation])
+}
+
+export const useRefreshWatchlistsQuery = () => {
+  const client = useQueryClient()
+  const generation = useWatchlistsAccountGeneration()
+  return useCallback(async (resource: string, params: unknown, { exact = true } = {}) => {
+    if (generation !== getWatchlistsAccountGeneration()) return
+    const filter = { queryKey: queryKey(generation, resource, params), exact }
+    await client.cancelQueries(filter)
+    if (generation !== getWatchlistsAccountGeneration()) return
+    await client.invalidateQueries(filter)
+  }, [client, generation])
+}
+
 export const useFetchWatchlistsQuery = () => {
   const client = useQueryClient()
   const generation = useWatchlistsAccountGeneration()
