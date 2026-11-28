@@ -59,7 +59,7 @@ def test_expected_tool_failure_reason_catalog_is_fixed_and_bounded() -> None:
         ),
         "LLM_POLICY_REFUSED": (
             "llm_policy_refused",
-            "The request was refused by the moderation policy.",
+            "The request was refused.",
             outcomes.BreakerAction.IGNORE,
         ),
     }

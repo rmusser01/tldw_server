@@ -51,7 +51,9 @@ from tldw_Server_API.app.core.LLM_Calls.adapter_utils import (
 )
 from tldw_Server_API.app.core.LLM_Calls.provider_metadata import provider_requires_api_key
 from tldw_Server_API.app.core.LLM_Calls.provider_results import (
+    OUTPUT_REFUSAL_TEXT,
     _extract_text_from_upstream_sse,
+    content_filter_refusal,
     extract_response_content,
     raise_if_content_filtered,
     sse_line_is_content_filtered,
@@ -400,12 +402,14 @@ def _summarize_via_adapter(
 
         def stream_generator() -> Generator[str, None, None]:
             gen = None
+            ours = False  # the output hook's refusal delta was seen (wording by origin)
             try:
                 gen = adapter.stream(request, timeout=timeout)
                 for raw in gateway.run_policy_post_hooks(call, gen):
                     line = raw.decode("utf-8") if isinstance(raw, (bytes, bytearray)) else str(raw)
+                    ours = ours or OUTPUT_REFUSAL_TEXT in line
                     if sse_line_is_content_filtered(line):
-                        raise LLMPolicyRefusal("Output violates moderation policy")
+                        raise content_filter_refusal(ours=ours)
                     text_chunk, error_payload, _done = _extract_text_from_upstream_sse(line)
                     if error_payload is not None:
                         if raise_on_error:

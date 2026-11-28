@@ -17,7 +17,7 @@ from loguru import logger
 
 from tldw_Server_API.app.core.exceptions import LLMPolicyRefusal
 
-from .query_classifier import is_content_filtered
+from tldw_Server_API.app.core.LLM_Calls.provider_results import is_content_filtered
 from .runtime_provider_call import (
     attach_runtime_provider_credentials,
     await_runtime_bound_provider_call,

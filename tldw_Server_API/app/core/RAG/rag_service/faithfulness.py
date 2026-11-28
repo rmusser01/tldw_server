@@ -98,7 +98,7 @@ def _unverified_by_policy() -> FaithfulnessResult:
     return FaithfulnessResult(
         score=None,
         claims=[],
-        reasoning="Verification skipped: the request was refused by moderation policy.",
+        reasoning="Verification skipped: the request was refused.",
         failure_code="llm_policy_refused",
         verification_available=False,
     )

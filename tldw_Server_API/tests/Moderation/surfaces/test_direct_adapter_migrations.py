@@ -661,7 +661,7 @@ async def test_xml_import_records_a_refused_summary_without_storing_it(moderatio
         xml.import_xml_handler, str(source), "t", "a", "", None, None, True, PROVIDER, "k"
     )
     assert stored.get("summary") == "No summary provided"
-    assert "refused by moderation policy" in message
+    assert "Summary skipped: refused" in message
 
 
 # ---- RAG optional stages: a refusal is "unverified/skipped", never a score or a heuristic grade -------------------

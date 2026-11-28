@@ -1,4 +1,4 @@
 {
   "core/LLM_Calls/Summarization_General_Lib.py": {"references": 2, "reason": "direct by design (R6: error taxonomy); moderated via gateway.run_policy_*_hooks"},
-  "core/Provider_Credentials/byok_testing.py": {"references": 1, "reason": "moved from core/AuthNZ/byok_testing.py (TASK-13950.17)"}
+  "core/Provider_Credentials/byok_testing.py": {"references": 1, "reason": "internal.byok_probe: fixed max_tokens=1 health probe with no user content; kept direct to keep its bounded-probe behaviour (moved from core/AuthNZ/byok_testing.py, TASK-13950.17)"}
 }

@@ -307,8 +307,8 @@ def load_moderation_surface_config(
         option="stream_buffer_chars",
         default=1024,
     )
-    if stream_buffer_chars <= 0:
-        raise ValueError(f"Invalid Moderation.stream_buffer_chars value {stream_buffer_chars!r}; must be positive")
+    if stream_buffer_chars < 0:  # 0 means no holdback (chat's own reader also takes 0)
+        raise ValueError(f"Invalid Moderation.stream_buffer_chars value {stream_buffer_chars!r}; must not be negative")
     surface_options: dict[str, object] = {}
     if config_parser.has_section("Moderation"):  # type: ignore[attr-defined]
         surface_options = {

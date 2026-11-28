@@ -13,7 +13,7 @@ from tldw_Server_API.app.core.Claims_Extraction.artifact_verification import (
     ArtifactVerificationUnit,
     verify_generated_artifact_against_sources,
 )
-from tldw_Server_API.app.core.exceptions import LLMPolicyRefusal
+from tldw_Server_API.app.core.LLM_Calls.provider_results import raise_if_content_filtered
 from tldw_Server_API.app.core.RAG.rag_service.types import Document
 
 
@@ -208,12 +208,7 @@ async def generate_research_workspace_artifact(
         max_tokens=max_tokens,
         streaming=False,
     )
-    try:
-        refused = chat_response["choices"][0].get("finish_reason") == "content_filter"
-    except (AttributeError, IndexError, KeyError, TypeError):
-        refused = False
-    if refused:
-        raise LLMPolicyRefusal("Output violates moderation policy")  # not a draft artifact
+    raise_if_content_filtered(chat_response)  # refused (ours or the provider's): not a draft artifact
     content = _coerce_chat_text(chat_response)
     if not content:
         raise ValueError("The model returned no final text. Try a larger Max Tokens value or a different model.")

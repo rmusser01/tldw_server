@@ -5,6 +5,7 @@ from functools import partial
 from typing import Any, Awaitable, Callable
 
 from tldw_Server_API.app.core.Chat.chat_orchestrator import chat_api_call_async
+from tldw_Server_API.app.core.LLM_Calls.provider_results import raise_if_content_filtered
 
 
 class ChatWorkflowDialogueOrchestrator:
@@ -133,6 +134,7 @@ class ChatWorkflowDialogueOrchestrator:
             streaming=False,
             user_identifier=user_identifier,
         )
+        raise_if_content_filtered(response)  # a refused answer is a refusal: never a debate turn or moderator JSON
         content = self._extract_llm_text(response).strip()
         if not content:
             raise ValueError("dialogue model returned an empty response")
@@ -159,6 +161,7 @@ class ChatWorkflowDialogueOrchestrator:
             response_format={"type": "json_object"},
             user_identifier=user_identifier,
         )
+        raise_if_content_filtered(response)  # a refused answer is a refusal: never a debate turn or moderator JSON
         content = self._extract_llm_text(response).strip()
         if not content:
             raise ValueError("moderator returned an empty response")

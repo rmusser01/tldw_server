@@ -168,6 +168,7 @@ async def classify_sample(
                     }
                 ],
                 max_tokens=1024,
+                llm_surface="moderation.classifier",
                 temperature=0,
                 streaming=False,
                 tools=None,

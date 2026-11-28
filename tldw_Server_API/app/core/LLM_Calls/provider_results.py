@@ -104,20 +104,49 @@ class NormalizedProviderStreamError:
     credential_refresh_retry_certified: bool = False
 
 
+# Mirrors ``Moderation.gateway_hooks.OUTPUT_REFUSAL`` (core/LLM_Calls must not import Moderation; a test pins equality).
+OUTPUT_REFUSAL_TEXT = "Output violates moderation policy"
+PROVIDER_FILTER_REFUSAL_TEXT = "The provider's content filter refused the answer"
+
+
+def is_content_filtered(response: Any) -> bool:
+    """Whether a non-stream reply was replaced by a refusal: ``finish_reason`` ``content_filter`` or ``stop_reason`` ``refusal``."""
+    if not isinstance(response, dict):
+        return False
+    choices = response.get("choices")
+    if isinstance(choices, list) and choices and isinstance(choices[0], dict):
+        if choices[0].get("finish_reason") == "content_filter":
+            return True
+    return response.get("stop_reason") == "refusal"  # Anthropic-shaped block (gateway_hooks)
+
+
+def content_filter_refusal(response: Any = None, *, ours: bool | None = None) -> LLMPolicyRefusal:
+    """The refusal to raise, worded by origin.
+
+    Our output hook's block always carries content exactly ``OUTPUT_REFUSAL_TEXT`` (Anthropic format: the text block);
+    any other ``content_filter`` is the provider's own filter. Streams pass ``ours`` (the refusal delta was seen).
+    """
+    if ours is None:
+        ours = False
+        if isinstance(response, dict):
+            choices = response.get("choices")
+            if isinstance(choices, list) and choices and isinstance(choices[0], dict):
+                message = choices[0].get("message")
+                ours = isinstance(message, dict) and message.get("content") == OUTPUT_REFUSAL_TEXT
+            blocks = response.get("content")
+            if isinstance(blocks, list):
+                ours = ours or any(isinstance(b, dict) and b.get("text") == OUTPUT_REFUSAL_TEXT for b in blocks)
+    return LLMPolicyRefusal(OUTPUT_REFUSAL_TEXT if ours else PROVIDER_FILTER_REFUSAL_TEXT)
+
+
 def raise_if_content_filtered(response: Any) -> None:
-    """Raise ``LLMPolicyRefusal`` when moderation replaced the answer (``finish_reason`` ``content_filter``).
+    """Raise ``LLMPolicyRefusal`` when the answer was replaced (moderation or the provider's own filter).
 
     For a caller that parses structured output from the reply: a refused answer is never parsed, scored,
     repaired or retried (TASK-13950.27).
     """
-    if not isinstance(response, dict):
-        return
-    choices = response.get("choices")
-    blocked = response.get("stop_reason") == "refusal"  # Anthropic-shaped block (gateway_hooks)
-    if isinstance(choices, list) and choices and isinstance(choices[0], dict):
-        blocked = blocked or choices[0].get("finish_reason") == "content_filter"
-    if blocked:
-        raise LLMPolicyRefusal("Output violates moderation policy")
+    if is_content_filtered(response):
+        raise content_filter_refusal(response)
 
 
 def sse_line_is_content_filtered(line: str) -> bool:

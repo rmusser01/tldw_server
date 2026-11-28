@@ -43,6 +43,7 @@ from tldw_Server_API.app.core.Chat.orchestrator.stream_execution import (
     execute_stream,
 )
 from tldw_Server_API.app.core.exceptions import (
+    LLMPolicyRefusal,
     NetworkError,
     RetryExhaustedError,
 )
@@ -409,6 +410,8 @@ def chat_api_call(
         return response
 
     # --- Exception Mapping (copied from your original, ensure it's still relevant) ---
+    except LLMPolicyRefusal:
+        raise  # a moderation refusal is a 400 for the caller, never a rebuilt provider error
     except (
         ChatAuthenticationError,
         ChatRateLimitError,
@@ -571,6 +574,8 @@ async def chat_api_call_async(
         if streaming:
             return execute_stream(response)
         return response
+    except LLMPolicyRefusal:
+        raise  # a moderation refusal is a 400 for the caller, never a rebuilt provider error
     except Exception as e:
         mapped_error = map_stream_error(e)
         if _is_network_exception(e):

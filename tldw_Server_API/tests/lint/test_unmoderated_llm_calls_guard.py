@@ -14,6 +14,10 @@ Surfaced means the keyword's value is a string literal, or a Name that is a para
 function (forwarding). A module-level constant is not surfaced and a ``**splat`` is not a surface.
 chat_orchestrator.py and gateway.py (the definitions) and in-app ``tests`` packages are skipped.
 
+R10: an exempt or caller-moderated surface id may appear as an ``llm_surface`` literal (keyword or dict key)
+only in its designated modules (``EXEMPT_ID_MODULES``). User-controlled data that reaches a gateway call
+therefore cannot be written, in code, to skip moderation; a new module using such an id fails the lint.
+
 Lock gains in with ``python -m tldw_Server_API.tests.lint.test_unmoderated_llm_calls_guard --tighten``.
 """
 
@@ -35,6 +39,26 @@ GATEWAY_NAMES = frozenset(
 )
 EXEMPT: frozenset[str] = frozenset({"core/Chat/chat_orchestrator.py", "core/LLM_Calls/gateway.py"})
 _SURFACE = "llm_surface"
+
+# Exempt / caller-moderated id -> app-relative modules (a ``/``-ending entry is a directory) allowed to name it.
+EXEMPT_ID_MODULES: dict[str, tuple[str, ...]] = {
+    "chat.completions": (
+        "api/v1/endpoints/chat.py",
+        "core/Chat/completion_pipeline.py",
+        "core/Chat/streaming_pipeline.py",
+        "core/Chat/tool_execution_service.py",
+    ),
+    "internal.byok_probe": ("core/Provider_Credentials/byok_testing.py",),
+    "internal.eval_judge": (
+        "core/Evaluations/cli/evals_cli.py",
+        "core/Evaluations/cli/evals_cli_enhanced.py",
+        "core/Evaluations/evaluation_manager.py",
+        "core/Evaluations/ms_g_eval.py",
+        "core/Evaluations/rag_evaluator.py",
+        "core/Evaluations/response_quality_evaluator.py",
+    ),
+    "moderation.classifier": ("core/Moderation/classification.py", "core/Moderation/semantic_matcher.py"),
+}
 
 RATCHET = _ceilings.Ratchet(
     baseline=Path(__file__).resolve().with_name("unmoderated_llm_calls_baseline.json"),
@@ -140,6 +164,74 @@ def measure(root: Path = APP_ROOT) -> dict[str, dict[str, int]]:
     return found
 
 
+# --- R10: exempt ids stay in their modules --------------------------------------------------------
+
+
+def _is_surface_key(node: ast.AST | None) -> bool:
+    return isinstance(node, ast.Constant) and node.value == _SURFACE
+
+
+def _surface_values(node: ast.AST) -> list[ast.AST]:
+    """Value nodes that set ``llm_surface``: keyword, dict key, ``x["llm_surface"] = v``, ``.setdefault``."""
+    if isinstance(node, ast.Call):
+        values = [kw.value for kw in node.keywords if kw.arg == _SURFACE]
+        if isinstance(node.func, ast.Attribute) and node.func.attr == "setdefault" and len(node.args) == 2:
+            values += [node.args[1]] if _is_surface_key(node.args[0]) else []
+        return values
+    if isinstance(node, ast.Dict):
+        return [v for k, v in zip(node.keys, node.values) if _is_surface_key(k)]
+    if isinstance(node, (ast.Assign, ast.AnnAssign)) and node.value is not None:
+        targets = node.targets if isinstance(node, ast.Assign) else [node.target]
+        return [node.value for t in targets if isinstance(t, ast.Subscript) and _is_surface_key(t.slice)]
+    return []
+
+
+def exempt_id_uses(tree: ast.Module) -> list[tuple[int, str]]:
+    """``(line, id)`` for every ``llm_surface`` literal naming an exempt or caller-moderated id."""
+    return [
+        (value.lineno, value.value)
+        for node in ast.walk(tree)
+        for value in _surface_values(node)
+        if isinstance(value, ast.Constant) and value.value in EXEMPT_ID_MODULES
+    ]
+
+
+def _allowed(relative: str, surface_id: str) -> bool:
+    return any(relative == p or (p.endswith("/") and relative.startswith(p)) for p in EXEMPT_ID_MODULES[surface_id])
+
+
+def test_exempt_surface_ids_are_registered_exempt() -> None:
+    from tldw_Server_API.app.core.Moderation.surfaces import CALLER_MODERATED_SURFACES, EXEMPT_SURFACES
+
+    assert set(EXEMPT_ID_MODULES) == set(EXEMPT_SURFACES) | set(CALLER_MODERATED_SURFACES)
+
+
+def test_exempt_surface_ids_appear_only_in_their_modules() -> None:
+    problems = []
+    for path, tree in parse_tree(APP_ROOT.resolve()).items():
+        relative = path.relative_to(APP_ROOT.resolve())
+        if "tests" in relative.parts[:-1]:
+            continue
+        for line, surface_id in exempt_id_uses(tree):
+            if not _allowed(relative.as_posix(), surface_id):
+                problems.append(f"{relative.as_posix()}:{line}: {surface_id!r} is reserved to {EXEMPT_ID_MODULES[surface_id]}")
+    assert problems == [], "\n".join(problems)
+
+
+def test_seeded_exempt_id_in_a_new_module_is_flagged() -> None:
+    bad = ast.parse('perform_chat_api_call(llm_surface="internal.byok_probe")\nx = {"llm_surface": "chat.completions"}\nk["llm_surface"] = "internal.eval_judge"\nk.setdefault("llm_surface", "moderation.classifier")')
+    assert [u[1] for u in sorted(exempt_id_uses(bad))] == [
+        "internal.byok_probe", "chat.completions", "internal.eval_judge", "moderation.classifier"
+    ]
+    assert not _allowed("core/Workflows/engine.py", "internal.byok_probe")
+    assert not _allowed("core/Chatbooks/x.py", "chat.completions")
+    assert not _allowed("core/Chat/new_module.py", "chat.completions")
+    assert not _allowed("core/Evaluations/new_module.py", "internal.eval_judge")
+    assert _allowed("core/Chat/streaming_pipeline.py", "chat.completions")
+    assert _allowed("core/Evaluations/ms_g_eval.py", "internal.eval_judge")
+    assert exempt_id_uses(ast.parse('f(llm_surface="rag.generation")')) == []
+
+
 # --- Self-tests ---------------------------------------------------------------------------------
 
 
@@ -193,6 +285,27 @@ def test_direct_adapter_reference_counts() -> None:
     assert count_module(ast.parse("get_registry().get_adapter(p).chat(r)")) == 1
 
 
+def surface_value_problems(tree: ast.Module, known: frozenset[str]) -> list[tuple[int, str]]:
+    """``(line, problem)`` for every surface value (keyword, dict key, subscript, setdefault) that is not a
+    registered literal or a Name that is a parameter of an enclosing function (forwarding)."""
+    problems: list[tuple[int, str]] = []
+
+    def visit(node: ast.AST, params: set[str]) -> None:
+        if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef, ast.Lambda)):
+            params = params | _params(node)
+        for v in _surface_values(node):
+            if isinstance(v, ast.Constant) and isinstance(v.value, str):
+                if v.value not in known:
+                    problems.append((v.lineno, f"unknown surface {v.value!r}"))
+            elif not (isinstance(v, ast.Name) and v.id in params):
+                problems.append((v.lineno, "llm_surface must be a registered literal or a forwarded parameter"))
+        for child in ast.iter_child_nodes(node):
+            visit(child, params)
+
+    visit(tree, set())
+    return problems
+
+
 def test_every_surface_literal_is_registered() -> None:
     from tldw_Server_API.app.core.Moderation.surfaces import KNOWN_SURFACES
 
@@ -201,19 +314,23 @@ def test_every_surface_literal_is_registered() -> None:
         relative = path.relative_to(APP_ROOT.resolve())
         if "tests" in relative.parts[:-1]:
             continue
-        for node in ast.walk(tree):
-            if not isinstance(node, ast.Call):
-                continue
-            for kw in node.keywords:
-                if kw.arg != _SURFACE:
-                    continue
-                v = kw.value
-                if isinstance(v, ast.Constant) and isinstance(v.value, str):
-                    if v.value not in KNOWN_SURFACES:
-                        problems.append(f"{relative.as_posix()}:{node.lineno}: unknown surface {v.value!r}")
-                elif not isinstance(v, ast.Name):
-                    problems.append(f"{relative.as_posix()}:{node.lineno}: llm_surface must be a literal or a forwarded parameter")
+        problems += [f"{relative.as_posix()}:{line}: {text}" for line, text in surface_value_problems(tree, KNOWN_SURFACES)]
     assert problems == [], "\n".join(problems)
+
+
+def test_seeded_bad_surface_values_are_flagged() -> None:
+    bad = ast.parse(
+        'f(llm_surface="nope.x")\nx = {"llm_surface": "nope.y"}\nk["llm_surface"] = "nope.z"\n'
+        "f(llm_surface=SOME_GLOBAL)\ndef w(llm_surface):\n    f(llm_surface=llm_surface)\n    k['llm_surface'] = other"
+    )
+    found = surface_value_problems(bad, frozenset({"rag.generation"}))
+    assert [text for _, text in found] == [
+        "unknown surface 'nope.x'",
+        "unknown surface 'nope.y'",
+        "unknown surface 'nope.z'",
+        "llm_surface must be a registered literal or a forwarded parameter",
+        "llm_surface must be a registered literal or a forwarded parameter",
+    ]
 
 
 # --- The ratchet --------------------------------------------------------------------------------

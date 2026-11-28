@@ -1,7 +1,7 @@
 """Every LLM-calling worker registers the Moderation gateway hooks (TASK-13950.27 PR C).
 
 A standalone worker never runs the app lifespan, so without its own call its provider calls reach the
-gateway unmoderated. The worker set is the compose ``command:`` modules, the users of
+gateway unmoderated. The worker set is the ``command:`` modules of the workers and embeddings compose files, the users of
 ``standalone_llm_provider_overrides*`` and the two named jobs workers. A worker that makes no LLM call
 is allowlisted below with its reason.
 """
@@ -18,6 +18,8 @@ from tldw_Server_API.tests.lint._ast_cache import APP_ROOT, REPO_ROOT
 pytestmark = pytest.mark.unit
 
 COMPOSE = REPO_ROOT / "Dockerfiles" / "docker-compose.workers.yml"
+EMBEDDINGS_COMPOSE = REPO_ROOT / "Dockerfiles" / "docker-compose.embeddings.yml"
+COMPOSES = (COMPOSE, EMBEDDINGS_COMPOSE)
 OVERRIDES_DEFINITION = "core/Provider_Credentials/llm_provider_overrides.py"
 NAMED = ("core/Explainer/jobs_worker.py", "core/Research/jobs_worker.py")
 MARKER = "register_moderation_gateway_hooks"
@@ -29,6 +31,7 @@ NO_LLM_CALL = {
     "services/privilege_snapshot_worker.py": "builds privilege snapshots; no provider call",
     "core/Collections/reading_digest_jobs_worker.py": "assembles digests from stored items; no provider call",
     "services/connectors_worker.py": "syncs external connector files into ingestion; no provider call",
+    "core/Embeddings/services/redis_worker.py": "embeddings pipeline stages; no contextualization or HyDE call (final review 2.6)",
 }
 
 
@@ -47,18 +50,20 @@ def overrides_user_files(app_root: Path) -> set[str]:
     }
 
 
-def unregistered(app_root: Path, compose: Path, allowlist: dict[str, str]) -> list[str]:
-    workers = compose_worker_files(compose, app_root) | overrides_user_files(app_root) | {n for n in NAMED if (app_root / n).exists()}
+def unregistered(app_root: Path, compose: Path | tuple[Path, ...], allowlist: dict[str, str]) -> list[str]:
+    composes = compose if isinstance(compose, tuple) else (compose,)
+    compose_workers = set().union(*(compose_worker_files(c, app_root) for c in composes))
+    workers = compose_workers | overrides_user_files(app_root) | {n for n in NAMED if (app_root / n).exists()}
     return sorted(w for w in workers - set(allowlist) if MARKER not in (app_root / w).read_text())
 
 
 def test_every_llm_worker_registers_the_moderation_hooks():
-    assert unregistered(APP_ROOT, COMPOSE, NO_LLM_CALL) == []
+    assert unregistered(APP_ROOT, COMPOSES, NO_LLM_CALL) == []
 
 
 def test_the_allowlist_names_only_compose_workers_without_the_marker():
     for rel in NO_LLM_CALL:
-        assert rel in compose_worker_files(COMPOSE, APP_ROOT), rel
+        assert any(rel in compose_worker_files(c, APP_ROOT) for c in COMPOSES), rel
         assert MARKER not in (APP_ROOT / rel).read_text(), f"{rel} registers; drop it from the allowlist"
 
 

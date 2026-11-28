@@ -212,7 +212,7 @@ class ChatAutoChunkBoundaryAssistant:
                 # Optional assist: a refusal leaves the deterministic chunking, labelled as one, never retried.
                 return AutoChunkBoundaryAssistantResult.fallback(
                     reason="ai_assist_policy_refused",
-                    rationale="Boundary assist was refused by moderation policy.",
+                    rationale="Boundary assist was refused.",
                 )
             except asyncio.TimeoutError:
                 return AutoChunkBoundaryAssistantResult.fallback(

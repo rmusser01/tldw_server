@@ -243,14 +243,18 @@ async def test_optional_auxiliary_input_block_is_no_result(moderation_hooks, stu
     from tldw_Server_API.app.core.RAG.rag_service.suggestion_generator import generate_suggestions
 
     if site == "suggestions":
-        out = await generate_suggestions("forbidden thing", "an answer", credential_runtime=_Runtime(), **AUX)
+        stage: dict = {}
+        out = await generate_suggestions(
+            "forbidden thing", "an answer", credential_runtime=_Runtime(), stage_metadata=stage, **AUX
+        )
         assert isinstance(out, list)
+        assert stage["failure_code"] == "llm_policy_refused"  # a refusal is not "provider_unavailable"
     else:
         out = await research_loop(
             "forbidden thing", QueryClassification(standalone_query="forbidden thing"), max_iterations=1,
             credential_runtime=_Runtime(), **AUX,
         )
-        assert out is not None
+        assert out.metadata["provider_stage"]["failure_code"] == "llm_policy_refused"
     assert stub_llm_registry.requests == []
 
 

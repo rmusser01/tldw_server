@@ -18,6 +18,8 @@ from tldw_Server_API.app.core.Chat.Chat_Deps import (
     ChatRateLimitError,
 )
 from tldw_Server_API.app.core.Chat.chat_service import perform_chat_api_call_async
+from tldw_Server_API.app.core.exceptions import LLMPolicyRefusal
+from tldw_Server_API.app.core.LLM_Calls.provider_results import raise_if_content_filtered
 from tldw_Server_API.app.core.Usage.llm_call_context import llm_call_context
 
 DEFAULT_FIRST_CHAT_PROMPT = "Please reply with a short hello so setup can confirm chat works."
@@ -73,6 +75,7 @@ async def _call_chat_completion(*, provider: str, model: str, prompt: str) -> An
             model=model,
             messages_payload=[{"role": "user", "content": prompt}],
             stream=False,
+            llm_surface="setup.first_chat",
         )
 
 
@@ -88,6 +91,9 @@ async def verify_first_chat(
     prompt = prompt.strip() or DEFAULT_FIRST_CHAT_PROMPT
     try:
         response = await _call_chat_completion(provider=provider, model=model, prompt=prompt)
+        raise_if_content_filtered(response)  # the prompt is the client's own: a refused answer is a 400, never "ready"
+    except LLMPolicyRefusal:
+        raise
     except Exception as exc:  # noqa: BLE001 - setup responses must stay sanitized
         category, message = _classify_failure(exc)
         logger.warning(

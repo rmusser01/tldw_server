@@ -1226,14 +1226,11 @@ def _call_policy_after_model_discovery(
     return remaining_policy
 
 
-CHAT_COMPLETIONS_SURFACE = "chat.completions"
-
-
 @dataclass
 class GatewayCall:
     """One provider call as the policy hooks see it."""
 
-    surface: str | None  # the caller's llm_surface kwarg; "chat.completions" for /chat/completions, else None until .27
+    surface: str | None  # the caller's llm_surface kwarg; None when the call named none (moderated as "unclassified")
     provider: str
     # the adapter request (messages, system_message, model, stream, ...); a pre-call hook may replace values
     request: dict[str, Any]

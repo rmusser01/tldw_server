@@ -1824,6 +1824,50 @@ async def test_character_chat_adapter_message_uses_current_core_writer(monkeypat
 
 
 @pytest.mark.asyncio
+async def test_character_chat_adapter_refused_answer_fails_the_step_and_is_not_saved(monkeypatch):
+    """A content_filter answer raises the refusal: nothing is posted, and the refusal is not the character's reply."""
+    from tldw_Server_API.app.core.exceptions import LLMPolicyRefusal
+
+    monkeypatch.delenv("TEST_MODE", raising=False)
+    monkeypatch.delenv("TLDW_TEST_MODE", raising=False)
+    messaging = "tldw_Server_API.app.core.Workflows.adapters.integration.messaging"
+    monkeypatch.setattr(f"{messaging}.is_test_mode", lambda: False)
+    monkeypatch.setattr(f"{messaging}.DatabasePaths.get_chacha_db_path", lambda _user_id: Path(":memory:"))
+
+    async def fake_to_thread(func: Any, /, *args: Any, **kwargs: Any) -> Any:
+        return func(*args, **kwargs)
+
+    monkeypatch.setattr(f"{messaging}.asyncio.to_thread", fake_to_thread)
+    fake_db = MagicMock()
+    fake_db.count_messages_for_conversation.return_value = 2
+    posts: list[str] = []
+
+    async def refused(**_kwargs: Any):
+        return {"choices": [{"message": {"content": "Output violates moderation policy"}, "finish_reason": "content_filter"}]}
+
+    monkeypatch.setattr("tldw_Server_API.app.core.DB_Management.ChaChaNotes_DB.CharactersRAGDB", lambda *_a, **_k: fake_db)
+    monkeypatch.setattr(
+        "tldw_Server_API.app.core.Character_Chat.modules.character_chat.load_chat_and_character",
+        lambda db, conversation_id_str, user_name: ({"name": "Luna"}, [], None),
+    )
+    monkeypatch.setattr(
+        "tldw_Server_API.app.core.Character_Chat.modules.character_chat.post_message_to_conversation",
+        lambda **kwargs: posts.append(kwargs["message_content"]) or "msg",
+    )
+    monkeypatch.setattr("tldw_Server_API.app.core.Chat.chat_service.perform_chat_api_call_async", refused)
+
+    from tldw_Server_API.app.core.Workflows.adapters.integration import run_character_chat_adapter
+
+    with pytest.raises(LLMPolicyRefusal) as raised:
+        await run_character_chat_adapter(
+            {"action": "message", "conversation_id": "conv-123", "message": "Hello!", "api_name": "openai"},
+            {"user_id": "1"},
+        )
+    assert raised.value.detail == "Output violates moderation policy"
+    assert posts == []
+
+
+@pytest.mark.asyncio
 async def test_character_chat_adapter_message_preflights_limit_before_llm(monkeypatch):
     """Message action should fail fast on message limit before spending an LLM call."""
     monkeypatch.delenv("TEST_MODE", raising=False)

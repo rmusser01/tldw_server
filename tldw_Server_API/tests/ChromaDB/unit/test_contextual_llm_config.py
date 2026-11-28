@@ -63,3 +63,16 @@ def test_contextualization_respects_provider_and_model(chromadb_manager, mock_ch
         assert kwargs.get("model_override") == "claude-3-7-sonnet-20250219"
         # Temperature is the 6th positional argument
         assert pytest.approx(args[5], rel=1e-6) == 0.33
+
+
+@pytest.mark.unit
+def test_a_refusal_gives_an_empty_outline_and_an_empty_context_header(chromadb_manager):
+    """Optional enrichment: a refusal is a labelled skip (empty outline, empty header), never an error, so the caller embeds on."""
+    from tldw_Server_API.app.core.exceptions import LLMPolicyRefusal
+
+    def refused(*_args, **_kwargs):
+        raise LLMPolicyRefusal("Input violates moderation policy")
+
+    with patch("tldw_Server_API.app.core.Embeddings.ChromaDB_Library.analyze", side_effect=refused):
+        assert chromadb_manager._build_document_outline("openai", None, "a document", None) == ""
+        assert chromadb_manager.situate_context("openai", None, "a document", "a chunk", None) == ""

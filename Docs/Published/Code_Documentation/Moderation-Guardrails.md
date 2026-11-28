@@ -34,10 +34,11 @@ Configuration ([Moderation] in `tldw_Server_API/Config_Files/config.txt`)
 Per-surface keys
 - Every LLM call names a surface id. `[Moderation] surface.<id> = true|false` narrows the default policy for that surface: `false` turns the global default off there; `true` or unset inherits it. A key cannot turn moderation on when `enabled = false`.
 - Order: the surface key narrows the global default, then an explicit per-user override `enabled` coalesces over it (an explicit `true` re-enables), then the Guardian overlay forces `enabled = true`. Callers that pass no surface (admin effective-policy endpoints, the workflow moderation step) get no narrowing.
-- An id that is not in the table below logs one warning and is ignored. The keys are config-only (no env variable). `MODERATION_STREAM_BUFFER_CHARS` / `stream_buffer_chars` (default 1024) sizes the output stream buffer.
+- An id that is not in the table below logs one warning and is ignored. The keys are config-only (no env variable). `MODERATION_STREAM_BUFFER_CHARS` / `stream_buffer_chars` (default 1024) sizes the output stream buffer; `0` means no holdback (a match that spans two chunks can then slip through), a negative value is rejected. The gateway hooks read the config key or the env variable; chat's own stream reader reads only the env variable, so the config key never reaches chat.
 - Caller-moderated (the caller already moderates): `chat.completions`.
-- Exempt (never moderated): `internal.byok_probe`, `internal.first_chat_verifier`, `internal.eval_judge`, `moderation.classifier`.
-- Fallback for a call that names no surface: `unclassified` (moderated).
+- Exempt (never moderated): `internal.byok_probe`, `internal.eval_judge`, `moderation.classifier`.
+- Implicit default: about 32 `analyze()` calls in 15 modules (reading summaries, watchlist outputs, the ingestion libraries, contextual embedding, the RAG rerank fallback) name no surface of their own and run as `media.summarization`, so `surface.media.summarization = false` turns moderation off for all of them. More precise surfaces for them are a follow-up.
+- Backstop: a call that names no surface is moderated as `unclassified` under the default policy, with one warning (`unsurfaced LLM call provider=...`) per provider per process. `surface.unclassified = false` narrows it like any other id. A new call site should name its surface; a lint fails the build when a gateway call site does not.
 - Moderated surfaces:
   - chat: `chat.completions.router`, `chat.prompt_improvement`, `chat.document_generation`, `chat.macros`, `chat.dialogue_workflows`, `sharing.workspace_chat`
   - messages and character: `messages`, `character.completion`, `character.roleplay_resume`, `character.router`, `character.memory_extraction`
@@ -47,6 +48,7 @@ Per-surface keys
   - media and audio: `media.summarization`, `media.document_insights`, `audio.insights`
   - automation, documents and generation: `scheduled_tasks.automation`, `chunking.boundaries`, `claims.extraction`, `notes.graph_suggestions`, `rpg.rules`, `skills.execution`, `slides.generation`, `slides.standalone_html`
   - web and writing: `web.search`, `web.extraction`, `writing.manuscript`, `writing.note_title`
+  - setup: `setup.first_chat` (the first-run first-chat check sends the client's own prompt, so it is moderated; a refusal on `POST /setup/first-run/first-chat` is a 400)
   - everything else: `vn_play`, `mcp.model_completion`, `evaluations`, `data_tables.generation`, `explainer`
 - Example:
   ```
@@ -55,6 +57,33 @@ Per-surface keys
   surface.rag.generation = false
   surface.web.search = false
   ```
+
+Coverage and limits
+- Where it runs: the gateway moderation hooks (registered at app startup and in every LLM worker) moderate the input messages before the provider call and the model output after it, stream and non-stream, on every surface in the table above. Chat (`chat.completions`) keeps its own pipeline, which moderates before the user turn is persisted and writes the audit rows.
+- Refusals: a blocked input raises `LLMPolicyRefusal` (HTTP 400 on API surfaces). A blocked output is a refusal too, but its shape depends on the surface. Refusals are not retried and do not fail over to another provider.
+- Refusal shapes:
+
+  | Surface kind | Input block | Output block | Stream block |
+  | --- | --- | --- | --- |
+  | Raising surfaces (workflows, study, prompt studio, summarization, chunking, claims and most job workers) | `LLMPolicyRefusal`, HTTP 400 `Input violates moderation policy`; a job fails with `llm_policy_refused` and is not retried | `LLMPolicyRefusal`, 400 `Output violates moderation policy`; the answer is never parsed, scored or stored | The stream raises the same refusal |
+  | Pass-through surfaces (RAG generation, character complete-v2, speech chat) | 400 | HTTP 200 with the refusal text as the content and `finish_reason: content_filter` | A refusal content delta, then `finish_reason: content_filter` and `[DONE]` |
+  | `/messages` (Anthropic format) | 400 | `stop_reason: refusal` with the refusal text block | A refusal text delta, then a `refusal` stop |
+  | Voice WebSocket | An `llm_policy_refused` error frame | The refusal is sent as an `llm_delta` and spoken | An `llm_delta` with the refusal text |
+  | Optional stages (RAG research loop and suggestions, contextual embedding, claims, chunking) | A labelled skip: stage `failure_code` `llm_policy_refused`, log label `claims_policy_refused`, `ai_assist_policy_refused`, `outline_policy_refused` or `context_policy_refused`; the main answer or embedding completes | Same (the research loop's output block stops the loop and sets no `failure_code`) | Same |
+
+  Module codes: `notes_graph_provider_policy_refused` (notes graph suggestions), `model_policy_refused` (MCP model completion; ignored by the MCP module breaker), `claims_policy_refused`, `ai_assist_policy_refused` (chunking skip). A blocked router answer (`chat.completions.router`, `character.router`) falls back to rules routing; it is harmless, because the router's output is a model name.
+- Known behaviour: a provider's own content filter (`finish_reason` `content_filter`, for example Azure OpenAI) is now surfaced as a refusal with the wording "The provider's content filter refused the answer", whether or not moderation is on. A reply our hook blocked keeps "Output violates moderation policy" (its content is exactly that text). A refused reply is never parsed and never retried.
+- Exempt, with reasons:
+  - `internal.byok_probe`: fixed `max_tokens=1` provider health probe with no user content.
+  - `internal.eval_judge` (owner decision 2026-11-26): judge calls are measurement; moderating judge input or output would change the scores. The model under evaluation is still moderated (`evaluations`). The evals CLIs are operator tools: they register no hooks, so nothing they call is moderated at all.
+  - `moderation.classifier`: it is the moderation (classifying text with an LLM must not recurse into moderation).
+  - OCR LLM backends (llama.cpp, ChatLLM, Points): transcription of the user's own document, not generation (owner decision); they use raw HTTP and are not on a surface.
+- Reserved ids: an exempt or caller-moderated id may be written as an `llm_surface` literal only in its designated modules (a lint enforces this), and no mapping that carries user, request or config data can set `llm_surface`.
+- Not moderated: text sent as the system message (skills, web search, character cards); content parts that are lists (image or other non-text parts); tool-call arguments; `reasoning_content`; server-side tool-continuation output; the `/llamacpp` passthrough; VN Play's own unwired adapter; the `Local_LLM` handlers (not reachable from a route today).
+- Stream latency: output moderation holds back the last `stream_buffer_chars` characters (default 1024) of a stream so a match that spans chunks is caught before it is sent. A short reply is released only at the end of the stream; a long one trails the model by that many characters. Lower the value for responsiveness, raise it for longer-spanning patterns. Every chunk that carries a `provider_response` (a Google event holds every part's text) is rebuilt without it while moderation is on.
+- Guardian cache: a user who has no Guardian DB is remembered as such for 60 s, so a user who gains one waits up to 60 s before its rules apply on hook surfaces.
+- Worker policy: the moderation service is a per-process singleton, and a standalone worker (compose workers, Prompt Studio, media ingest, audio, data tables, explainer, research) keeps the policy it loaded at its first call until it restarts. Admin changes (per-user overrides, blocklist edits, `PUT /moderation/settings`, `/reload`) reach only the API process; restart the workers to apply them. A reload is a follow-up.
+- Persisted text: hook surfaces moderate only the request sent to the provider and the model reply. A surface may therefore store the user's original, unredacted text (chat redacts before persisting). Hook surfaces write no audit rows, and self-monitoring and topic monitoring do not run on them; these are filed as follow-ups under TASK-13950.
 
 Blocklist Grammar
 - Literal: `confidential project`
