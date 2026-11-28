@@ -403,6 +403,37 @@ describe("document Chat fallback ownership", () => {
     expect(io.saveMessage).not.toHaveBeenCalled()
   })
 
+  it("restores the transcript and chat context in timestamp order from browser storage", async () => {
+    const saved = savedHistory("Saved topic", { createdAt: 2 })
+    const other = savedHistory("Other topic")
+    const question: Message = {
+      id: "z-question", history_id: saved.id, name: "User", role: "user",
+      createdAt: 10, content: "Original question", images: []
+    }
+    const answer: Message = {
+      id: "a-answer", history_id: saved.id, name: "Model", role: "assistant",
+      createdAt: 11, content: "Original answer", images: [], parent_message_id: question.id
+    }
+    io.listHistories.mockResolvedValue([saved, other])
+    io.getFull.mockImplementation(async id => id === saved.id
+      ? { historyInfo: saved, messages: [answer, question] }
+      : savedChat(other, "Other answer"))
+
+    const { result } = renderHook(() => useDocumentChat(1, operation))
+    await waitFor(() => expect(result.current.isChatReady).toBe(true))
+    act(() => result.current.selectConversation(other.id))
+    await waitFor(() => expect(result.current.messages[0]?.message).toBe("Other answer"))
+    act(() => result.current.selectConversation(saved.id))
+    await waitFor(() => expect(result.current.isChatReady).toBe(true))
+
+    const expected = [
+      ["user", "Original question"],
+      ["assistant", "Original answer"]
+    ]
+    expect(result.current.messages.map(row => [row.role, row.message])).toEqual(expected)
+    expect(useStoreMessageOption.getState().history.map(row => [row.role, row.content])).toEqual(expected)
+  })
+
   it("restores distinct saved replies with a shared parent while deduplicating server message identities", async () => {
     const history = savedHistory("Regenerated chat")
     const chat = savedChat(history, "Original")
