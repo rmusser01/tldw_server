@@ -1,5 +1,5 @@
 import React from "react"
-import { fireEvent, render as renderUI, screen, waitFor } from "@testing-library/react"
+import { fireEvent, render as renderUI, screen, waitFor, within } from "@testing-library/react"
 import { MemoryRouter } from "react-router-dom"
 import { beforeEach, describe, expect, it, vi } from "vitest"
 
@@ -35,6 +35,7 @@ const state = vi.hoisted(() => {
     cancelRunMutateAsync: vi.fn(),
     continueRunMutateAsync: vi.fn(),
     activeRun: null as any,
+    activeRunError: null as Error | null,
     transcript: null as any,
     navigate: vi.fn(),
     notification: {
@@ -74,8 +75,8 @@ vi.mock("@/hooks/useChatWorkflows", () => ({
   useChatWorkflowRun: () => ({
     data: state.activeRun,
     isLoading: false,
-    isError: false,
-    error: null
+    isError: state.activeRunError !== null,
+    error: state.activeRunError
   }),
   useChatWorkflowTranscript: () => ({
     data: state.transcript,
@@ -279,11 +280,17 @@ describe("ChatWorkflowsPage", () => {
       conversation_id: "server-chat-456"
     })
     state.activeRun = null
+    state.activeRunError = null
     state.transcript = null
   })
 
   it("loads a library template into the builder", async () => {
     render(<ChatWorkflowsPage />)
+
+    const library = within(screen.getByRole("tabpanel", { name: "Library" }))
+    const guidance = library.getByRole("status")
+    expect(guidance).toHaveTextContent("Reusable templates")
+    expect(guidance).toHaveAttribute("aria-live", "off")
 
     fireEvent.click(screen.getByRole("button", { name: "Edit in Builder" }))
 
@@ -357,6 +364,18 @@ describe("ChatWorkflowsPage", () => {
     })
     expect(screen.getByText("Run in progress")).toBeInTheDocument()
     expect(screen.getByText("What outcome are we aiming for?")).toBeInTheDocument()
+  })
+
+  it("shows the active run load error and its details as an alert", async () => {
+    state.activeRunError = new Error("The run could not be retrieved.")
+    render(<ChatWorkflowsPage />)
+
+    fireEvent.click(screen.getByRole("button", { name: "Start Run" }))
+
+    const panel = await screen.findByRole("tabpanel", { name: "Run" })
+    const alert = await within(panel).findByRole("alert")
+    expect(alert).toHaveTextContent("Unable to load the active workflow run.")
+    expect(alert).toHaveTextContent("The run could not be retrieved.")
   })
 
   it("starts a guided run from the current builder draft", async () => {
@@ -457,6 +476,7 @@ describe("ChatWorkflowsPage", () => {
       expect(screen.getByText("What outcome are we aiming for?")).toBeInTheDocument()
     })
 
+    const runStatus = screen.getByRole("status", { name: "Workflow run status" })
     fireEvent.change(screen.getByLabelText("Answer for current step"), {
       target: { value: "Ship a feature" }
     })
@@ -468,7 +488,8 @@ describe("ChatWorkflowsPage", () => {
         answer_text: "Ship a feature"
       })
     })
-    expect(screen.getByText("Workflow complete")).toBeInTheDocument()
+    expect(screen.getByRole("status", { name: "Workflow run status" })).toBe(runStatus)
+    expect(runStatus).toHaveTextContent("Workflow complete")
 
     fireEvent.click(screen.getByRole("button", { name: "Continue to Chat" }))
 
@@ -478,5 +499,30 @@ describe("ChatWorkflowsPage", () => {
     expect(state.navigate).toHaveBeenCalledWith(
       "/chat?settingsServerChatId=server-chat-456"
     )
+  })
+
+  it("keeps the cancellation announcement mounted across a failed run refresh", async () => {
+    const view = render(<ChatWorkflowsPage />)
+
+    fireEvent.click(screen.getByRole("button", { name: "Start Run" }))
+    await screen.findByText("What outcome are we aiming for?")
+    const run = within(screen.getByRole("tabpanel", { name: "Run" }))
+    const runStatus = screen.getByRole("status", { name: "Workflow run status" })
+
+    fireEvent.click(run.getByRole("button", { name: "Cancel Run" }))
+    await waitFor(() => expect(state.cancelRunMutateAsync).toHaveBeenCalledOnce())
+    state.activeRunError = new Error("The run could not be refreshed.")
+    view.rerender(<ChatWorkflowsPage />)
+
+    expect(run.getByRole("alert")).toHaveTextContent("The run could not be refreshed.")
+    expect(screen.getByRole("status", { name: "Workflow run status" })).toBe(runStatus)
+    expect(runStatus).toBeEmptyDOMElement()
+
+    state.activeRunError = null
+    view.rerender(<ChatWorkflowsPage />)
+
+    expect(screen.getByRole("status", { name: "Workflow run status" })).toBe(runStatus)
+    expect(runStatus).toHaveTextContent("Workflow canceled")
+    expect(runStatus).toHaveTextContent("You can return to the library or launch a fresh run.")
   })
 })
