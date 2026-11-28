@@ -1105,8 +1105,8 @@ def test_pr_context_and_base_diff_logic_are_workflow_run_safe() -> None:
     assert combined_text.count("github.event.pull_request.number") == 28  # nosec B101
     assert combined_text.count("github.event.workflow_run.pull_requests[0].head.sha") == 59  # nosec B101
     assert combined_text.count("github.event.pull_request.head.sha") == 62  # nosec B101
-    # The backlog task ratchet still gets the PR base (TASK-13440).
-    assert combined_text.count("github.event.pull_request.base.sha") == 6
+    # Both backend lanes give the backlog task ratchet the PR base (TASK-13440).
+    assert combined_text.count("github.event.pull_request.base.sha") == 7
     assert combined_text.count("needs.admission.outputs.base_sha") == 11
 
     for name, output_names in CHANGE_CLASSIFIER_OUTPUTS.items():

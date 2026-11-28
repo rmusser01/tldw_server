@@ -10,6 +10,7 @@ dependencies:
 references:
 - Docs/ADR/106-dev-pr-sanity-only.md
 - Docs/Development/CI_REQUIRED_GATES.md
+- https://github.com/rmusser01/tldw_server/pull/3680
 - https://github.com/rmusser01/tldw_server/pull/3540
 ---
 
@@ -23,8 +24,8 @@ Limit PRs targeting dev to cheap syntax and static checks and retain full CI, br
 <!-- AC:BEGIN -->
 - [ ] #1 No dev PR builds a Docker image or starts browser, coverage, or broad test matrices.
 - [ ] #2 Required dev contexts and trusted license admission keep reporting while backend, frontend and security validation use bounded static checks.
-- [ ] #3 Main, release, nightly and manual validation retain their original workloads and triggers.
-- [ ] #4 Coverage includes dev code and docs routing, failure handling, and the impact of strict current-base branch protection.
+- [x] #3 Main, release, nightly and manual validation retain their original workloads and triggers.
+- [x] #4 Coverage includes dev code and docs routing, failure handling, and the impact of strict current-base branch protection.
 <!-- AC:END -->
 
 ## Implementation Notes
@@ -33,6 +34,7 @@ Limit PRs targeting dev to cheap syntax and static checks and retain full CI, br
 ADR required: yes. Follow up on ADR-096 with a record of the dev-only sanity policy. ADR-063 still governs current-base queueing. Related: TASK-13462 and PR #3540.
 Kept the existing required context names while skipping Docker, coverage and browser workloads on dev PRs. Backend and frontend sanity check the test merge commit. The separate trusted license status and static security checks still gate dev. Strict GitHub rules force a fresh sanity result whenever the queue rebases; scope and tradeoffs are recorded in ADR-106.
 Local result: 507 targeted workflow contracts passed, plus actionlint, the dev backend sanity commands, and Backlog ID validation. Bandit found zero new issues in touched tests. Hosted status checks and merge are pending.
+Independent requesting-code-review caught a missing clean-runner dependency and input routing gaps. The dev preflight now checks the quickstart target and scopes workflow and Backlog contracts to their own inputs without a backend application dependency install. Replaying the actual shell in a fresh venv passed 362 checks, including the canonical Backlog ratchet. GitHub reported all four legacy contexts skipped on the initial PR head, including the Docker matrix.
 <!-- SECTION:IMPLEMENTATION_NOTES:END -->
 
 ## Final Summary

@@ -8,9 +8,9 @@
 
 ## Decision
 
-Run lightweight, path-scoped checks on PRs targeting `dev`. Backend sanity covers Python syntax, the HTTP client patch guard, and the quickstart dry run. Frontend sanity covers lint and TypeScript checks. Keep backlog ID validation, trusted license admission, and static security checks.
+Run lightweight, path-scoped checks on PRs targeting `dev`. Backend sanity covers Python syntax, the HTTP client patch guard, and the quickstart dry run. Frontend sanity covers lint and TypeScript checks. Keep backlog ID and format validation, trusted license admission, and static security checks.
 
-Docker builds, coverage floors, browser tests, and broad test suites run on their existing `main`, publication, nightly, or manual routes. The four full-suite workflows still named in the `dev` ruleset keep their PR triggers and report skipped required jobs. The three active gates enforce license admission and change detection.
+Docker builds, coverage floors, browser tests, and broad test suites run on their existing `main`, publication, nightly, or manual routes. The four full-suite workflows still named in the `dev` ruleset keep their PR triggers and report skipped required jobs. The three active gates enforce change detection and keep their existing license-first configuration. GitHub still requires the trusted license status to merge.
 
 This updates the `dev` PR portion of [ADR-096](096-tiered-development-and-release-ci.md). Full release qualification follows ADR-096. Strict current-base enforcement and queueing follow [ADR-063](063-in-repo-merge-queue.md).
 

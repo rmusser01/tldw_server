@@ -64,6 +64,38 @@ jobs:
       - name: Check backlog task ids are unique
         run: python3 Helper_Scripts/ci/check_backlog_task_ids.py .
 
+      - name: Check dev quickstart target
+        if: github.base_ref == 'dev'
+        run: make -n quickstart-install
+
+      - name: Check dev workflow and backlog contracts
+        if: github.base_ref == 'dev'
+        shell: bash
+        env:
+          BACKLOG_TASK_FORMAT_BASE: ${{ github.event.pull_request.base.sha }}
+          PYTHONPATH: tools/backlog-py/src
+          PYTEST_DISABLE_PLUGIN_AUTOLOAD: "1"
+        run: |
+          tests=()
+          ci_changes=$(git diff --name-only --no-renames HEAD^1 HEAD -- .github/ Helper_Scripts/ci/ tldw_Server_API/tests/CI/)
+          if [[ -n "$ci_changes" ]]; then
+            tests+=(
+              tldw_Server_API/tests/CI/test_license_first_workflow_contracts.py
+              tldw_Server_API/tests/CI/test_merge_queue_gate_workflows.py
+            )
+          fi
+          task_changes=$(git diff --name-only --no-renames HEAD^1 HEAD -- ':(glob)backlog/tasks/*.md' tools/backlog-py/)
+          if [[ -n "$task_changes" ]]; then
+            tests+=(tldw_Server_API/tests/CI/test_backlog_task_format_ratchet.py)
+          fi
+          if (( ${#tests[@]} == 0 )); then
+            exit 0
+          fi
+          contract_venv="$RUNNER_TEMP/dev-ci-contracts"
+          python3 -m venv "$contract_venv"
+          "$contract_venv/bin/python" -m pip install 'pytest>=9.0.3,<9.1' 'PyYAML>=6.0.0' 'defusedxml>=0.7.0'
+          PATH="$contract_venv/bin:$PATH" python -m pytest -q --confcutdir=tldw_Server_API/tests/CI "${tests[@]}"
+
   # The complete timezone axis has its own budget; backend-required still rejects
   # any missing or unsuccessful result before its other gates (TASK-13260.278.18.83.45).
   non-utc-tests:
@@ -764,7 +796,7 @@ jobs:
         env:
           CHANGES_RESULT: ${{ needs.changes.result }}
         run: |
-          echo "::error::Change detection (the 'changes' job) ended as '${CHANGES_RESULT}', not 'success', so this gate cannot tell what the head changed and ran nothing. If its 'Check backlog task ids are unique' step failed, renumber the file it names; otherwise re-run the workflow."
+          echo "::error::The 'changes' job ended as '${CHANGES_RESULT}'. Inspect the failed step for the diff, backlog IDs, or dev preflight. If it found a duplicate task ID, renumber the file it names."
           exit 1
 
       - name: Require non-UTC timestamp tests to have passed
@@ -897,24 +929,9 @@ jobs:
         with:
           python-version: '3.12'
 
-      - name: Check HTTP client patching and quickstart target
+      - name: Check HTTP client patching
         if: github.base_ref == 'dev' && needs.changes.outputs.backend_changed == 'true'
-        run: |
-          python Helper_Scripts/checks/guard_http_client_patching.py
-          make -n quickstart-install
-
-      - name: Check workflow contracts when CI changes
-        if: github.base_ref == 'dev' && needs.changes.outputs.backend_changed == 'true'
-        env:
-          PYTEST_DISABLE_PLUGIN_AUTOLOAD: "1"
-        run: |
-          if git diff --quiet HEAD^1 HEAD -- .github/ Helper_Scripts/ci/ tldw_Server_API/tests/CI/; then
-            exit 0
-          fi
-          python -m pip install pytest pyyaml
-          python -m pytest -q --confcutdir=tldw_Server_API/tests/CI \
-            tldw_Server_API/tests/CI/test_license_first_workflow_contracts.py \
-            tldw_Server_API/tests/CI/test_merge_queue_gate_workflows.py
+        run: python Helper_Scripts/checks/guard_http_client_patching.py
 
       - name: Compile backend modules
         if: needs.changes.outputs.backend_changed == 'true'

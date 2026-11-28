@@ -8,7 +8,7 @@ This document defines the required pull-request gates and server CI tiers.
 
 | Event | Validation |
 | --- | --- |
-| `dev` PR, including forks | Trusted license status, backlog ID validation, and path-scoped Python syntax and guardrails, frontend lint and type checking, and static security. Pre-commit and workflow lint retain their existing PR scopes. |
+| `dev` PR, including forks | Trusted license status, backlog ID and format validation, and path-scoped Python syntax and guardrails, frontend lint and type checking, and static security. Pre-commit and workflow lint retain their existing PR scopes. |
 | Nightly on `dev` | Existing broad Linux 3.12 shards and the `TEST_MODE=0` rate-limit lane, at the regression run's immutable event SHA |
 | PR into `main` | Complete existing Linux/macOS/Windows matrices and checked wheel/sdist, including a clean wheel install and import. The five-image build check and path-scoped browser and coverage suites retain their existing routes. Require `Main PR release qualification` at the current base. |
 | `main` push, tagged Docker publication or manual server publication | The same full validation at the actual event SHA before eligible PyPI or GHCR jobs can publish |
@@ -341,7 +341,7 @@ Fork PRs and PRs opened by bots or apps are never queued and stay manual.
 - **All eight green:** checks the head against `dev` (the merge state can lag right after a merge) and waits for
   auto-merge. The merge pushes `dev`, which wakes the queue for the next PR.
 
-The queue deletes held runs for supplemental workflows. It promotes `ci.yml` into the approval and retry list when an active `dev` ruleset requires `Server CI verdict`. The default-branch `Wake merge queue after server CI` workflow dispatches the existing queue kick after a same-repository PR CI failure or cancellation when this rule is active.
+The queue deletes held runs for supplemental workflows. The three active sanity gates and four skipped contexts above use the existing required-workflow names.
 
 ### Three details that surprise people
 

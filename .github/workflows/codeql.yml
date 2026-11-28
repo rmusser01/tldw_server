@@ -4,7 +4,7 @@ on:
   # Run on direct pushes to protected/default branches only
   push:
     branches: [ main, master ]
-  # Run on PRs targeting main/master/dev, not every branch
+  # Run on PRs targeting main or master.
   pull_request:
     branches: [ main, master ]
   schedule:
