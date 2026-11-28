@@ -13,7 +13,11 @@ pytestmark = pytest.mark.unit
 
 ROOT = Path(__file__).resolve().parents[3]
 EVIDENCE = json.loads((ROOT / "Docs/Evidence/PR2761-codeql-actions.json").read_text())
-CASES = sorted({(p["workflow"], p["job"], p["event"]) for p in EVIDENCE["checkout_event_proofs"].values()})
+CASES = {(p["workflow"], p["job"], p["event"]) for p in EVIDENCE["checkout_event_proofs"].values()}
+# Coverage checkouts moved from the summary job to the two execution jobs.
+COVERAGE_WORKFLOW = ".github/workflows/coverage-required.yml"
+CASES.remove((COVERAGE_WORKFLOW, "coverage-required", "workflow_dispatch"))
+CASES.update((COVERAGE_WORKFLOW, job, "workflow_dispatch") for job in ("global-coverage", "authnz-coverage"))
 ADMISSION_GUARD = (
     "vars.LICENSE_FIRST_CI_ENABLED == 'true' && "
     "github.event_name == 'workflow_run' && "
@@ -25,6 +29,7 @@ PR_FIELDS = {
 }
 EVENT_SHA_BRANCHES = {
     "(github.event.pull_request.base.ref == 'main' && github.sha)",
+    "(github.base_ref == 'dev' && github.sha)",
     "(inputs.qualification && github.sha)",
 }
 
@@ -64,7 +69,7 @@ def non_pr_checkout_ref(expression: str, jobs: dict[str, Any], job: dict[str, An
     raise AssertionError("No event-commit fallback")
 
 
-@pytest.mark.parametrize(("workflow_path", "job_id", "event"), CASES)
+@pytest.mark.parametrize(("workflow_path", "job_id", "event"), sorted(CASES))
 def test_cache_writing_events_checkout_the_event_commit(workflow_path: str, job_id: str, event: str) -> None:
     workflow = yaml.safe_load((ROOT / workflow_path).read_text())
     assert event in {"schedule", "workflow_dispatch"}

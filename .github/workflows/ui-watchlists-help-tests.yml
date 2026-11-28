@@ -4,7 +4,6 @@ on:
   pull_request:
     branches:
       - main
-      - dev
     paths:
       - "apps/packages/ui/src/components/Option/Watchlists/WatchlistsPlaygroundPage.tsx"
       - "apps/packages/ui/src/components/Option/Watchlists/__tests__/WatchlistsPlaygroundPage.help-links.test.tsx"

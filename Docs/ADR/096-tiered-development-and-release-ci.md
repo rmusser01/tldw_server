@@ -5,6 +5,7 @@
 **Decision owner:** Repository maintainer
 **Related task:** TASK-15572
 **Related plan:** [Server CI tiers](https://github.com/rmusser01/tldw_server/blob/dev/Docs/Development/CI_REQUIRED_GATES.md#server-ci-tiers)
+**Amendment:** [ADR-106](106-dev-pr-sanity-only.md) defines the narrower `dev` PR lane.
 
 ## Decision
 

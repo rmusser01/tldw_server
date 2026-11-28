@@ -19,7 +19,7 @@ def _workflow(name: str) -> dict:
 
 def test_main_pr_has_an_unfiltered_distinct_release_check():
     workflow = _workflow("ci")
-    assert workflow[True]["pull_request"] == {"branches": ["dev", "main"]}  # nosec B101
+    assert workflow[True]["pull_request"] == {"branches": ["main"]}  # nosec B101
     verdict = workflow["jobs"]["release-qualified"]
     assert _evaluate(  # nosec B101
         verdict["if"],

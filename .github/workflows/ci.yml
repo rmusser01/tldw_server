@@ -4,7 +4,7 @@ run-name: ${{ inputs.nightly && 'Server nightly regression' || github.event.pull
 
 on:
   pull_request:
-    branches: [dev, main]
+    branches: [main]
   workflow_dispatch:
     inputs:
       nightly:

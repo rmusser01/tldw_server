@@ -4,7 +4,6 @@ on:
   pull_request:
     branches:
       - main
-      - dev
     paths:
       - "apps/packages/ui/src/components/Option/WorldBooks/**"
       - "apps/packages/ui/src/assets/tailwind-shared.css"

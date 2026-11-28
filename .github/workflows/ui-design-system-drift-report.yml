@@ -2,7 +2,7 @@ name: UI Design-System Drift Report
 
 on:
   pull_request:
-    branches: [dev, main]
+    branches: [main]
     paths:
       - "apps/packages/ui/src/**"
       - "apps/packages/ui/scripts/design-system-drift-*"

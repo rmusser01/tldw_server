@@ -4,7 +4,6 @@ on:
   pull_request:
     branches:
       - main
-      - dev
     paths:
       - "apps/test-utils/research-workspace/**"
       - "apps/tldw-frontend/e2e/workflows/research-workspace.parity.spec.ts"

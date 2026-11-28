@@ -7,11 +7,10 @@ the FINAL_SUMMARY markers. ``backlog-py task normalize`` rewrites all of that in
 canonical form, and every backlog-py edit leaves the file it touches canonical.
 
 The check reads only the task files changed between the merge base with
-``BACKLOG_TASK_FORMAT_BASE`` and HEAD. backend-required passes the PR's base commit;
-a local run defaults to ``origin/dev``. Scoping it to the change means a PR is never
-failed for a file it did not touch: a non-canonical file that reached dev through a
-PR this gate did not run on (a backlog-only PR) cannot block unrelated work, and the
-legacy files TASK-13441 normalizes need no baseline.
+``BACKLOG_TASK_FORMAT_BASE`` and HEAD. backend-required passes the PR's base commit
+in both the dev sanity and full lanes. A local run defaults to ``origin/dev``.
+Scoping the check to changed files keeps existing formatting issues from
+blocking unrelated work.
 
 A failure here usually means a task file was written by the Node CLI. Fix it with:
 
@@ -87,15 +86,16 @@ def test_task_files_changed_by_this_change_are_canonical() -> None:
 
 def test_backend_required_gives_the_ratchet_the_pr_base() -> None:
     """Without the base the required gate would fall back to origin/dev, or skip."""
-    steps = [
-        step
-        for job in yaml.safe_load(WORKFLOW.read_text(encoding="utf-8"))["jobs"].values()
-        for step in job.get("steps", [])
-        if "test_backlog_task_format_ratchet.py" in str(step.get("run", ""))
-    ]
-
-    assert len(steps) == 1
-    assert "base_sha" in str(steps[0].get("env", {}).get(BASE_ENV, ""))
+    jobs = yaml.safe_load(WORKFLOW.read_text(encoding="utf-8"))["jobs"]
+    for job_id, base in {
+        "changes": "${{ github.event.pull_request.base.sha }}",
+        "backend-required": "${{ inputs.base_sha || github.event.pull_request.base.sha || github.event.before }}",
+    }.items():
+        (step,) = [
+            step for step in jobs[job_id]["steps"]
+            if "test_backlog_task_format_ratchet.py" in step.get("run", "")
+        ]
+        assert step["env"][BASE_ENV] == base
 
 
 _CROSSED = (
