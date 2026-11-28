@@ -28,6 +28,90 @@ async function capture(page: Page, info: TestInfo, name: string) {
   await info.attach(name, { path, contentType: 'image/png' });
 }
 
+for (const [device, width, height] of [['desktop', 1280, 800], ['mobile', 390, 844]] as const) {
+  test(`preserves the draft through playlist replacement review and Undo on ${device}`, async ({ page }, info) => {
+    await page.setViewportSize({ width, height });
+    const fixture = await installBrowserFixture(page, { webUrl, playlistPreflight: true, processingPolls: 0 });
+    const items = [
+      { ordinal: 1, title: 'Field recording techniques', source_url: 'https://www.youtube.com/watch?v=a1234567890', duplicate_status: 'duplicate_existing', selected: false },
+      { ordinal: 2, title: 'Interview notes in practice', source_url: 'https://www.youtube.com/watch?v=b1234567890', duplicate_status: 'new', selected: true },
+    ];
+    await page.route('**/api/v1/media/playlists/preflight', route => route.fulfill({
+      headers: { 'access-control-allow-origin': '*', 'access-control-allow-headers': '*', 'access-control-allow-methods': 'POST,OPTIONS' },
+      json: { playlist_title: 'Oral history workshop', playlist_id: 'PLfieldnotes', item_count: 2, selected_count: 1, duplicate_count: 1, items },
+    }));
+    const dialog = await openIngest(page);
+    await dialog.getByRole('button', { name: 'Links', exact: true }).click();
+    const links = dialog.getByRole('textbox', { name: /URLs input/i });
+    await links.fill('https://www.youtube.com/playlist?list=PLfieldnotes');
+    await dialog.getByRole('button', { name: 'Preview', exact: true }).click();
+    await dialog.getByRole('radio', { name: 'Overwrite', exact: true }).check();
+    await dialog.getByRole('button', { name: 'Add 2', exact: true }).click();
+    await useQuickPreset(dialog);
+    await dialog.getByRole('button', { name: 'Hide settings', exact: true }).click();
+    await links.fill('https://example.org/interview-index');
+    await dialog.getByRole('button', { name: 'Text', exact: true }).click();
+    const passage = dialog.getByRole('textbox', { name: 'Pasted text input' });
+    await passage.fill('Follow up with the archivist about the interview dates.');
+    const editor = dialog.locator('.qi-web-scroll:visible');
+    const scrollBeforeReview = await editor.evaluate(el => el.scrollTop);
+    const review = dialog.getByRole('button', { name: 'Review replacements', exact: true });
+    await review.click();
+    await expect(dialog.getByRole('heading', { name: 'Review replacements' })).toBeFocused();
+    await expect(dialog.getByText('2 sources will run', { exact: true })).toBeVisible();
+    await expect(dialog.getByText('1 existing Media item may be replaced.', { exact: true })).toBeVisible();
+    const affected = dialog.getByRole('listitem');
+    await expect(affected).toHaveCount(1);
+    await expect(affected).toContainText(items[0].title);
+    await expect(affected).toContainText(items[0].source_url);
+    const back = dialog.getByRole('button', { name: 'Back to sources' });
+    const confirm = dialog.getByRole('button', { name: 'Confirm and save 2 sources' });
+    await expect(back).toBeInViewport({ ratio: 1 });
+    await expect(confirm).toBeInViewport({ ratio: 1 });
+    if (device === 'mobile') {
+      for (const button of [back, confirm]) expect((await button.boundingBox())!.width).toBeGreaterThan(width * 0.85);
+    }
+    await capture(page, info, 'replacement-review-' + device);
+    await back.focus();
+    await back.press('Enter');
+    await expect(review).toBeFocused();
+    await expect(passage).toHaveValue('Follow up with the archivist about the interview dates.');
+    expect(await editor.evaluate(el => el.scrollTop)).toBe(scrollBeforeReview);
+    await dialog.getByRole('button', { name: 'Clear all', exact: true }).click();
+    const undo = dialog.getByRole('button', { name: 'Undo', exact: true });
+    await expect(undo).toBeFocused();
+    await expect(dialog.getByText('2 sources cleared.', { exact: true })).toBeVisible();
+    await capture(page, info, 'undo-clear-' + device);
+    await undo.click();
+    await expect(dialog.getByRole('button', { name: 'Clear all' })).toBeFocused();
+    await dialog.getByRole('button', { name: 'Links', exact: true }).click();
+    await expect(links).toHaveValue('https://example.org/interview-index');
+    expect(fixture.jobs.size).toBe(0);
+    await review.click();
+    await dialog.getByRole('button', { name: 'Confirm and save 2 sources' }).click();
+    await expect(dialog.getByRole('heading', { name: '2 saved to Media' })).toBeVisible();
+    expect([...fixture.jobs.values()].map(job => job.source_url)).toEqual(items.map(item => item.source_url));
+    const submissions = fixture.requests.filter(request => request.method === 'POST' && request.path === '/api/v1/media/ingest/jobs');
+    expect(submissions.map(request => request.body.overwrite_existing)).toEqual([true, false]);
+  });
+}
+
+test('Undo keeps pasted sources added before and after Clear all ready to run', async ({ page }) => {
+  await installBrowserFixture(page, { webUrl });
+  const dialog = await openIngest(page);
+  await dialog.getByRole('button', { name: 'Text', exact: true }).click();
+  const paste = async (value: string) => {
+    await dialog.getByRole('textbox', { name: 'Pasted text input' }).fill(value);
+    await dialog.getByRole('button', { name: /Add pasted text to queue/ }).click();
+  };
+  await paste('Map');
+  await paste('Log');
+  await dialog.getByRole('button', { name: 'Clear all' }).click();
+  await paste('Key');
+  await dialog.getByRole('button', { name: 'Undo', exact: true }).click();
+  await expect(dialog.getByRole('status', { name: 'Source counts' })).toHaveText('3 ready');
+});
+
 test('processing confirmations keep every action in reach on a narrow phone', async ({ page }) => {
   await page.setViewportSize({ width: 320, height: 700 });
   await installBrowserFixture(page, { webUrl, processingPolls: 100 });

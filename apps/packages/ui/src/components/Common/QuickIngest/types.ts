@@ -208,6 +208,7 @@ export type QueueItemValidation = {
 export type PlaylistQueueMetadata = {
   playlistId?: string | null
   playlistTitle?: string | null
+  sourceTitle?: string
   ordinal?: number
   normalizedSourceId?: string | null
   duplicateStatus?: "new" | "duplicate_in_batch" | "duplicate_existing" | "unknown"

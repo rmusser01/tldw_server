@@ -54,6 +54,7 @@ export async function installBrowserFixture(
     count?: number;
     webUrl?: string;
     processingPolls?: number;
+    playlistPreflight?: boolean;
     ingestFailure?: boolean;
     errorList?: boolean;
   } = {}
@@ -160,6 +161,7 @@ export async function installBrowserFixture(
           '/api/v1/rag/search': { post: {} },
           '/api/v1/media/process-web-scraping': { post: {} },
           '/api/v1/media/process-documents': { post: {} },
+          ...(options.playlistPreflight ? { '/api/v1/media/playlists/preflight': { post: {} } } : {}),
         },
       });
     if (path === '/api/v1/config/docs-info')
@@ -169,7 +171,7 @@ export async function installBrowserFixture(
           hasMediaIngestJobs: true,
           hasMediaIngestJobEvents: false,
           hasMediaIngestWorker: true,
-          hasMediaPlaylistPreflight: false,
+          hasMediaPlaylistPreflight: options.playlistPreflight ?? false,
           hasDurableMediaCollections: true,
           hasKnowledgeQaMediaScope: true,
         },
@@ -312,8 +314,9 @@ export async function installBrowserFixture(
     }
     if (path === '/api/v1/media/ingest/jobs' && method === 'POST') {
       const id = ++state.nextJob;
+      const firstUrl = Array.isArray(body?.urls) ? body.urls[0] : body?.urls;
       const source =
-        body?.urls?.[0] || body?.url || body?.file?.name || body?.files?.name || 'source.txt';
+        firstUrl || body?.url || body?.file?.name || body?.files?.name || 'source.txt';
       const attempts = (state.attempts.get(source) || 0) + 1;
       state.attempts.set(source, attempts);
       const job = {

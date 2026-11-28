@@ -159,6 +159,9 @@ export const inferIngestTypeFromUrl = (url: string): IngestEntryType => {
   return INGEST_TYPE_MAP[inferMediaTypeFromUrl(url)]
 }
 
+export const resolveIngestUrlType = (url: string, type?: IngestEntryType): IngestEntryType =>
+  typeof type === "string" && type && type !== "auto" ? type : inferIngestTypeFromUrl(url)
+
 export const inferIngestTypeFromFilename = (name: string): IngestEntryType =>
   INGEST_TYPE_MAP[inferMediaTypeFromFilename(name)]
 

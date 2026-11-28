@@ -134,11 +134,11 @@ vi.mock("antd", async (importOriginal) => {
         destroyAll: vi.fn()
       }
     ),
-    Button: ({ children, onClick, disabled, ...props }: any) => mocks.useActualAddContentStep ? <actual.Button onClick={onClick} disabled={disabled} {...props}>{children}</actual.Button> : (
-      <button onClick={onClick} disabled={disabled} {...props}>
-        {children}
-      </button>
-    ),
+    Button: React.forwardRef<HTMLButtonElement, any>(function MockButton(props, ref) {
+      return mocks.useActualAddContentStep
+        ? <actual.Button ref={ref} {...props} />
+        : <button ref={ref} {...props} />
+    }),
     Switch: ({ checked, onChange, ...props }: any) => (
     <input
       type="checkbox"
@@ -579,7 +579,7 @@ describe("QuickIngestWizardModal session runtime", () => {
     useQuickIngestSessionStore.getState().createDraftSession({
       selectedPreset: "custom",
       presetConfig: { ...quick, common: { ...quick.common, overwrite_existing: true } },
-      queueItems: [{ id: "existing", kind: "url", url: "https://source.test/existing", detectedType: "web", icon: "Globe", fileSize: 0, validation: { valid: true } }],
+      queueItems: [{ id: "existing", kind: "url", url: "https://source.test/existing.pdf", detectedType: "pdf", icon: "FileText", fileSize: 0, validation: { valid: true } }],
     })
     render(<RuntimeIngestModal open onClose={vi.fn()} />)
     fireEvent.click(await screen.findByRole("button", { name: "Text" }))
@@ -849,9 +849,11 @@ describe("QuickIngestWizardModal session runtime", () => {
     const quick = resolvePresetMap().quick
     useQuickIngestSessionStore.getState().createDraftSession({
       selectedPreset: "custom", presetConfig: { ...quick, common: { ...quick.common, overwrite_existing: mode === "global" } },
-      queueItems: [{ id: "replace", kind: "url", url: "https://source.test/replace", detectedType: "web", icon: "Globe", fileSize: 0, validation: { valid: true },
+      queueItems: [{ id: "replace", kind: "url", url: "https://source.test/replace.pdf", detectedType: "pdf", icon: "FileText", fileSize: 0, validation: { valid: true },
         ...(mode === "playlist" ? { playlist: { duplicateStatus: "duplicate_existing" }, conferenceOverride: { selected: true, duplicatePolicy: "overwrite" as const } } : {}),
-      }, { id: "fresh", kind: "url", url: "https://source.test/fresh", detectedType: "web", icon: "Globe", fileSize: 0, validation: { valid: true } }],
+      }, { id: "fresh", kind: "url", url: "https://source.test/fresh", detectedType: "web", icon: "Globe", fileSize: 0, validation: { valid: true } },
+      { id: "existing", kind: "url", url: "https://source.test/keep.mp4", detectedType: "video", icon: "Film", fileSize: 0, validation: { valid: true },
+        playlist: { duplicateStatus: "duplicate_existing" }, conferenceOverride: { selected: true, duplicatePolicy: "include_existing" } }],
     })
     mocks.startQuickIngestSession.mockResolvedValue({ ok: true, sessionId: "qi-test" })
     render(<RuntimeIngestModal open autoProcessQueued onClose={vi.fn()} />)
@@ -859,9 +861,46 @@ describe("QuickIngestWizardModal session runtime", () => {
     expect(mocks.startQuickIngestSession).not.toHaveBeenCalled()
     fireEvent.click(review)
     const listedSources = screen.getAllByRole("listitem").map(row => row.textContent)
-    expect(listedSources).toEqual(mode === "global" ? ["https://source.test/replace", "https://source.test/fresh"] : ["https://source.test/replace"])
-    fireEvent.click(await screen.findByRole("button", { name: "Confirm and save 2 sources" }))
+    expect(listedSources).toHaveLength(1)
+    expect(listedSources[0]).toContain("https://source.test/replace")
+    expect(screen.getByText("3 sources will run")).toBeVisible()
+    expect(screen.getByText("1 existing Media item may be replaced.")).toBeVisible()
+    fireEvent.click(await screen.findByRole("button", { name: "Confirm and save 3 sources" }))
     await waitFor(() => expect(mocks.startQuickIngestSession).toHaveBeenCalledTimes(1))
+  })
+
+  it("returns to the review trigger with unsent inputs and restores the same queued file and metadata after Clear all", async () => {
+    mocks.useActualAddContentStep = true
+    const quick = resolvePresetMap().quick
+    useQuickIngestSessionStore.getState().createDraftSession({
+      selectedPreset: "custom", presetConfig: { ...quick, common: { ...quick.common, overwrite_existing: true } },
+      queueItems: [{ id: "notes", url: "https://source.test/notes.pdf", detectedType: "pdf", icon: "FileText", fileSize: 0,
+        validation: { valid: true }, conferenceOverride: { selected: true, title: "Survey notes", speaker: "Anne" } }],
+    })
+    render(<RuntimeIngestModal open onClose={vi.fn()} />)
+    fireEvent.click(await screen.findByRole("button", { name: "Files" }))
+    const file = new NodeFile(["Field interview"], "interview.txt", { type: "text/plain" })
+    fireEvent.change(screen.getByTestId("qi-file-input"), { target: { files: [file] } })
+    fireEvent.click(screen.getByRole("button", { name: "Links" }))
+    fireEvent.change(screen.getByRole("textbox", { name: /URL input/i }), { target: { value: "https://unsent.test/" } })
+    fireEvent.click(screen.getByRole("button", { name: "Text" }))
+    fireEvent.change(screen.getByRole("textbox", { name: "Pasted text input" }), { target: { value: "My unqueued passage" } })
+    fireEvent.click(screen.getByRole("button", { name: "Review replacements" }))
+    expect(screen.getByRole("heading", { name: "Review replacements" })).toHaveFocus()
+    expect(screen.getByText("Survey notes")).toBeVisible()
+    fireEvent.click(screen.getByRole("button", { name: "Back to sources" }))
+    expect(screen.getByRole("button", { name: "Review replacements" })).toHaveFocus()
+    expect(screen.getByRole("textbox", { name: "Pasted text input" })).toHaveValue("My unqueued passage")
+    fireEvent.click(screen.getByRole("button", { name: "Links" }))
+    expect(screen.getByRole("textbox", { name: /URL input/i })).toHaveValue("https://unsent.test/")
+    fireEvent.click(screen.getByRole("button", { name: "Clear all" }))
+    fireEvent.click(screen.getByRole("button", { name: "Undo" }))
+    fireEvent.click(screen.getByRole("button", { name: "Review replacements" }))
+    fireEvent.click(screen.getByRole("button", { name: "Confirm and save 2 sources" }))
+    await waitFor(() => expect(mocks.startQuickIngestSession).toHaveBeenCalledTimes(1))
+    const request = mocks.startQuickIngestSession.mock.calls[0][0]
+    expect(request.files[0].directFile).toBe(file)
+    expect(request.entries[0]).toMatchObject({ id: "notes", conferenceOverride: { title: "Survey notes", speaker: "Anne" } })
   })
 
   it("persists both native upload acknowledgements and shows the confirmed result when the first status becomes inaccessible", async () => {

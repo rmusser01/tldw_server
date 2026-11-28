@@ -29,7 +29,9 @@ Use these pages when you want to add material, organize it, ask cited questions,
 
 Open **Quick Ingest** in Media. Choose **Files**, **Links**, or **Text**. You can switch between them to build one batch. The source list shows what is ready and why an item will be skipped. Use **Edit link** to repair an invalid URL.
 
-Check the destination above the main button. **Change settings** lets you save to Media, create drafts to review in this browser, or extract content without saving. If your preset uses AI analysis, choose a provider or select **Skip analysis for this import**. When an import can replace existing Media, review the sources and confirm.
+Check the destination above the main button. **Change settings** lets you save to Media, create drafts to review in this browser, or extract content without saving. If your preset uses AI analysis, choose a provider or select **Skip analysis for this import**. When an import can replace existing Media, **Review replacements** shows how many sources will run and which ones may replace an item. **Back to sources** returns to your selected input with any unqueued links or text still there.
+
+If you use **Clear all** by mistake, choose **Undo** in the same draft to restore the sources in their original order. Sources added after clearing stay in the queue.
 
 Use **View extracted text** and **Copy text** to take text from an extract-only run. For a batch, choose **View text** next to a source. Copy any text you want to keep before leaving the session.
 
