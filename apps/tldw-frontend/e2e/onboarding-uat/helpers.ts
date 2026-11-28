@@ -304,9 +304,8 @@ export async function completeFirstSourcePasteIngest(
   await page
     .getByRole("button", { name: /add pasted text to queue/i })
     .click()
-  await expect(page.getByText(/queued/i)).toBeVisible({ timeout: 20_000 })
-
-  await page.getByRole("button", { name: /configure \d+ items/i }).click()
+  await expect(page.getByRole("status", { name: "Source counts" })).toHaveText("1 ready")
+  await page.getByRole("button", { name: "Change settings" }).click()
   const analysisSwitch = page
     .getByRole("switch", { name: /^Ingestion options\s*[–-]\s*analysis$/i })
     .first()
@@ -324,11 +323,7 @@ export async function completeFirstSourcePasteIngest(
     await expect(chunkingSwitch).toHaveAttribute("aria-checked", "false")
   }
 
-  await page.getByRole("button", { name: /^next$/i }).click()
-  await expect(page.getByText(/ready to process/i)).toBeVisible({
-    timeout: 20_000,
-  })
-  await page.getByRole("button", { name: /start processing/i }).click()
+  await page.getByRole("button", { name: "Save 1 source" }).click()
 
   await expect(page.getByTestId("wizard-results-step")).toBeVisible({
     timeout: 120_000,
@@ -366,7 +361,7 @@ export async function completeFirstSourcePasteIngest(
 
   const resultsStep = page.getByTestId("wizard-results-step")
   await resultsStep
-    .getByRole("button", { name: /close the ingest wizard/i })
+    .getByRole("button", { name: "Done", exact: true })
     .click()
   await expect(resultsStep).toBeHidden({ timeout: 10_000 })
   await expect

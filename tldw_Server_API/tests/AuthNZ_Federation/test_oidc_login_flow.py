@@ -551,6 +551,58 @@ def test_federation_callback_links_existing_user_and_returns_tokens(
     assert link["external_email"] == "alice@example.com"
 
 
+def test_federation_callback_refuses_a_locked_account_before_linking_it(
+    federation_client: TestClient,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """TASK-15679: SSO into a security-locked account answers 423 and adds no identity link."""
+    from tldw_Server_API.app.core.AuthNZ.account_lock import set_lock
+    from tldw_Server_API.app.core.AuthNZ.database import get_db_pool
+    from tldw_Server_API.app.core.AuthNZ.federation.oidc_service import OIDCFederationService
+    from tldw_Server_API.app.core.AuthNZ.repos.federated_identity_repo import FederatedIdentityRepo
+    from tldw_Server_API.tests.AuthNZ_SQLite._account_lock_fixtures import assert_locked
+    from tldw_Server_API.tests.AuthNZ_SQLite._user_fixtures import create_authnz_test_user
+
+    async def _seed_locked_user() -> int:
+        user_id = await create_authnz_test_user(
+            await get_db_pool(), username="alice", email="alice@example.com", is_verified=True
+        )
+        assert await set_lock(user_id) is not None
+        return user_id
+
+    user_id = asyncio.run(_seed_locked_user())
+    created = federation_client.post(
+        "/api/v1/admin/identity/providers",
+        json={
+            "slug": "corp",
+            "provider_type": "oidc",
+            "owner_scope_type": "global",
+            "enabled": True,
+            "issuer": "https://issuer.example.com",
+            "authorization_url": "https://issuer.example.com/oauth2/authorize",
+            "token_url": "https://issuer.example.com/oauth2/token",
+            "jwks_url": "https://issuer.example.com/.well-known/jwks.json",
+            "client_id": "client-123",
+            "claim_mapping": {"subject": "sub", "email": "email"},
+            "provisioning_policy": {"allow_email_account_linking": True},
+        },
+    )
+    assert created.status_code == 200, created.text
+    login = federation_client.get("/api/v1/auth/federation/corp/login", follow_redirects=False)
+    state = parse_qs(urlparse(login.headers["location"]).query)["state"][0]
+
+    async def _claims(self, **_kwargs: Any) -> dict:
+        return {"sub": "external-subject-123", "email": "alice@example.com", "iss": "https://issuer.example.com"}
+
+    monkeypatch.setattr(OIDCFederationService, "exchange_authorization_code", _claims, raising=False)
+    assert_locked(federation_client.get(f"/api/v1/auth/federation/corp/callback?state={state}&code=code-123"))
+
+    async def _links() -> list[dict]:
+        return await FederatedIdentityRepo(db_pool=await get_db_pool()).list_for_user(user_id=user_id)
+
+    assert asyncio.run(_links()) == []
+
+
 def test_federation_callback_jit_creates_user_when_policy_allows(
     federation_client: TestClient,
     monkeypatch: pytest.MonkeyPatch,

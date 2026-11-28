@@ -20,6 +20,7 @@ from tldw_Server_API.app.core.Audit.unified_audit_service import (
     AuditEventType,
     MandatoryAuditWriteError,
 )
+from tldw_Server_API.app.core.AuthNZ.account_lock import assert_account_not_locked
 from tldw_Server_API.app.core.AuthNZ.jwt_service import get_jwt_service
 from tldw_Server_API.app.core.AuthNZ.principal_model import AuthPrincipal
 import tldw_Server_API.app.core.AuthNZ.repos.users_repo as _users_repo
@@ -83,17 +84,20 @@ async def create_impersonation_token(
             target_username = str(target_user["username"])
             target_is_active = bool(target_user.get("is_active", True))
             target_role = str(target_user.get("role") or "user")
+            target_state = target_user
         else:
             target_user_id = int(target_user.id)
             target_username = str(target_user.username)
             target_is_active = bool(getattr(target_user, "is_active", True))
             target_role = str(getattr(target_user, "role", None) or "user")
+            target_state = {"security_locked_at": getattr(target_user, "security_locked_at", None)}
 
         if not target_is_active:
             raise HTTPException(
                 status_code=status.HTTP_400_BAD_REQUEST,
                 detail=f"User {user_id} is not active",
             )
+        assert_account_not_locked(target_state)
         # Generate a short-lived access token with impersonation claim
         jwt_svc = get_jwt_service()
         token = jwt_svc.create_access_token(

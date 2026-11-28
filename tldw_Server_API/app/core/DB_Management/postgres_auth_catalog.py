@@ -45,6 +45,8 @@ _USERS_COLUMNS = {
     "password_changed_at",
     "previous_email",
     "email_changed_at",
+    "security_locked_at",
+    "credentials_valid_after",
 }
 _AUDIO_COLUMNS = {
     "id",
@@ -105,6 +107,7 @@ _API_KEY_COLUMNS = {
         "revoked_at",
         "revoked_by",
         "revoke_reason",
+        "suspended_at",
         "is_virtual",
         "parent_key_id",
         "org_id",
@@ -608,6 +611,9 @@ def _column_type_allowed(column: str, data_type: str) -> bool:
         "email_verified_at",
         "password_changed_at",
         "email_changed_at",
+        "security_locked_at",
+        "credentials_valid_after",
+        "suspended_at",
         "expires_at",
         "consumed_at",
         "revoked_at",

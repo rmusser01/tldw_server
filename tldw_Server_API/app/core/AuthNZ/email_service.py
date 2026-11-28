@@ -218,6 +218,72 @@ Or copy this token into the extension:
 If you did not request this, you can ignore this email.
 """
     },
+    "account_locked": {
+        "subject": "Your account was locked - {{ app_name }}",
+        "html": """
+<!DOCTYPE html>
+<html>
+<head>
+    <style>
+        body { font-family: Arial, sans-serif; line-height: 1.6; color: #333; }
+        .container { max-width: 600px; margin: 0 auto; padding: 20px; }
+        .header { background-color: #0f172a; color: white; padding: 20px; text-align: center; }
+        .content { background-color: #f8f9fa; padding: 30px; margin-top: 20px; }
+        .button { display: inline-block; padding: 12px 30px; background-color: #2563eb;
+                  color: white; text-decoration: none; border-radius: 5px; margin: 20px 0; }
+        .code-box { background: #fff; border: 1px solid #e5e7eb; padding: 12px;
+                    margin: 16px 0; border-radius: 6px; font-family: monospace; word-break: break-all; }
+        .footer { margin-top: 30px; padding-top: 20px; border-top: 1px solid #dee2e6;
+                  font-size: 0.9em; color: #6c757d; }
+        .note { background-color: #fff3cd; border: 1px solid #ffc107; padding: 10px;
+                margin: 16px 0; border-radius: 5px; }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <div class="header">
+            <h1>{{ app_name }}</h1>
+        </div>
+        <div class="content">
+            <h2>Your account was locked</h2>
+            <p>Hello{{ user_label }},</p>
+            <p>Your account was locked from a signed-in session. Every session was signed out and nothing can
+               sign in until you follow the link below.</p>
+            {% if locked_at %}<p>Locked at {{ locked_at }} from {{ device }}{% if ip_address %} (IP {{ ip_address }}){% endif %}.</p>{% endif %}
+            <p>This link unlocks the account and expires in {{ expiry_minutes }} minute(s).</p>
+            <center>
+                <a href="{{ unlock_link }}" class="button">Unlock my account</a>
+            </center>
+            <p>If you prefer, copy the token below and paste it where the page asks for it:</p>
+            <div class="code-box">{{ magic_token }}</div>
+            {% if restores_address %}<div class="note">Using this link makes this address the account's email again and removes the current password.</div>{% endif %}
+        </div>
+        <div class="footer">
+            <p>This is an automated message from {{ app_name }}.</p>
+        </div>
+    </div>
+</body>
+</html>
+""",
+        "text": """
+Your account was locked - {{ app_name }}
+
+Hello{{ user_label }},
+
+Your account was locked from a signed-in session. Every session was signed out and nothing can sign in until you follow the link below.
+{% if locked_at %}
+Locked at {{ locked_at }} from {{ device }}{% if ip_address %} (IP {{ ip_address }}){% endif %}.
+{% endif %}
+Use this link to unlock the account (expires in {{ expiry_minutes }} minute(s)):
+{{ unlock_link }}
+
+Or copy this token where the page asks for it:
+{{ magic_token }}
+{% if restores_address %}
+Using this link makes this address the account's email again and removes the current password.
+{% endif %}
+"""
+    },
     "admin_reauth": {
         "subject": "Confirm admin action - {{ app_name }}",
         "html": """
@@ -440,6 +506,9 @@ If you did not, sign in with your password, change your password, and change you
 }
 
 
+SMTP_TIMEOUT_SECONDS = 15
+
+
 def _mask_email(address: str) -> str:
     """Return ``a***@domain``: enough to recognise an address without logging or showing it."""
     local, _, domain = address.partition("@")
@@ -506,6 +575,10 @@ class EmailService:
 
         return default
 
+    def public_web_base_url(self) -> Optional[str]:
+        """The configured PUBLIC_WEB_BASE_URL (environment first, then settings), or None."""
+        return self._read_setting_text("PUBLIC_WEB_BASE_URL")
+
     @staticmethod
     def _normalize_public_path(path: str) -> str:
         normalized = str(path or "").strip() or "/"
@@ -527,7 +600,7 @@ class EmailService:
             resolved_path = self._normalize_public_path(configured_public_path or legacy_default_path)
             return f"{resolved_base}{resolved_path}?token={token}"
 
-        public_web_base_url = self._read_setting_text("PUBLIC_WEB_BASE_URL")
+        public_web_base_url = self.public_web_base_url()
         if public_web_base_url:
             resolved_path = self._normalize_public_path(
                 configured_public_path or hosted_default_path
@@ -891,7 +964,7 @@ class EmailService:
 
     def _deliver_smtp_message(self, message: MIMEMultipart) -> None:
         """Blocking SMTP delivery executed in a worker thread."""
-        with smtplib.SMTP(self.smtp_host, self.smtp_port) as server:
+        with smtplib.SMTP(self.smtp_host, self.smtp_port, timeout=SMTP_TIMEOUT_SECONDS) as server:
             if self.smtp_use_tls:
                 server.starttls()
 
@@ -995,6 +1068,16 @@ class EmailService:
             _template="email_verification",
         )
 
+    def _magic_link_url(self, token: str, *, base_url: Optional[str] = None, link_path: Optional[str] = None) -> str:
+        """The sign-in/unlock link for ``token``, built like every magic link (hosted path, then legacy)."""
+        return self._resolve_public_web_base_url(
+            base_url=base_url,
+            hosted_default_path="/auth/magic-link",
+            legacy_default_path="/magic-link",
+            configured_public_path=link_path or self._read_setting_text("PUBLIC_MAGIC_LINK_PATH"),
+            token=token,
+        )
+
     async def send_magic_link_email(
         self,
         *,
@@ -1006,13 +1089,7 @@ class EmailService:
         link_path: Optional[str] = None,
     ) -> bool:
         """Send magic link sign-in email."""
-        magic_link = self._resolve_public_web_base_url(
-            base_url=base_url,
-            hosted_default_path="/auth/magic-link",
-            legacy_default_path="/magic-link",
-            configured_public_path=link_path or self._read_setting_text("PUBLIC_MAGIC_LINK_PATH"),
-            token=magic_token,
-        )
+        magic_link = self._magic_link_url(magic_token, base_url=base_url, link_path=link_path)
 
         user_label = f" {username}" if username else ""
         template_data = {
@@ -1037,6 +1114,42 @@ class EmailService:
             text_body,
             redact_mock_tokens=True,
             _template="magic_link",
+        )
+
+    async def send_account_locked_email(
+        self,
+        *,
+        to_email: str,
+        username: Optional[str],
+        magic_token: str,
+        expires_in_minutes: int,
+        locked_at: Optional[datetime],
+        device: str,
+        ip_address: Optional[str],
+        restores_address: bool = False,
+        base_url: Optional[str] = None,
+    ) -> bool:
+        """Send the account-locked mail with the unlock link; ``locked_at`` None (a re-sent link) omits when/where."""
+        unlock_link = self._magic_link_url(magic_token, base_url=base_url)
+        template_data = {
+            "app_name": self.app_name,
+            "user_label": f" {username}" if username else "",
+            "unlock_link": unlock_link,
+            "magic_token": magic_token,
+            "expiry_minutes": expires_in_minutes,
+            "locked_at": locked_at.strftime("%Y-%m-%d %H:%M UTC") if locked_at else None,
+            "device": device,
+            "ip_address": ip_address,
+            "restores_address": restores_address,
+        }
+        template = EMAIL_TEMPLATES["account_locked"]
+        return await self.send_email(
+            to_email,
+            Template(template["subject"]).render(**template_data),
+            Template(template["html"]).render(**template_data),
+            Template(template["text"]).render(**template_data),
+            redact_mock_tokens=True,
+            _template="account_locked",
         )
 
     async def send_admin_reauth_email(

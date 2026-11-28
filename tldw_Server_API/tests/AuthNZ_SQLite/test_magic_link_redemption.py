@@ -124,6 +124,7 @@ async def test_link_expiring_during_claim_cannot_grant_credentials(sign_in, monk
     monkeypatch.setattr("tldw_Server_API.app.services.auth_service.consume_magic_link", claim_at_expiry)
     monkeypatch.setattr(sign_in.jwt, "verify_token_async", AsyncMock(return_value={
         "jti": "synthetic-expiring-link", "exp": expires_at.timestamp(), "user_id": sign_in.user_id,
+        "email": "reader@example.test",  # every minted link carries it; one without it is refused before the claim
     }))
 
     response = await sign_in.submit()

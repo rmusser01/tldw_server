@@ -21,7 +21,7 @@ from tldw_Server_API.app.api.v1.schemas.org_team_schemas import VirtualKeyCreate
 from tldw_Server_API.app.core.Audit.unified_audit_service import MandatoryAuditWriteError
 from tldw_Server_API.app.core.AuthNZ.api_key_manager import get_api_key_manager
 from tldw_Server_API.app.core.AuthNZ.principal_model import AuthPrincipal
-from tldw_Server_API.app.core.exceptions import APIKeyRotationRejected
+from tldw_Server_API.app.core.exceptions import APIKeyRotationRejected, APIKeySuspendedError
 from tldw_Server_API.app.services import admin_scope_service
 from tldw_Server_API.app.services.admin_service import update_api_key_metadata
 
@@ -127,6 +127,11 @@ async def rotate_user_api_key(
         return APIKeyCreateResponse(**result)
     except HTTPException:
         raise
+    except APIKeySuspendedError as exc:
+        raise HTTPException(
+            status_code=409,
+            detail={"code": "api_key_suspended", "message": "This API key is suspended; the owner must restore it"},
+        ) from exc
     except APIKeyRotationRejected as exc:
         raise HTTPException(status_code=404, detail="API key not found") from exc
     except MandatoryAuditWriteError as e:

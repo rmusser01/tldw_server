@@ -10,14 +10,16 @@ import {
 import { IngestWizardProvider, useIngestWizard } from "../IngestWizardContext";
 import { useQuickIngestSessionStore } from "@/store/quick-ingest-session";
 import { AddContentStep } from "../AddContentStep";
+import type { WizardQueueItem } from "../types";
 const DOCUMENT_LIMIT = 250 * 1024 ** 2;
 
-vi.mock("react-i18next", () => ({
-  useTranslation: () => ({
-    t: (key: string, value: any) =>
-      typeof value === "string" ? value : value?.defaultValue || key,
-  }),
-}));
+vi.mock("react-i18next", async () => {
+  const { createInstance } = await import("i18next");
+  const { default: ICU } = await import("@/i18n/icu-format");
+  const i18n = createInstance().use(ICU);
+  await i18n.init({ lng: "en", resources: { en: { option: {} } }, defaultNS: "option" });
+  return { useTranslation: () => ({ t: i18n.t }) };
+});
 vi.mock("@/hooks/useServerCapabilities", () => ({
   useServerCapabilities: () => ({ capabilities: {} }),
 }));
@@ -32,6 +34,9 @@ function QueueProbe() {
       </output>
       <output data-testid="filenames">
         {JSON.stringify(state.queueItems.map((item) => item.fileName))}
+      </output>
+      <output data-testid="ids">
+        {JSON.stringify(state.queueItems.map((item) => item.id))}
       </output>
       <output data-testid="submitted">
         {state.processingState.perItemProgress.length}
@@ -53,6 +58,127 @@ const add = (input: string) => {
   });
   fireEvent.click(screen.getByRole("button", { name: "Add URLs to queue" }));
 };
+
+const mountOneScreen = (processingItems?: WizardQueueItem[]) => render(
+  <IngestWizardProvider>
+    <AddContentStep oneScreen processingItems={processingItems} />
+    <QueueProbe />
+  </IngestWizardProvider>,
+);
+
+describe("one-screen source queue", () => {
+  it("discards the rejected link's identity and replacement permission on repair", () => {
+    const changed = vi.fn();
+    render(<IngestWizardProvider onStateChange={changed} initialState={{ queueItems: [{
+      id: "slot", kind: "url", url: "https://example.org/rejected", detectedType: "video", icon: "Film", fileSize: 0,
+      validation: { valid: false }, processAgain: true,
+      playlist: { playlistId: "old-list", ordinal: 3, normalizedSourceId: "rejected", duplicateStatus: "duplicate_existing" },
+      conferenceOverride: { selected: true, title: "Opening talk", duplicatePolicy: "overwrite" },
+    }] }}>
+      <AddContentStep oneScreen />
+    </IngestWizardProvider>);
+    fireEvent.click(screen.getByRole("button", { name: "Edit link" }));
+    fireEvent.change(screen.getByRole("textbox", { name: "Correct link" }), { target: { value: "https://example.org/new.pdf" } });
+    fireEvent.click(screen.getByRole("button", { name: "Apply link" }));
+    const [item] = changed.mock.lastCall![0].queueItems;
+    expect(item).toMatchObject({ id: "slot", url: "https://example.org/new.pdf", sourceUrlEdited: true, processAgain: false, validation: { valid: true } });
+    expect(item.playlist).toEqual({ ordinal: 3 });
+    expect(item.conferenceOverride).toEqual({ selected: true, title: "Opening talk", duplicatePolicy: undefined });
+  });
+
+  it("undoes Clear all in the original order and keeps sources added since clearing", () => {
+    mountOneScreen();
+    fireEvent.click(screen.getByRole("button", { name: "Links" }));
+    add("https://example.com/a\nhttps://example.com/b");
+    const originalIds = JSON.parse(screen.getByTestId("ids").textContent!);
+    fireEvent.click(screen.getByRole("button", { name: "Clear all" }));
+    const undo = screen.getByRole("button", { name: "Undo" });
+    expect(undo).toHaveFocus();
+    expect(screen.getByTestId("ids")).toHaveTextContent("[]");
+    add("https://example.com/c");
+    fireEvent.click(undo);
+    expect(JSON.parse(screen.getByTestId("ids").textContent!).slice(0, 2)).toEqual(originalIds);
+    expect(JSON.parse(screen.getByTestId("urls").textContent!)).toEqual([
+      "https://example.com/a", "https://example.com/b", "https://example.com/c",
+    ]);
+    expect(screen.getByRole("button", { name: "Clear all" })).toHaveFocus();
+    expect(screen.queryByRole("button", { name: "Undo" })).toBeNull();
+  });
+
+  it("keeps different pasted texts of the same size eligible", () => {
+    mountOneScreen();
+    fireEvent.click(screen.getByRole("button", { name: "Text" }));
+    for (const value of ["alpha", "bravo"]) {
+      fireEvent.change(screen.getByRole("textbox", { name: "Pasted text input" }), { target: { value } });
+      fireEvent.click(screen.getByRole("button", { name: /add pasted text/i }));
+    }
+    expect(screen.getByRole("status", { name: "Source counts" })).toHaveTextContent(/^2 ready$/);
+  });
+
+  it("keeps a new equal-length paste eligible when Undo restores earlier pasted sources", () => {
+    mountOneScreen();
+    fireEvent.click(screen.getByRole("button", { name: "Text" }));
+    const paste = (value: string) => {
+      fireEvent.change(screen.getByRole("textbox", { name: "Pasted text input" }), { target: { value } });
+      fireEvent.click(screen.getByRole("button", { name: /add pasted text/i }));
+    };
+    paste("one");
+    paste("two");
+    fireEvent.click(screen.getByRole("button", { name: "Clear all" }));
+    paste("new");
+    fireEvent.click(screen.getByRole("button", { name: "Undo" }));
+    expect(screen.getByRole("status", { name: "Source counts" })).toHaveTextContent(/^3 ready$/);
+  });
+
+  it("offers one keyboard control for choosing files", () => {
+    mountOneScreen();
+    const zone = screen.getByTestId("qi-file-dropzone");
+    expect(zone.querySelectorAll('[role="button"],button').length + Number(zone.matches('[role="button"]'))).toBe(1);
+  });
+
+  it("keeps queue and unsubmitted input across source choices", () => {
+    mountOneScreen();
+    expect(screen.getByTestId("qi-file-input")).toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: "Links", pressed: false }));
+    add("https://example.com/a");
+    const linkDraft = "https://example.com/b";
+    fireEvent.change(screen.getByRole("textbox", { name: "URL input area" }), { target: { value: linkDraft } });
+    fireEvent.click(screen.getByRole("button", { name: "Text" }));
+    fireEvent.change(screen.getByRole("textbox", { name: "Pasted text input" }), { target: { value: "my notes" } });
+    fireEvent.click(screen.getByRole("button", { name: "Links" }));
+    expect(screen.getByRole("textbox", { name: "URL input area" })).toHaveValue(linkDraft);
+    expect(screen.getByTestId("urls")).toHaveTextContent("https://example.com/a");
+    fireEvent.click(screen.getByRole("button", { name: "Text" }));
+    expect(screen.getByRole("textbox", { name: "Pasted text input" })).toHaveValue("my notes");
+    expect(screen.queryByRole("button", { name: /Configure/ })).not.toBeInTheDocument();
+  });
+
+  it("accounts for all rows, repairs a link in place, and explicitly includes a duplicate", () => {
+    mountOneScreen();
+    fireEvent.click(screen.getByRole("button", { name: "Links" }));
+    add("https://example.com/a\nhttps://example.com/a\nbad-link");
+    const ids = screen.getByTestId("ids").textContent;
+    expect(screen.getByRole("status", { name: "Source counts" })).toHaveTextContent("1 ready · 1 duplicate · 1 invalid");
+    fireEvent.click(screen.getByRole("button", { name: "Edit link" }));
+    const edit = screen.getByRole("textbox", { name: "Correct link" });
+    expect(edit).toHaveValue("bad-link");
+    fireEvent.change(edit, { target: { value: "https://example.org/book.pdf" } });
+    fireEvent.click(screen.getByRole("button", { name: "Apply link" }));
+    expect(screen.getByTestId("ids").textContent).toBe(ids);
+    expect(screen.getByRole("status", { name: "Source counts" })).toHaveTextContent("2 ready · 1 duplicate");
+    fireEvent.click(screen.getByRole("button", { name: "Include again" }));
+    expect(screen.getByRole("status", { name: "Source counts" })).toHaveTextContent("3 ready");
+    fireEvent.click(screen.getByText("submit probe"));
+    expect(screen.getByTestId("submitted")).toHaveTextContent("3");
+  });
+
+  it("accounts for valid rows outside the submitted set", () => {
+    mountOneScreen([]);
+    fireEvent.click(screen.getByRole("button", { name: "Links" }));
+    add("https://example.com/a");
+    expect(screen.getByRole("status", { name: "Source counts" })).toHaveTextContent("0 ready · 1 outside this run");
+  });
+});
 afterEach(() => vi.unstubAllGlobals());
 
 describe("eligible source queue", () => {

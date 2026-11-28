@@ -7,7 +7,7 @@ from typing import Any
 from loguru import logger
 
 from tldw_Server_API.app.core.AuthNZ.database import DatabasePool
-from tldw_Server_API.app.core.AuthNZ.repos._dual_backend import row_dict
+from tldw_Server_API.app.core.AuthNZ.repos._dual_backend import affected_rows, row_dict
 
 
 def _normalize_status(status: str | None) -> str:
@@ -224,3 +224,19 @@ class FederatedIdentityRepo:
         except Exception as exc:
             logger.error(f"FederatedIdentityRepo.list_for_user failed: {exc}")
             raise
+
+    async def delete_identity_links_created_since(self, *, user_id: int, since: datetime) -> int:
+        """Delete the user's SSO links created after ``since``; return how many (TASK-15679 take-back)."""
+        if getattr(self.db_pool, "pool", None) is not None:
+            result = await self.db_pool.execute(
+                "DELETE FROM federated_identities WHERE user_id = $1 AND created_at > $2::timestamptz",
+                int(user_id),
+                since,
+            )
+        else:
+            result = await self.db_pool.execute(
+                "DELETE FROM federated_identities WHERE user_id = ? AND datetime(created_at) > datetime(?)",
+                int(user_id),
+                since.isoformat(),
+            )
+        return affected_rows(result)

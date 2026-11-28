@@ -345,3 +345,43 @@ def test_users_email_change_columns_are_altered_only_when_missing(existing, expe
     assert conn.executed == expected
     assert len(conn.probes) == 2
     assert all("information_schema.columns" in query for query in conn.probes)
+
+
+_ADD_LOCKED = "ALTER TABLE public.users ADD COLUMN IF NOT EXISTS security_locked_at TIMESTAMPTZ"
+_ADD_VALID_AFTER = "ALTER TABLE public.users ADD COLUMN IF NOT EXISTS credentials_valid_after TIMESTAMPTZ"
+
+
+class _TableColumnProbeConnection:
+    def __init__(self, existing: set[str]) -> None:
+        self.existing = existing
+        self.executed: list[str] = []
+        self.probes: list[tuple[str, str, str]] = []
+
+    async def fetchval(self, query: str, table: str, column: str) -> bool:
+        self.probes.append((query, table, column))
+        return column in self.existing
+
+    async def execute(self, query: str) -> None:
+        self.executed.append(query)
+
+
+@pytest.mark.parametrize(
+    ("existing", "expected"),
+    [
+        (set(), [_ADD_LOCKED, _ADD_VALID_AFTER]),
+        ({"security_locked_at"}, [_ADD_VALID_AFTER]),
+        ({"security_locked_at", "credentials_valid_after"}, []),
+    ],
+    ids=["fresh", "half-migrated", "migrated"],
+)
+def test_account_lock_columns_are_altered_only_when_missing(existing, expected) -> None:
+    from tldw_Server_API.app.core.AuthNZ import pg_migrations_extra
+
+    conn = _TableColumnProbeConnection(existing)
+    asyncio.run(pg_migrations_extra._ensure_account_lock_columns(conn))
+    assert conn.executed == expected
+    assert [(table, column) for _query, table, column in conn.probes] == [
+        ("users", "security_locked_at"),
+        ("users", "credentials_valid_after"),
+    ]
+    assert all("information_schema.columns" in query for query, _table, _column in conn.probes)

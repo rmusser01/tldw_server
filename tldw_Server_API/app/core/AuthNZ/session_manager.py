@@ -40,6 +40,10 @@ from redis import asyncio as redis_async
 from redis.exceptions import ConnectionError as RedisConnectionError
 from redis.exceptions import RedisError
 
+from tldw_Server_API.app.core.AuthNZ.account_lock_errors import (
+    ACCOUNT_LOCK_REVOKE_REASON,
+    AccountSecurityLockedError,
+)
 from tldw_Server_API.app.core.AuthNZ.crypto_utils import (
     derive_hmac_key,
     derive_hmac_key_candidates,
@@ -1188,6 +1192,19 @@ class SessionManager:
                     logger.info(f"Session cap evicted {len(evicted)} session(s) [redacted]")
                 else:
                     logger.info(f"Session cap evicted {len(evicted)} session(s) for user {user_id}")
+                # Own try, like the alert below: the row exists, so nothing here may fail the sign-in.
+                try:
+                    from tldw_Server_API.app.core.Audit.unified_audit_service import AuditEventType
+                    from tldw_Server_API.app.core.AuthNZ.account_lock import write_account_audit
+
+                    await write_account_audit(
+                        AuditEventType.AUTH_SESSION_EVICTED,
+                        user_id=user_id,
+                        session_id=session_id,
+                        metadata={"evicted_session_ids": [int(e["id"]) for e in evicted]},
+                    )
+                except _SESSION_MANAGER_NONCRITICAL_EXCEPTIONS as exc:
+                    logger.bind(error_type=type(exc).__name__).warning("Session eviction audit not written")
 
             if alert_new_sign_in:
                 # Own try: the outer except would turn an error here into SessionError after the row exists.
@@ -1796,10 +1813,30 @@ class SessionManager:
             logger.warning("Revoke reason lookup failed ({})", type(exc).__name__)
             return None
 
+    async def revoked_by_current_lock(self, token: str, reason: Optional[str]) -> bool:
+        """Whether ``reason`` is the account-lock revocation and the token's user is locked right now.
+
+        After an unlock the same token keeps that reason but gets the ordinary 401. Call only for a
+        token whose signature was already verified; False on any lookup error.
+        """
+        if reason != ACCOUNT_LOCK_REVOKE_REASON:
+            return False
+        from tldw_Server_API.app.core.AuthNZ.account_lock import is_user_security_locked
+
+        try:
+            return await is_user_security_locked(int((self._get_unverified_claims(token) or {}).get("sub")))
+        except _SESSION_MANAGER_NONCRITICAL_EXCEPTIONS as exc:
+            logger.warning("Lock lookup for a revoked token failed ({})", type(exc).__name__)
+            return False
+
     async def revoked_token_exception(self, token: str, default: HTTPException) -> HTTPException:
-        """Return the session_replaced 401 for a cap-evicted token, else ``default``."""
-        if await self.get_revoke_reason(token) == SESSION_CAP_REVOKE_REASON:
+        """The session_replaced 401 for a cap-evicted token, the 423 while a lock-revoked token's user is
+        locked, else ``default``."""
+        reason = await self.get_revoke_reason(token)
+        if reason == SESSION_CAP_REVOKE_REASON:
             return session_replaced_http_exception()
+        if await self.revoked_by_current_lock(token, reason):
+            return AccountSecurityLockedError()
         return default
 
     async def get_user_sessions(

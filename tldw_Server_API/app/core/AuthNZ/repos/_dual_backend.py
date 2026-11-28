@@ -22,6 +22,18 @@ def dollar(sql: str) -> str:
     return "".join(part + (f"${i}" if i < len(parts) else "") for i, part in enumerate(parts, start=1))
 
 
+def affected_rows(result: Any) -> int:
+    """Normalize a SQLite cursor or an asyncpg status string ("UPDATE 3") to an affected-row count."""
+    rowcount = getattr(result, "rowcount", None)
+    if isinstance(rowcount, int):
+        return rowcount
+    if isinstance(result, str):
+        parts = result.strip().split()
+        if parts and parts[-1].isdigit():
+            return int(parts[-1])
+    return 0
+
+
 def row_dict(row: Any) -> dict[str, Any]:
     """Copy a driver row (dict, sqlite3/aiosqlite Row, asyncpg Record) into a plain dict.
 

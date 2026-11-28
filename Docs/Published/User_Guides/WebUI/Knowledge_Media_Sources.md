@@ -25,6 +25,22 @@ Use these pages when you want to add material, organize it, ask cited questions,
 | `/connectors`, `/connectors/browse`, `/connectors/jobs`, `/connectors/sources` | Advanced self-hosted | Browse connector placeholders, connector jobs, and connector source surfaces. | External systems, source adapters, connector status. |
 | `/shared`, `/share/[token]` | Advanced self-hosted | View shared resources and public share links. | Collaboration, read-only links, shared workspaces. |
 
+## Add sources with Quick Ingest
+
+Open **Quick Ingest** in Media. Choose **Files**, **Links**, or **Text**. You can switch between them to build one batch. The source list shows what is ready and why an item will be skipped. Use **Edit link** to repair an invalid URL.
+
+Check the destination above the main button. **Change settings** lets you save to Media, create drafts to review in this browser, or extract content without saving. If your preset uses AI analysis, choose a provider or select **Skip analysis for this import**. When an import can replace existing Media, **Review replacements** shows how many sources will run and which ones may replace an item. **Back to sources** returns to your selected input with any unqueued links or text still there.
+
+If you use **Clear all** by mistake, choose **Undo** in the same draft to restore the sources in their original order. Sources added after clearing stay in the queue.
+
+Use **View extracted text** and **Copy text** to take text from an extract-only run. For a batch, choose **View text** next to a source. Copy any text you want to keep before leaving the session.
+
+Use **Edit link**, **Choose file**, or **Paste again** beside a source that needs repair. Quick Ingest retries the corrected source and keeps the other results. After a refresh, select the original file with the same name and size or paste the text again.
+
+Minimize an active import to keep working. The background indicator shows work still in progress alongside failures. If you stop an import, Quick Ingest waits for the server to confirm the outcome. When a job’s status is unavailable, use **Check status** or **Check Media** before trying again.
+
+On the receipt, choose **Open in Media** for a saved source or **Open drafts** for a review batch. Further actions are under **More actions**.
+
 ## Larger Systems
 
 Knowledge workflows depend on source ownership. Media, notes, collections, sources, and workspaces create or organize material. Knowledge QA searches selected indexed material and produces cited answers. Research Workspace adds a higher-level project shell around source organization, chat, export, sharing, and recovery states.

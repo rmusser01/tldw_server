@@ -11,6 +11,8 @@ from typing import TYPE_CHECKING, Literal, Protocol
 
 from loguru import logger
 
+from ..runtime.controls import ParentControls, observe_physical
+from ..runtime.controls import ParentStop as ParentStop
 from ..runtime.policy import OutboundPolicyChecker
 from ..runtime.requests import RuntimeRequestContext
 from .probes import (
@@ -86,6 +88,7 @@ class PreflightRuntimeControls:
         deadline: float | None = None,
         clock: Callable[[], float] = monotonic,
         sleep: Callable[[float], Awaitable[None]] = asyncio.sleep,
+        parent: ParentControls | None = None,
     ) -> None:
         if deadline is not None:
             if isinstance(deadline, bool):
@@ -94,6 +97,8 @@ class PreflightRuntimeControls:
             if not math.isfinite(deadline):
                 raise ValueError("deadline must be finite")
         self.request_context = request_context
+        self.parent = parent
+        self._callback_error: BaseException | None = None
         self.limits = limits or PreflightLimits()
         self.deadline = deadline
         self._clock = clock
@@ -115,6 +120,8 @@ class PreflightRuntimeControls:
         if isinstance(amount, bool) or not isinstance(amount, int) or amount < 1:
             raise ValueError("amount must be a positive integer")
         async with self._budget_lock:
+            if self.parent is not None:
+                self.cap_timeout(None)
             field_name = {
                 "request": "requests",
                 "browser": "browsers",
@@ -124,6 +131,17 @@ class PreflightRuntimeControls:
             limit = getattr(self.limits, field_name)
             if limit is not None and current + amount > limit:
                 raise ProbeBudgetExhausted()
+            if self.parent is not None:
+                reservation = self.parent.reserve(
+                    {"request": "network_requests", "browser": "browser_attempts", "active_probe": "active_probes"}[
+                        kind
+                    ],
+                    amount,
+                )
+                try:
+                    reservation.commit()
+                finally:
+                    reservation.close()
             self._consumed = replace(
                 self._consumed,
                 **{field_name: current + amount},
@@ -137,11 +155,25 @@ class PreflightRuntimeControls:
 
     def cap_timeout(self, requested_s: float | None) -> float | None:
         """Cap a local timeout against the remaining overall deadline."""
+        if self._callback_error is not None:
+            raise self._callback_error
+        if self.parent is not None:
+            requested_s = self.parent.cap_timeout(requested_s)
         remaining = self.remaining_seconds()
         values = [value for value in (requested_s, remaining) if value is not None]
         if values and min(values) <= 0:
             raise PreflightDeadlineExceeded()
         return min(values) if values else None
+
+    def charge_bytes(self, amount: int) -> None:
+        """Charge observed acquisition bytes only when a parent is composed."""
+        if self.parent is not None and amount:
+            self.parent.charge_bytes(amount)
+
+    def latch_callback_error(self, error: BaseException) -> None:
+        """Keep an independently scheduled browser callback's primary outcome."""
+        if self._callback_error is None:
+            self._callback_error = error
 
     def deadline_exhausted(self) -> bool:
         """Return whether the overall preflight deadline has expired."""
@@ -212,6 +244,8 @@ class PreflightRuntimeControls:
                     name=f"preflight-cleanup-force-{index}",
                 )
             )
+        for task in tasks:
+            observe_physical(task)
         return tasks
 
     @staticmethod
@@ -266,6 +300,7 @@ class PreflightRuntimeControls:
             self._graceful_cleanup(entries),
             name="preflight-cleanup-graceful",
         )
+        observe_physical(graceful_task)
         done, _ = await asyncio.wait(
             {graceful_task},
             timeout=max(0.0, graceful_deadline - loop.time()),
@@ -353,6 +388,7 @@ class PreflightRuntimeControls:
             ),
             name="preflight-cleanup-subset-supervisor",
         )
+        observe_physical(supervisor)
         await self._await_cleanup_supervisor(supervisor)
 
     async def close(self, grace_s: float = 2.0) -> None:
@@ -366,6 +402,7 @@ class PreflightRuntimeControls:
                 self._run_cleanup_episode(handles, normalized_grace),
                 name="preflight-cleanup-supervisor",
             )
+            observe_physical(self._cleanup_task)
         await self._await_cleanup_supervisor(self._cleanup_task)
 
 

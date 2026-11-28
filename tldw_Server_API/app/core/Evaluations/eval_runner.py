@@ -48,7 +48,9 @@ from tldw_Server_API.app.core.exceptions import LLMPolicyRefusal
 from tldw_Server_API.app.core.http_client import RetryPolicy, afetch
 from tldw_Server_API.app.core.LLM_Calls.adapter_registry import ChatProviderRegistry
 from tldw_Server_API.app.core.LLM_Calls.adapter_utils import (
+    ensure_app_config,
     normalize_provider,
+    resolve_provider_model,
     split_system_message,
 )
 from tldw_Server_API.app.core.LLM_Calls.gateway import perform_chat_api_call
@@ -131,6 +133,8 @@ def _call_adapter_text(
             raise ChatConfigurationError(provider=provider, message="Provider credential context is invalid.")
         api_key, app_config = provider_credentials.api_key, provider_credentials.app_config
         extra_kwargs.update({PROVIDER_CALL_CREDENTIALS_CONTEXT_KEY: provider_credentials, "credentials_resolved": True})
+        # The gateway reads an own key's model only from its config section; keep DEFAULT_MODEL_<PROVIDER> (R6).
+        model = model or resolve_provider_model(provider, ensure_app_config(app_config))
     system_msg = system_message
     cleaned_messages = messages_payload or []
     if not system_msg:

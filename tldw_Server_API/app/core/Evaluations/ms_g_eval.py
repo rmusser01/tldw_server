@@ -113,6 +113,8 @@ def _call_adapter_text(
     system_message, cleaned_messages = split_system_message(messages_payload or [])
     if provider_credentials is not None:
         extra_kwargs[PROVIDER_CALL_CREDENTIALS_CONTEXT_KEY] = provider_credentials
+        # The gateway reads an own key's model only from its config section; keep DEFAULT_MODEL_<PROVIDER> (R6).
+        model = model or resolve_provider_model(provider, provider_credentials.app_config or {})
     # The judge scores the evaluated output: exempt as ``internal.eval_judge`` (owner 2026-11-26), since moderating
     # the judge's input or output would change the scores.
     response = perform_chat_api_call(

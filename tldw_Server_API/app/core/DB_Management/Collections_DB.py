@@ -3869,6 +3869,37 @@ class CollectionsDatabase:
             raise KeyError("media_collection_item_not_found")
         return self._row_to_media_collection_item(row)
 
+    def repair_media_collection_item_source(
+        self, item: MediaCollectionItemRow, source_url: str, retry_count: int, idempotency_key: str,
+    ) -> MediaCollectionItemRow | None:
+        """Bind an unresolved collection slot to the corrected URL before retrying it."""
+        metadata = {k: v for k, v in item.metadata.items()
+                    if k not in {"playlist_id", "playlist_title", "duplicate_policy"}}
+        now = _utcnow_iso()
+        with self.transaction() as conn:
+            result = self.backend.execute(
+                """
+                UPDATE media_collection_items
+                SET source_url = ?, normalized_source_id = NULL, source_kind = NULL,
+                    duplicate_status = 'unknown', metadata_json = ?, retry_count = ?,
+                    idempotency_key = ?, updated_at = ?
+                WHERE id = ? AND user_id = ? AND updated_at = ?
+                  AND status IN ('planned', 'submit_failed', 'failed', 'cancelled')
+                  AND media_id IS NULL AND content_item_id IS NULL
+                  AND (retry_count < ? OR (retry_count = ? AND idempotency_key = ? AND source_url = ?))
+                """,
+                (source_url, self._json_dumps_or_none(metadata), retry_count, idempotency_key, now,
+                 item.id, self.user_id, item.updated_at, retry_count, retry_count, idempotency_key, source_url),
+                connection=conn,
+            )
+            if not result.rowcount:
+                return None
+            self.backend.execute(
+                "UPDATE media_collections SET updated_at = ? WHERE id = ? AND user_id = ?",
+                (now, item.collection_id, self.user_id), connection=conn,
+            )
+        return self.get_media_collection_item(item.id)
+
     def update_media_collection_item(
         self,
         item_id: int,

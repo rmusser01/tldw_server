@@ -29,41 +29,17 @@ def test_cluster_env_overrides(monkeypatch):
 
 
 def test_extractor_max_workers_env(monkeypatch):
+    from tldw_Server_API.app.core.Web_Scraping.orchestration.executor import _load_worker_count
+
     monkeypatch.setenv("EXTRACTOR_MAX_WORKERS", "3")
 
-    async def _fake_recursive(*_args, **_kwargs):
+    async def recursive(*args, **kwargs):
         return ["ok"]
 
-    monkeypatch.setattr(extractor_lib, "recursive_scrape", _fake_recursive)
-
-    captured: dict[str, int | None] = {}
-
-    class _DummyFuture:
-        def __init__(self, fn):
-            self._fn = fn
-
-        def result(self):
-            return self._fn()
-
-    class _DummyExecutor:
-        def __init__(self, max_workers=None):
-            captured["max_workers"] = max_workers
-
-        def __enter__(self):
-            return self
-
-        def __exit__(self, exc_type, exc, tb):
-            return False
-
-        def submit(self, fn):
-            return _DummyFuture(fn)
-
-    monkeypatch.setattr(extractor_lib, "ThreadPoolExecutor", _DummyExecutor)
-
-    result = extractor_lib.sync_recursive_scrape("https://example.com", 1, 1)
-
-    assert captured["max_workers"] == 3
-    assert result == ["ok"]
+    monkeypatch.setattr(extractor_lib, "recursive_scrape", recursive)
+    assert extractor_lib._extractor_max_workers() == 3
+    assert _load_worker_count() == "3"
+    assert extractor_lib.sync_recursive_scrape("https://example.com", 1, 1) == ["ok"]
 
 
 def test_regex_pii_mask_flag_accepts_y(monkeypatch):

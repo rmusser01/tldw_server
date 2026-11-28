@@ -137,7 +137,7 @@ ORIGINAL_JOB_NAMES = {
     ),
     "codeql.yml": ("analyze",),
     "container-build-check.yml": ("build", "container-build-check", "queue-tick"),
-    "coverage-required.yml": ("changes", "coverage-required", "queue-tick"),
+    "coverage-required.yml": ("changes", "global-coverage", "authnz-coverage", "coverage-required", "queue-tick"),
     "e2e-required.yml": ("changes", "e2e-required", "queue-tick"),
     "e2e-smoke.yml": ("e2e-smoke",),
     "frontend-e2e-tiers.yml": ("changes", "critical", "features", "admin", "ux-regression", "queue-tick"),
@@ -197,7 +197,9 @@ ORIGINAL_DEPENDENCIES = {
     ),
     ("container-build-check.yml", "container-build-check"): ("build",),
     ("container-build-check.yml", "queue-tick"): ("container-build-check",),
-    ("coverage-required.yml", "coverage-required"): ("changes",),
+    ("coverage-required.yml", "global-coverage"): ("changes",),
+    ("coverage-required.yml", "authnz-coverage"): ("changes",),
+    ("coverage-required.yml", "coverage-required"): ("changes", "global-coverage", "authnz-coverage"),
     ("coverage-required.yml", "queue-tick"): ("coverage-required",),
     ("e2e-required.yml", "e2e-required"): ("changes",),
     ("e2e-required.yml", "queue-tick"): ("e2e-required",),
@@ -237,6 +239,8 @@ LICENSE_RED_GATES = {
     ("security-required.yml", "security-required"),
 }
 DIRECT_ADMISSION_JOBS = ALWAYS_ROLLUPS | LICENSE_RED_GATES | {
+    ("coverage-required.yml", "global-coverage"),
+    ("coverage-required.yml", "authnz-coverage"),
     ("backend-required.yml", "non-utc-tests"),
     ("backend-required.yml", "chacha-owner-isolation"),
     ("backend-required.yml", "rag-pipeline"),
@@ -867,6 +871,11 @@ def test_runner_roots_cannot_bypass_admission_and_checkouts_are_immutable() -> N
                         "needs.changes.outputs.backend_changed == 'true' && "
                         "needs.changes.outputs.chat_executors_changed == 'true'"
                     )
+                elif name == "coverage-required.yml" and job_name in {"global-coverage", "authnz-coverage"}:
+                    extra_condition = (
+                        "needs.changes.result == 'success' && "
+                        "needs.changes.outputs.coverage_required == 'true'"
+                    )
                 elif (name, job_name) == ("frontend-required.yml", "frontend-unit-tests"):
                     extra_condition = (
                         "needs.changes.result == 'success' && "
@@ -916,6 +925,8 @@ def test_runner_roots_cannot_bypass_admission_and_checkouts_are_immutable() -> N
                     assert re.search(r"(?m)^\s*exit 1\s*$", refusal["run"])
                 if extra_condition:
                     expected_condition += f" && ({extra_condition})"
+                if (name, job_name) == ("coverage-required.yml", "coverage-required"):
+                    expected_condition = expected_condition.replace("always() && !cancelled() &&", "always() &&", 1)
                 if name == "frontend-e2e-tiers.yml" and job_name in {"critical", "features", "admin"}:
                     expected_condition += f" && ({frontend_relevance})"
                 if name == "security-required.yml" and job_name in ("changes", "security-required"):
@@ -1012,7 +1023,7 @@ def test_runner_roots_cannot_bypass_admission_and_checkouts_are_immutable() -> N
                     }
                 assert other_inputs == expected_other_inputs, (name, job_name)
 
-    assert checkout_count == 65  # nosec B101
+    assert checkout_count == 66  # nosec B101
 
 
 def test_pr_context_and_base_diff_logic_are_workflow_run_safe() -> None:
@@ -1060,8 +1071,8 @@ def test_pr_context_and_base_diff_logic_are_workflow_run_safe() -> None:
     combined_text = "\n".join(text for _, text in workflows.values())
     assert combined_text.count("github.event.workflow_run.pull_requests[0].number") == 28  # nosec B101
     assert combined_text.count("github.event.pull_request.number") == 28  # nosec B101
-    assert combined_text.count("github.event.workflow_run.pull_requests[0].head.sha") == 58  # nosec B101
-    assert combined_text.count("github.event.pull_request.head.sha") == 61  # nosec B101
+    assert combined_text.count("github.event.workflow_run.pull_requests[0].head.sha") == 59  # nosec B101
+    assert combined_text.count("github.event.pull_request.head.sha") == 62  # nosec B101
     # The backlog task ratchet still gets the PR base (TASK-13440).
     assert combined_text.count("github.event.pull_request.base.sha") == 6
     assert combined_text.count("needs.admission.outputs.base_sha") == 11
@@ -1357,7 +1368,7 @@ def test_admitted_jobs_restore_but_cannot_save_shared_caches() -> None:
                         save_condition.startswith("github.event_name!='workflow_run'&&")
                     )
 
-    assert setup_helper_count == 31
+    assert setup_helper_count == 32
     assert setup_python_cache_count == 1
     assert cache_save_count == 7
     assert cache_restore_count == 7
@@ -2221,7 +2232,7 @@ def test_moved_provider_credential_code_keeps_authnz_ci_posture() -> None:
     assert [path for path in MOVED_E2E_PATHS if not classify_paths([path])["e2e_changed"]] == []  # nosec B101
     workflow = yaml.safe_load((REPO_ROOT / ".github/workflows/coverage-required.yml").read_text())
     floor = next(
-        step for step in workflow["jobs"]["coverage-required"]["steps"] if step.get("name") == "AuthNZ coverage floor"
+        step for step in workflow["jobs"]["authnz-coverage"]["steps"] if step.get("name") == "AuthNZ coverage floor"
     )
     words = shlex.split(floor["run"].replace("\\\n", " "), comments=True)
     assert {word.split("=", 1)[1] for word in words if word.startswith("--cov=")} >= AUTHNZ_FLOOR_TARGETS  # nosec B101

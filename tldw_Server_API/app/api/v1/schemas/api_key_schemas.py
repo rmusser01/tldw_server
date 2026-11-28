@@ -54,6 +54,7 @@ class APIKeyMetadata(BaseModel):
     usage_count: Optional[int] = 0
     last_used_at: Optional[datetime] = None
     last_used_ip: Optional[str] = None
+    suspended_at: Optional[datetime] = None
 
 
 class APIKeyCreateResponse(APIKeyMetadata):

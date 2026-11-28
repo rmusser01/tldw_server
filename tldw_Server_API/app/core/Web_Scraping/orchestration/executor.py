@@ -290,6 +290,10 @@ class ExtractionExecutorManager:
                             raise ArticleFailure("extraction_error", "submit") from None
                         generation.outstanding[cast(Future[Any], future)] = lease
                         future.add_done_callback(partial(self._release_completed, generation, lease))
+                        # Observe this future, not the manager's aggregate outstanding set.
+                        from ..runtime.controls import observe_physical
+
+                        observe_physical(future)
 
                 if future is None:
                     lease.release()

@@ -2121,6 +2121,31 @@ async def test_tldw_auth_provider_fails_closed_when_authnz_ws_verify_rejects(
 
 
 @pytest.mark.asyncio
+async def test_tldw_auth_provider_fails_closed_for_a_locked_account(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A locked user's token: the verifier raises the 423 (an HTTPException) and the socket is refused."""
+    from tldw_Server_API.app.core.AuthNZ.account_lock_errors import AccountSecurityLockedError
+    from tldw_Server_API.app.core.MCP_unified.adapters import tldw_runtime
+
+    async def _locked_account(*_args: Any, **_kwargs: Any) -> None:
+        raise AccountSecurityLockedError()
+
+    monkeypatch.setattr(tldw_runtime, "get_jwt_manager", lambda: object())
+    monkeypatch.setattr(
+        "tldw_Server_API.app.core.AuthNZ.User_DB_Handling.verify_jwt_and_fetch_user",
+        _locked_account,
+    )
+
+    identity = await tldw_runtime.TldwServerAuthProvider().authenticate_authnz_websocket_token(
+        "token",
+        websocket=SimpleNamespace(headers={}, client=None),
+    )
+
+    assert identity is None
+
+
+@pytest.mark.asyncio
 async def test_tldw_auth_provider_projects_active_scope_from_verified_user(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:

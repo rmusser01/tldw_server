@@ -636,3 +636,64 @@ def test_websearch_processed_provider_result_shape_preserves_metadata_and_extras
             },
         }
     ]
+
+
+def test_phase5_crawl_contract_exports_and_positional_constructors_are_compatible() -> None:
+    import dataclasses
+    import inspect
+
+    contracts = importlib.import_module("tldw_Server_API.app.core.Web_Scraping.contracts")
+    requests = importlib.import_module("tldw_Server_API.app.core.Web_Scraping.contracts.requests")
+    results = importlib.import_module("tldw_Server_API.app.core.Web_Scraping.contracts.results")
+
+    assert {"CrawlRequest", "CrawlResult"} <= set(contracts.__all__)
+    assert contracts.CrawlRequest is requests.CrawlRequest
+    assert contracts.CrawlResult is results.CrawlResult
+    assert [field.name for field in dataclasses.fields(contracts.CrawlRequest)] == [
+        "base_url",
+        "max_pages",
+        "max_depth",
+        "include_external",
+        "context",
+    ]
+    assert [field.name for field in dataclasses.fields(contracts.CrawlResult)] == [
+        "base_url",
+        "results",
+        "status",
+        "failure",
+    ]
+    request = contracts.CrawlRequest(" https://example.com ", 7, 2, True)
+    result = contracts.CrawlResult(" https://example.com ", [results.ExtractionResult("https://example.com/a")])
+    assert (request.base_url, request.max_pages, request.max_depth, request.include_external) == (
+        "https://example.com",
+        7,
+        2,
+        True,
+    )
+    assert result.base_url == "https://example.com"
+    assert isinstance(result.results, tuple)
+    assert result.results[0].url == "https://example.com/a"
+    assert result.status.value == "ok"
+    assert result.failure is None
+    for cls, defaults in [
+        (
+            contracts.CrawlRequest,
+            {"max_pages": None, "max_depth": None, "include_external": False, "context": "<factory>"},
+        ),
+        (contracts.CrawlResult, {"results": (), "status": contracts.WebScrapingStatus.OK, "failure": None}),
+    ]:
+        signature = inspect.signature(cls)
+        assert {name: parameter.default for name, parameter in signature.parameters.items() if name != "base_url"} == {
+            name: dataclasses._HAS_DEFAULT_FACTORY if value == "<factory>" else value
+            for name, value in defaults.items()
+        }
+        assert all(
+            parameter.kind is inspect.Parameter.POSITIONAL_OR_KEYWORD for parameter in signature.parameters.values()
+        )
+
+
+@pytest.mark.parametrize("export", ["CrawlRequest", "CrawlResult"])
+def test_phase5_crawl_constructor_rejects_empty_base_url(export: str) -> None:
+    contracts = importlib.import_module("tldw_Server_API.app.core.Web_Scraping.contracts")
+    with pytest.raises(ValueError, match="base_url is required"):
+        getattr(contracts, export)("  ")

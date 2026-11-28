@@ -1,6 +1,7 @@
 // @vitest-environment jsdom
 import { beforeEach, describe, expect, it, vi } from "vitest"
 import { render, screen, fireEvent, within } from "@testing-library/react"
+import userEvent from "@testing-library/user-event"
 import React from "react"
 import type { WizardResultItem } from "../types"
 import { extractCompletedIngestJobWarning } from "@/services/tldw/ingest-job-results"
@@ -65,6 +66,145 @@ vi.mock("@/hooks/useServerCapabilities", () => ({
 import { WizardResultsStep } from "../WizardResultsStep"
 
 describe("WizardResultsStep navigation buttons", () => {
+  it("opens the one newly saved source from the WebUI footer and keeps secondary actions collapsed", () => {
+    const openMedia = vi.fn()
+    render(<WizardResultsStep oneScreen onClose={vi.fn()} onOpenMedia={openMedia} onSearchKnowledge={vi.fn()} />)
+    expect(screen.getByRole("heading", { name: "1 saved to Media" })).toBeVisible()
+    const footer = within(screen.getByRole("group", { name: "Result actions" }))
+    fireEvent.click(footer.getByRole("button", { name: "Open in Media" }))
+    expect(openMedia).toHaveBeenCalledWith(wizardHarness.results[0])
+    expect(screen.getByText("Ask added items").closest("details")).not.toHaveAttribute("open")
+    expect(screen.queryByText("Knowledge readiness unconfirmed")).toBeNull()
+  })
+
+  it("retries only recoverable failed sources and counts all outcomes in a mixed WebUI import", () => {
+    const retry = vi.fn()
+    wizardHarness.results.push(
+      { id: "failed", type: "web", url: "https://example.com", status: "error", error: "Timed out", outcome: "failed" },
+      { id: "skip", type: "pdf", status: "ok", outcome: "skipped", mediaId: 55 },
+      { id: "extract", type: "pdf", status: "ok", persisted: false },
+    )
+    wizardHarness.queueItems = [
+      { id: "failed", url: "https://example.com", validation: { valid: true } },
+      { id: "duplicate", url: "https://example.com", validation: { valid: true } },
+    ]
+    render(<WizardResultsStep oneScreen onClose={vi.fn()} onRetryItems={retry} />)
+    expect(screen.getByRole("heading", { name: "1 saved to Media" })).toBeVisible()
+    expect(screen.getByText("1 extracted · 1 failed · 2 skipped")).toBeVisible()
+    expect(screen.getByText("Duplicate · skipped")).toBeVisible()
+    fireEvent.click(screen.getByRole("button", { name: "Retry failed source" }))
+    expect(retry).toHaveBeenCalledWith(["failed"], undefined)
+  })
+
+  it("opens the WebUI batch review with newly saved identities", () => {
+    const review = vi.fn()
+    wizardHarness.results.push({ id: "second", type: "pdf", status: "ok", mediaId: 8 })
+    render(<WizardResultsStep oneScreen onClose={vi.fn()} onReviewSavedItems={review} />)
+    fireEvent.click(screen.getByRole("button", { name: "Review 2 saved sources" }))
+    expect(review).toHaveBeenCalledWith([42, 8])
+  })
+
+  it("reads and copies the exact extracted transcript and returns focus to the receipt action", async () => {
+    const transcript = "  Opening line\r\n\n<think>quoted markup</think>\nClosing line  "
+    userEvent.setup()
+    setSinglePdfResult({ mediaId: null, persisted: false, data: { results: [{ content: [], transcript, summary: "A summary" }] } })
+    render(<WizardResultsStep oneScreen onClose={vi.fn()} />)
+
+    const open = within(screen.getByRole("group", { name: "Result actions" })).getByRole("button", { name: "View extracted text" })
+    fireEvent.click(open)
+    expect(screen.getByRole("heading", { name: "Extracted text" })).toHaveFocus()
+    expect(screen.getByRole("region", { name: "Extracted text" }).querySelector("pre")?.textContent).toBe(transcript)
+    fireEvent.click(screen.getByRole("button", { name: "Copy text" }))
+    expect(await screen.findByText("Text copied.")).toBeVisible()
+    expect(await navigator.clipboard.readText()).toBe(transcript)
+    fireEvent.click(screen.getByRole("button", { name: "Back to results" }))
+    expect(open).toHaveFocus()
+  })
+
+  it("keeps batch previews with their source, including warnings, and explains empty and unavailable output", () => {
+    wizardHarness.results = [
+      { id: "one", type: "html", title: "First link", status: "ok", data: { articles: [
+        { url: "https://example.com/a", title: "A", content: "First article" },
+        { url: "https://example.com/b", title: "B", content: "" },
+        { url: "https://example.com/c", title: "C", content: " Third article " },
+      ] } },
+      { id: "two", type: "audio", title: "Recording", status: "ok", warning: "Partial result", data: { result: { transcription: "Second transcript" } } },
+      { id: "three", type: "pdf", title: "Empty PDF", status: "ok", data: { results: [{ content: "  ", analysis_content: "Model analysis" }] } },
+      { id: "four", type: "pdf", title: "Unavailable PDF", status: "ok" },
+      { id: "saved", type: "pdf", title: "Saved PDF", status: "ok", mediaId: 7, data: { content: "In Media" } },
+    ]
+    render(<WizardResultsStep oneScreen onClose={vi.fn()} />)
+    expect(screen.getAllByRole("button", { name: /View text/ })).toHaveLength(2)
+    expect(screen.getByText("No readable text was returned for this source.")).toBeVisible()
+    expect(screen.getByText("Extracted text is unavailable in this receipt.")).toBeVisible()
+    for (const [name, content] of [["First link", "First article\n\n Third article "], ["Recording", "Second transcript"]]) {
+      const open = screen.getByRole("button", { name: `View text for ${name}` })
+      fireEvent.click(open)
+      expect(screen.getByRole("region", { name: "Extracted text" }).querySelector("pre")?.textContent).toBe(content)
+      fireEvent.keyDown(screen.getByRole("heading", { name: "Extracted text" }), { key: "Escape" })
+      expect(open).toHaveFocus()
+    }
+  })
+
+  it("keeps extracted text available for manual copy when the clipboard rejects a write", async () => {
+    userEvent.setup()
+    vi.spyOn(navigator.clipboard, "writeText").mockRejectedValueOnce(new Error("Denied"))
+    setSinglePdfResult({ mediaId: null, persisted: false, data: { content: "Readable text" } })
+    render(<WizardResultsStep oneScreen onClose={vi.fn()} />)
+    fireEvent.click(screen.getByRole("button", { name: "View extracted text" }))
+    fireEvent.click(screen.getByRole("button", { name: "Copy text" }))
+    expect(await screen.findByRole("alert")).toHaveTextContent("Select the text and copy it manually.")
+    expect(screen.getByText("Readable text")).toBeVisible()
+    expect(screen.queryByText("Text copied.")).toBeNull()
+  })
+
+  it("reads the returned segment text when an audio result only contains timed segments", () => {
+    setSinglePdfResult({ type: "audio", mediaId: null, data: { segments: [
+      { start: 0, text: " First speaker" }, { start: 2, text: "Second speaker " },
+    ] } })
+    render(<WizardResultsStep oneScreen onClose={vi.fn()} />)
+    fireEvent.click(screen.getByRole("button", { name: "View extracted text" }))
+    expect(screen.getByRole("region", { name: "Extracted text" }).querySelector("pre")?.textContent).toBe(" First speaker\nSecond speaker ")
+  })
+
+  it("identifies a web extraction by its returned article title and submitted URL", () => {
+    const url = "https://source.test/survey"
+    wizardHarness.results = [{ id: "survey", type: "html", url, status: "ok", data: { articles: [
+      { url: url + "/appendix", title: "Appendix", content: "Appendix text" },
+      { url, title: "River survey field notes", content: "Observations" },
+    ] } }]
+    render(<WizardResultsStep oneScreen onClose={vi.fn()} />)
+    fireEvent.click(screen.getByRole("button", { name: "View extracted text" }))
+    const viewer = within(screen.getByRole("region", { name: "Extracted text" }))
+    expect(viewer.getByText("River survey field notes")).toBeVisible()
+    expect(viewer.getByText(url)).toBeVisible()
+  })
+
+  it("offers Open drafts only with a confirmed draft handoff", () => {
+    const open = vi.fn()
+    setSinglePdfResult({ mediaId: undefined, persisted: false })
+    const { rerender } = render(<WizardResultsStep oneScreen onClose={vi.fn()} />)
+    expect(screen.getByRole("heading", { name: "1 extracted" })).toBeVisible()
+    expect(screen.queryByRole("button", { name: "Open drafts" })).toBeNull()
+    rerender(<WizardResultsStep oneScreen onClose={vi.fn()} reviewDrafts={{ count: 1, onOpen: open }} />)
+    expect(screen.getByRole("heading", { name: "1 draft ready for review" })).toBeVisible()
+    fireEvent.click(screen.getByRole("button", { name: "Open drafts" }))
+    expect(open).toHaveBeenCalledOnce()
+  })
+
+  it("keeps confirmed drafts reachable when another source can be retried", () => {
+    const open = vi.fn()
+    setSinglePdfResult({ mediaId: undefined })
+    wizardHarness.results.push({ id: "failed", type: "web", status: "error", error: "Timed out" })
+    wizardHarness.queueItems = [{ id: "failed", url: "https://example.com", validation: { valid: true } }]
+    render(<WizardResultsStep oneScreen onClose={vi.fn()} onRetryItems={vi.fn()}
+      reviewDrafts={{ count: 1, onOpen: open }} />)
+    expect(screen.getByRole("button", { name: "Retry failed source" })).toBeVisible()
+    fireEvent.click(screen.getByText("More actions"))
+    fireEvent.click(screen.getByText("Open drafts"))
+    expect(open).toHaveBeenCalledOnce()
+  })
+
   it.each([1, 2])("labels and opens exactly %s saved items", count => {
     setSinglePdfResult({ mediaId: 42, persisted: true })
     wizardHarness.results = Array.from({ length: count }, (_, index) => ({ ...wizardHarness.results[0], id: `saved-${index}`, mediaId: 42 + index }))
@@ -150,6 +290,23 @@ describe("WizardResultsStep navigation buttons", () => {
     render(<WizardResultsStep onClose={vi.fn()} onCorrectItems={onCorrectItems} />)
     fireEvent.click(screen.getByRole("button", { name: /Correct.*auth/ }))
     expect(onCorrectItems).toHaveBeenCalledWith(["auth"])
+  })
+
+  it("offers settings for configuration failures and preserves wait guidance for a full job queue", () => {
+    wizardHarness.results = [
+      { id: "settings", status: "error", type: "web", error: "Unauthorized 401" },
+      { id: "language", status: "error", type: "audio", error: "HTTP 422: invalid transcription model" },
+      { id: "queue", status: "error", type: "web", error: "Maximum concurrent jobs reached" },
+    ]
+    wizardHarness.queueItems = wizardHarness.results.map(item => ({
+      id: item.id, kind: "url", url: "https://source.test/" + item.id, validation: { valid: true },
+    }))
+    const onCorrectItems = vi.fn()
+    render(<WizardResultsStep oneScreen onClose={vi.fn()} onCorrectItems={onCorrectItems} />)
+    expect(screen.queryByRole("button", { name: "Edit settings for settings" })).toBeNull()
+    fireEvent.click(screen.getByRole("button", { name: "Edit settings for language" }))
+    expect(onCorrectItems).toHaveBeenCalledWith(["language"])
+    expect(screen.queryByRole("button", { name: /settings for queue/i })).toBeNull()
   })
 
   it.each([
