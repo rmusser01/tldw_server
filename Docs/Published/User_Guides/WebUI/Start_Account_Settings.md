@@ -30,11 +30,17 @@ Use these pages when you are connecting to a server, setting up authentication, 
 | `/settings/evaluations` | Shared UI | Configure evaluation defaults. | RAG/model evaluation workflows. |
 | `/settings/health` | WebUI, extension options | Inspect connection, readiness, and degraded backend state. | Troubleshooting backend reachability. |
 | `/settings/ui`, `/settings/splash` | Shared UI | Customize interface and splash behavior. | UI preferences. |
-| `/settings/quick-ingest` | Shared UI | Configure quick ingest defaults. | Browser capture and upload defaults. |
+| `/settings/quick-ingest` | Shared UI | Edit the Quick, Standard, or Deep preset. | Set the destination and analysis provider for future ingests. |
 | `/settings/image-generation`, `/settings/image-gen` | Advanced self-hosted | Configure image generation providers; `/settings/image-gen` is a compatibility route. | Image provider setup. |
 | `/settings/share` | Shared UI | Configure sharing behavior. | Shared resources and link defaults. |
 | `/settings/processed` | Shared UI | Inspect processed data settings or state. | Cleanup and processing diagnostics. |
 | `/settings/about` | Shared UI | View version and application information. | Support and diagnostics. |
+
+## Quick Ingest defaults
+
+In **Settings → Quick Ingest**, choose the preset you want to edit. **Destination** controls whether future ingests using that preset save directly to Media, create drafts for review in this browser, or extract content without saving. When **Analysis** is on, choose or enter an analysis provider. Changes are saved as you edit.
+
+**Advanced options** lets you search for an individual setting. **OCR defaults** apply across presets. After resetting a preset or all presets, use **Undo** on the page to recover your changes.
 
 ## Setup Notes
 

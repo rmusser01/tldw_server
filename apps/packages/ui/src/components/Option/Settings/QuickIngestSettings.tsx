@@ -1,542 +1,508 @@
 import React from "react"
-import { Button, Collapse, Input, InputNumber, Select, Switch } from "antd"
+import { AutoComplete, Button, Select, Switch } from "antd"
 import { useQuery } from "@tanstack/react-query"
 import { useTranslation } from "react-i18next"
 import { useStorage } from "@plasmohq/storage/hook"
 import {
+  DEFAULT_PRESET,
   PRESET_META,
-  resolvePresetMap,
   type PresetMap
 } from "@/components/Common/QuickIngest/presets"
 import { getDefaultOcrLanguage, ocrLanguages } from "@/data/ocr-language"
+import { getQuickIngestAnalysisProviderWarning } from "@/services/tldw/quick-ingest-batch"
+import { tldwClient } from "@/services/tldw/TldwApiClient"
 import {
-  ensureSelectOption,
-  getAdvancedFieldSelectOptions
-} from "@/components/Common/QuickIngest/advanced-field-options"
-import type { IngestPreset } from "@/components/Common/QuickIngest/types"
-import { QUICK_INGEST_SCHEMA_FALLBACK } from "@/services/tldw/fallback-schemas"
-import { fetchChatModels, getEmbeddingModels } from "@/services/tldw-server"
+  getChatModelsCacheGeneration,
+  subscribeChatModelsInvalidation
+} from "@/services/chat-models-invalidation"
+import {
+  presetDefaults as factory,
+  useQuickIngestPresetSettings
+} from "./useQuickIngestPresetSettings"
+import { QuickIngestAdvancedSettings } from "./QuickIngestAdvancedSettings"
 
-const PRESET_KEYS: Array<Exclude<IngestPreset, "custom">> = [
-  "quick",
-  "standard",
-  "deep"
-]
-const EXCLUDED_ADVANCED_FIELDS = new Set([
-  "perform_analysis",
-  "perform_chunking",
-  "overwrite_existing",
-  "diarize"
-])
+type NamedPreset = keyof PresetMap
+const presetKeys: NamedPreset[] = ["quick", "standard", "deep"]
 
-type ToggleRowProps = {
+// Inactive advanced overrides are stored too. They must survive a reset and Undo.
+const atFactoryDefaults = (map: PresetMap, key: NamedPreset) =>
+  JSON.stringify(map[key]) === JSON.stringify(factory[key])
+
+function ToggleRow({
+  label,
+  checked,
+  onChange
+}: {
   label: string
-  description?: string
   checked: boolean
-  onChange: (value: boolean) => void
+  onChange: (checked: boolean) => void
+}) {
+  const id = React.useId()
+  return (
+    <label
+      htmlFor={id}
+      className="flex min-h-11 cursor-pointer items-center justify-between gap-4 text-text"
+    >
+      <span>{label}</span>
+      <Switch id={id} aria-label={label} checked={checked} onChange={onChange} />
+    </label>
+  )
 }
 
-const ToggleRow = ({ label, description, checked, onChange }: ToggleRowProps) => (
-  <div className="flex flex-wrap items-center justify-between gap-3">
-    <div className="min-w-[220px]">
-      <span className="text-text">{label}</span>
-      {description ? (
-        <div className="text-xs text-text-muted mt-1">{description}</div>
-      ) : null}
-    </div>
-    <Switch checked={checked} onChange={onChange} aria-label={label} />
-  </div>
-)
-
-export const QuickIngestSettings = () => {
+export function QuickIngestSettings() {
   const { t } = useTranslation(["settings", "option"])
-  const qi = React.useCallback(
-    (key: string, defaultValue: string, options?: Record<string, unknown>) =>
-      options
-        ? t(`option:quickIngest.${key}`, { defaultValue, ...options })
-        : t(`option:quickIngest.${key}`, defaultValue),
-    [t]
-  )
-  const [presetConfigs, setPresetConfigs] = useStorage<PresetMap>(
-    "quickIngestPresetConfigs",
-    resolvePresetMap()
-  )
-  const [defaultOCRLanguage, setDefaultOCRLanguage] = useStorage(
-    "defaultOCRLanguage",
-    getDefaultOcrLanguage()
-  )
-  const [enableOcrAssets, setEnableOcrAssets] = useStorage(
-    "enableOcrAssets",
-    false
-  )
-  const { data: chatModels = [], isLoading: chatModelsLoading } = useQuery({
-    queryKey: ["playground:chatModels"],
-    queryFn: () => fetchChatModels({ returnEmpty: true }),
-    enabled: true
-  })
-  const { data: embeddingModels = [], isLoading: embeddingModelsLoading } =
-    useQuery({
-      queryKey: ["embedding-models"],
-      queryFn: () => getEmbeddingModels(),
-      enabled: true
+  const { presets, isLoading, write } = useQuickIngestPresetSettings()
+  const [ocrLanguage, setOcrLanguage] = useStorage("defaultOCRLanguage", getDefaultOcrLanguage())
+  const [ocrAssets, setOcrAssets] = useStorage("enableOcrAssets", false)
+  const [writeError, setWriteError] = React.useState("")
+  const [resetPending, setResetPending] = React.useState(false)
+  const [selected, setSelected] = React.useState<NamedPreset>(DEFAULT_PRESET)
+  const [lastReset, setLastReset] = React.useState<{
+    before: PresetMap
+    keys: NamedPreset[]
+    message: string
+  } | null>(null)
+  const [restoredMessage, setRestoredMessage] = React.useState("")
+  const undoButton = React.useRef<HTMLButtonElement>(null)
+  const resetTrigger = React.useRef<HTMLElement | null>(null)
+  const selectedRadio = React.useRef<HTMLInputElement>(null)
+  const focusAfterReset = React.useRef(false)
+  const focusAfterUndo = React.useRef(false)
+  const id = React.useId()
+  const preset = presets[selected]
+  const presetName = (key: NamedPreset) =>
+    t("option:quickIngest." + PRESET_META[key].labelKey, {
+      defaultValue: key.charAt(0).toUpperCase() + key.slice(1)
     })
-  const presets = React.useMemo(
-    () => resolvePresetMap(presetConfigs),
-    [presetConfigs]
+  const name = presetName(selected)
+  const destination = preset.reviewBeforeStorage
+    ? "draft"
+    : preset.storeRemote
+      ? "media"
+      : "extract"
+  const missingProvider = Boolean(getQuickIngestAnalysisProviderWarning(preset))
+  const provider =
+    typeof preset.advancedValues?.api_name === "string" ? preset.advancedValues.api_name : ""
+  const generation = React.useSyncExternalStore(
+    subscribeChatModelsInvalidation,
+    getChatModelsCacheGeneration,
+    getChatModelsCacheGeneration
   )
-  const advancedFields = React.useMemo(
-    () =>
-      QUICK_INGEST_SCHEMA_FALLBACK.filter(
-        (field) => !EXCLUDED_ADVANCED_FIELDS.has(field.name)
-      ),
-    []
+  const { data: providers } = useQuery({
+    queryKey: ["playground:providersStatus", generation],
+    queryFn: () => tldwClient.getProvidersStatus(),
+    enabled: preset.common.perform_analysis,
+    staleTime: 60_000,
+    retry: false
+  })
+  const providerNames = new Set(
+    providers?.providers
+      ?.filter((entry) => entry.configured)
+      .map((entry) => entry.name.trim())
+      .filter(Boolean)
   )
+  const resettable = presetKeys.filter((key) => !atFactoryDefaults(presets, key))
+  const canUndo = lastReset?.keys.some((key) => atFactoryDefaults(presets, key))
 
-  const updatePreset = React.useCallback(
-    (
-      preset: Exclude<IngestPreset, "custom">,
-      updater: (config: PresetMap["quick"]) => PresetMap["quick"]
-    ) => {
-      setPresetConfigs((prev) => {
-        const resolved = resolvePresetMap(prev)
-        return {
-          ...resolved,
-          [preset]: updater(resolved[preset])
-        }
+  React.useEffect(() => {
+    if (focusAfterReset.current && canUndo && undoButton.current) {
+      focusAfterReset.current = false
+      undoButton.current?.focus()
+    } else if (focusAfterUndo.current) {
+      focusAfterUndo.current = false
+      const trigger = resetTrigger.current
+      if (trigger && !trigger.matches(":disabled")) trigger.focus()
+      else selectedRadio.current?.focus()
+    }
+  }, [lastReset, canUndo])
+
+  function updatePreset(updater: (previous: PresetMap[NamedPreset]) => PresetMap[NamedPreset]) {
+    setRestoredMessage("")
+    setWriteError("")
+    void write((current) => ({ ...current, [selected]: updater(current[selected]) }))
+      .then(() => {
+        setLastReset((previous) => {
+          if (!previous?.keys.includes(selected)) return previous
+          const keys = previous.keys.filter((key) => key !== selected)
+          return keys.length ? { ...previous, keys } : null
+        })
       })
-    },
-    [setPresetConfigs]
-  )
-  const updatePresetAdvancedValue = React.useCallback(
-    (
-      preset: Exclude<IngestPreset, "custom">,
-      fieldName: string,
-      value: unknown
-    ) => {
-      updatePreset(preset, (config) => {
-        const nextAdvanced = { ...(config.advancedValues ?? {}) }
-        if (value === undefined || value === null || value === "") {
-          delete nextAdvanced[fieldName]
-        } else {
-          nextAdvanced[fieldName] = value
-        }
-        return {
-          ...config,
-          advancedValues: nextAdvanced
-        }
+      .catch(() => {
+        setWriteError(
+          t("quickIngestSettings.saveFailed", "Could not save the preset change. Try again.")
+        )
       })
-    },
-    [updatePreset]
-  )
+  }
 
-  const resetPreset = React.useCallback(
-    (preset: Exclude<IngestPreset, "custom">) => {
-      setPresetConfigs((prev) => {
-        const resolved = resolvePresetMap(prev)
-        const defaults = resolvePresetMap()
-        return {
-          ...resolved,
-          [preset]: defaults[preset]
-        }
+  function updateAdvanced(field: string, value: unknown) {
+    updatePreset((current) => {
+      const advancedValues = { ...current.advancedValues }
+      if (value == null || value === "") delete advancedValues[field]
+      else advancedValues[field] = value
+      return { ...current, advancedValues }
+    })
+  }
+
+  async function reset(keys: NamedPreset[], message: string, trigger: HTMLElement) {
+    setResetPending(true)
+    setWriteError("")
+    try {
+      const before = await write((current) => {
+        const next = { ...current }
+        for (const key of keys) next[key] = factory[key]
+        return next
       })
-    },
-    [setPresetConfigs]
-  )
+      resetTrigger.current = trigger
+      focusAfterReset.current = true
+      setRestoredMessage("")
+      setLastReset({ before, keys, message })
+    } catch {
+      setWriteError(t("quickIngestSettings.resetFailed", "Could not reset the presets. Try again."))
+    } finally {
+      setResetPending(false)
+    }
+  }
 
-  const resetAll = React.useCallback(() => {
-    setPresetConfigs(resolvePresetMap())
-  }, [setPresetConfigs])
+  async function undoReset() {
+    if (!lastReset) return
+    setResetPending(true)
+    setWriteError("")
+    try {
+      await write((current) => {
+        const next = { ...current }
+        for (const key of lastReset.keys) {
+          // Preserve any edits to this preset made since the reset, including from another tab.
+          if (atFactoryDefaults(current, key)) next[key] = lastReset.before[key]
+        }
+        return next
+      })
+      focusAfterUndo.current = true
+      setLastReset(null)
+      setRestoredMessage(t("quickIngestSettings.restored", "Previous preset settings restored."))
+    } catch {
+      focusAfterReset.current = true
+      setWriteError(
+        t("quickIngestSettings.undoFailed", "Could not restore the presets. Try Undo again.")
+      )
+    } finally {
+      setResetPending(false)
+    }
+  }
 
+  const selectClass =
+    "min-h-11 w-full rounded-md border border-border bg-surface px-3 py-2 text-text focus-visible:outline-primary"
   return (
-    <div className="flex flex-col space-y-6 text-sm">
-      <div>
-        <h2 className="text-base font-semibold leading-7 text-text">
-          {t("quickIngestSettings.title", "Quick Ingest settings")}
-        </h2>
-        <p className="mt-1 text-sm text-text-muted">
+    <div className="min-w-0 space-y-6 text-sm text-text">
+      <fieldset role="radiogroup" aria-labelledby={id + "-choice"}>
+        <legend id={id + "-choice"} className="mb-2 text-base font-semibold">
+          {t("quickIngestSettings.presetChoice", "Preset to edit")}
+        </legend>
+        <div className="inline-grid w-full grid-cols-3 gap-1 rounded-lg border border-border bg-surface p-1 sm:max-w-sm">
+          {presetKeys.map((key) => (
+            <label key={key} className="min-w-0 cursor-pointer">
+              <input
+                type="radio"
+                className="peer sr-only"
+                name={id + "-preset"}
+                value={key}
+                ref={selected === key ? selectedRadio : undefined}
+                checked={selected === key}
+                onChange={() => setSelected(key)}
+              />
+              <span className="flex min-h-11 items-center justify-center rounded-md px-2 text-center text-text-muted peer-checked:bg-primary/15 peer-checked:font-semibold peer-checked:text-primary peer-checked:ring-1 peer-checked:ring-primary/50 peer-focus-visible:outline peer-focus-visible:outline-2 peer-focus-visible:outline-primary">
+                {presetName(key)}
+              </span>
+            </label>
+          ))}
+        </div>
+        <p className="mt-2 text-sm text-text-muted">
           {t(
-            "quickIngestSettings.subtitle",
-            "Customize the presets used in the Quick Ingest Options tab."
+            "quickIngestSettings.defaultsHint",
+            "Edits are saved for future ingests that use this preset."
           )}
         </p>
-        <div className="border-b border-border mt-3" />
+      </fieldset>
+
+      <section
+        aria-labelledby={id + "-heading"}
+        className="min-w-0 rounded-lg border border-border bg-surface p-4 sm:p-5"
+      >
+        <h2 id={id + "-heading"} className="mb-4 text-lg font-semibold">
+          {t("quickIngestSettings.editorTitle", {
+            defaultValue: "{{preset}} preset",
+            preset: name
+          })}
+        </h2>
+        <fieldset disabled={isLoading || resetPending} className="min-w-0 space-y-4">
+          <div>
+            <label className="mb-1 block font-medium" htmlFor={id + "-destination"}>
+              {t("quickIngestSettings.destination", "Destination")}
+            </label>
+            <select
+              id={id + "-destination"}
+              className={selectClass}
+              value={destination}
+              aria-describedby={id + "-destination-help"}
+              onChange={(event) => {
+                const next = event.currentTarget.value
+                updatePreset((current) => ({
+                  ...current,
+                  storeRemote: next !== "extract",
+                  reviewBeforeStorage: next === "draft"
+                }))
+              }}
+            >
+              <option value="media">{t("quickIngestSettings.saveToMedia", "Save to Media")}</option>
+              <option value="draft">
+                {t("quickIngestSettings.createDrafts", "Create review drafts")}
+              </option>
+              <option value="extract">
+                {t("quickIngestSettings.extractOnly", "Extract without saving")}
+              </option>
+            </select>
+            <p id={id + "-destination-help"} className="mt-1 text-xs text-text-muted">
+              {destination === "draft"
+                ? t(
+                    "quickIngestSettings.draftHelp",
+                    "Review extracted content in this browser before saving it to Media."
+                  )
+                : destination === "extract"
+                  ? t(
+                      "quickIngestSettings.extractHelp",
+                      "Read the extracted content in the result without creating a Media record."
+                    )
+                  : t(
+                      "quickIngestSettings.mediaHelp",
+                      "Completed sources are saved directly to Media."
+                    )}
+            </p>
+          </div>
+
+          <div className="border-y border-border py-1">
+            <ToggleRow
+              label={t("option:quickIngest.analysisLabel", "Analysis")}
+              checked={preset.common.perform_analysis}
+              onChange={(value) =>
+                updatePreset((current) => ({
+                  ...current,
+                  common: { ...current.common, perform_analysis: value }
+                }))
+              }
+            />
+            {preset.common.perform_analysis && (
+              <div className="mb-3">
+                <label htmlFor={id + "-provider"} className="mb-1 block font-medium">
+                  {t("option:quickIngest.analysisProvider.label", "Analysis provider")}
+                </label>
+                <AutoComplete
+                  id={id + "-provider"}
+                  className="w-full [&_.ant-select-placeholder]:!text-text-muted [&_.ant-select-selection-placeholder]:!text-text-muted"
+                  size="large"
+                  allowClear
+                  aria-label={t("option:quickIngest.analysisProvider.label", "Analysis provider")}
+                  aria-required="true"
+                  aria-invalid={missingProvider}
+                  aria-describedby={id + "-provider-help"}
+                  placeholder={t(
+                    "option:quickIngest.analysisProvider.placeholder",
+                    "Choose or enter a provider"
+                  )}
+                  value={provider}
+                  options={Array.from(providerNames, (value) => ({ value }))}
+                  filterOption={(query, option) =>
+                    (option?.value ?? "").toLowerCase().includes(query.toLowerCase())
+                  }
+                  onChange={(value) => updateAdvanced("api_name", value)}
+                  onBlur={() => {
+                    if (provider !== provider.trim()) updateAdvanced("api_name", provider.trim())
+                  }}
+                />
+                <p
+                  id={id + "-provider-help"}
+                  aria-live="polite"
+                  className={"mt-1 text-xs " + (missingProvider ? "text-warn" : "text-text-muted")}
+                >
+                  {missingProvider
+                    ? t(
+                        "quickIngestSettings.providerNeeded",
+                        "Choose an analysis provider or turn off Analysis before using this preset."
+                      )
+                    : t(
+                        "quickIngestSettings.providerHelp",
+                        "Choose a configured provider or enter its name."
+                      )}
+                </p>
+              </div>
+            )}
+            <ToggleRow
+              label={t("option:quickIngest.chunkingLabel", "Chunking")}
+              checked={preset.common.perform_chunking}
+              onChange={(value) =>
+                updatePreset((current) => ({
+                  ...current,
+                  common: { ...current.common, perform_chunking: value }
+                }))
+              }
+            />
+            {destination === "media" && (
+              <ToggleRow
+                label={t("option:quickIngest.overwriteLabel", "Overwrite existing")}
+                checked={preset.common.overwrite_existing}
+                onChange={(value) =>
+                  updatePreset((current) => ({
+                    ...current,
+                    common: { ...current.common, overwrite_existing: value }
+                  }))
+                }
+              />
+            )}
+          </div>
+
+          <fieldset>
+            <legend className="font-semibold">
+              {t("quickIngestSettings.sourceFormats", "Source formats")}
+            </legend>
+            <ToggleRow
+              label={t("quickIngestSettings.speakers", "Identify speakers in audio")}
+              checked={preset.typeDefaults.audio?.diarize ?? false}
+              onChange={(value) =>
+                updatePreset((current) => ({
+                  ...current,
+                  typeDefaults: {
+                    ...current.typeDefaults,
+                    audio: { ...current.typeDefaults.audio, diarize: value }
+                  }
+                }))
+              }
+            />
+            <ToggleRow
+              label={t("quickIngestSettings.scans", "Read text from scanned documents")}
+              checked={preset.typeDefaults.document?.ocr ?? false}
+              onChange={(value) =>
+                updatePreset((current) => ({
+                  ...current,
+                  typeDefaults: {
+                    ...current.typeDefaults,
+                    document: { ...current.typeDefaults.document, ocr: value }
+                  }
+                }))
+              }
+            />
+            <ToggleRow
+              label={t("quickIngestSettings.captions", "Use video captions")}
+              checked={preset.typeDefaults.video?.captions ?? false}
+              onChange={(value) =>
+                updatePreset((current) => ({
+                  ...current,
+                  typeDefaults: {
+                    ...current.typeDefaults,
+                    video: { ...current.typeDefaults.video, captions: value }
+                  }
+                }))
+              }
+            />
+          </fieldset>
+          <QuickIngestAdvancedSettings
+            key={selected}
+            values={preset.advancedValues}
+            onChange={updateAdvanced}
+          />
+        </fieldset>
+      </section>
+
+      <div className="space-y-2">
+        {writeError && (
+          <p role="alert" className="text-danger">
+            {writeError}
+          </p>
+        )}
+        <div className="flex flex-wrap gap-2">
+          <Button
+            size="large"
+            className="min-h-11"
+            disabled={isLoading || resetPending || !resettable.includes(selected)}
+            onClick={(event) =>
+              reset(
+                [selected],
+                t("quickIngestSettings.resetOneNotice", {
+                  defaultValue: "{{preset}} reset to defaults.",
+                  preset: name
+                }),
+                event.currentTarget
+              )
+            }
+          >
+            {t("quickIngestSettings.resetOne", {
+              defaultValue: "Reset {{preset}} preset",
+              preset: name
+            })}
+          </Button>
+          <Button
+            size="large"
+            className="min-h-11"
+            disabled={isLoading || resetPending || !resettable.length}
+            onClick={(event) =>
+              reset(
+                resettable,
+                t("quickIngestSettings.resetManyNotice", {
+                  defaultValue: "{{presets}} reset to defaults.",
+                  presets: resettable.map(presetName).join(", ")
+                }),
+                event.currentTarget
+              )
+            }
+          >
+            {t("quickIngestSettings.resetAll", "Reset all presets")}
+          </Button>
+        </div>
+        <div className="flex flex-wrap items-center gap-x-3">
+          <p role="status" className="text-sm text-text-muted">
+            {lastReset?.message ?? restoredMessage}
+          </p>
+          {canUndo && (
+            <Button
+              ref={undoButton}
+              className="min-h-11"
+              disabled={resetPending}
+              onClick={undoReset}
+            >
+              {t("quickIngestSettings.undo", "Undo")}
+            </Button>
+          )}
+        </div>
       </div>
 
-      <div className="flex flex-wrap items-center justify-between gap-2">
+      <section aria-labelledby={id + "-ocr"} className="space-y-2 border-t border-border pt-4">
+        <h2 id={id + "-ocr"} className="text-base font-semibold">
+          {t("quickIngestSettings.ocrDefaults.title", "OCR defaults")}
+        </h2>
         <p className="text-sm text-text-muted">
           {t(
-            "quickIngestSettings.presetHint",
-            "Changes apply the next time you open Quick Ingest."
+            "quickIngestSettings.sharedOcr",
+            "These text recognition settings apply across presets."
           )}
         </p>
-        <Button size="small" onClick={resetAll}>
-          {t("quickIngestSettings.resetAll", "Reset all presets")}
-        </Button>
-      </div>
-
-      <section className="rounded-md border border-border bg-surface p-4 space-y-3">
-        <div>
-          <h3 className="text-sm font-semibold text-text">
-            {t("quickIngestSettings.ocrDefaults.title", "OCR defaults")}
-          </h3>
-          <p className="mt-1 text-xs text-text-muted">
-            {t(
-              "quickIngestSettings.ocrDefaults.description",
-              "Used by ingest flows that extract text from images or scanned documents."
-            )}
-          </p>
-        </div>
         <ToggleRow
-          checked={enableOcrAssets}
+          checked={ocrAssets ?? false}
           label={t("generalSettings.settings.enableOcrAssets.label")}
-          onChange={setEnableOcrAssets}
+          onChange={setOcrAssets}
         />
-        <div className="flex flex-wrap items-center justify-between gap-3">
-          <span className="text-text">
+        <div className="flex flex-wrap items-center justify-between gap-2">
+          <label htmlFor={id + "-language"}>
             {t("generalSettings.settings.ocrLanguage.label")}
-          </span>
+          </label>
           <Select
+            id={id + "-language"}
             aria-label={t("generalSettings.settings.ocrLanguage.label")}
-            className="w-full sm:w-[240px]"
-            onChange={setDefaultOCRLanguage}
+            size="large"
+            className="w-full sm:w-64"
+            onChange={setOcrLanguage}
             options={ocrLanguages}
-            showSearch
-            value={defaultOCRLanguage}
+            showSearch={{ optionFilterProp: ["label", "value"] }}
+            value={ocrLanguage}
           />
         </div>
       </section>
-
-      {PRESET_KEYS.map((presetKey) => {
-        const preset = presets[presetKey]
-        const meta = PRESET_META[presetKey]
-        const label = qi(
-          meta.labelKey,
-          presetKey.charAt(0).toUpperCase() + presetKey.slice(1)
-        )
-        const description = qi(meta.descriptionKey, "")
-
-        return (
-          <div
-            key={presetKey}
-            className="rounded-md border border-border bg-surface p-4 space-y-4"
-          >
-            <div className="flex flex-wrap items-center justify-between gap-3">
-              <div className="flex items-start gap-2">
-                <span aria-hidden="true" className="text-lg">
-                  {meta.icon}
-                </span>
-                <div>
-                  <div className="text-sm font-semibold text-text">{label}</div>
-                  {description ? (
-                    <div className="text-xs text-text-muted">
-                      {description}
-                    </div>
-                  ) : null}
-                </div>
-              </div>
-              <Button size="small" onClick={() => resetPreset(presetKey)}>
-                {qi("preset.reset", "Reset to defaults")}
-              </Button>
-            </div>
-
-            <div className="space-y-3">
-              <ToggleRow
-                label={qi("analysisLabel", "Analysis")}
-                checked={preset.common.perform_analysis}
-                onChange={(value) =>
-                  updatePreset(presetKey, (config) => ({
-                    ...config,
-                    common: { ...config.common, perform_analysis: value }
-                  }))
-                }
-              />
-              <ToggleRow
-                label={qi("chunkingLabel", "Chunking")}
-                checked={preset.common.perform_chunking}
-                onChange={(value) =>
-                  updatePreset(presetKey, (config) => ({
-                    ...config,
-                    common: { ...config.common, perform_chunking: value }
-                  }))
-                }
-              />
-              <ToggleRow
-                label={qi("overwriteLabel", "Overwrite existing")}
-                checked={preset.common.overwrite_existing}
-                onChange={(value) =>
-                  updatePreset(presetKey, (config) => ({
-                    ...config,
-                    common: { ...config.common, overwrite_existing: value }
-                  }))
-                }
-              />
-              <ToggleRow
-                label={qi("storeRemote", "Store to remote DB")}
-                checked={preset.storeRemote}
-                onChange={(value) =>
-                  updatePreset(presetKey, (config) => ({
-                    ...config,
-                    storeRemote: value,
-                    reviewBeforeStorage: value
-                      ? config.reviewBeforeStorage
-                      : false
-                  }))
-                }
-              />
-              <ToggleRow
-                label={qi("reviewBeforeStorage", "Review before saving")}
-                checked={preset.reviewBeforeStorage}
-                onChange={(value) =>
-                  updatePreset(presetKey, (config) => ({
-                    ...config,
-                    reviewBeforeStorage: value,
-                    storeRemote: value ? true : config.storeRemote
-                  }))
-                }
-              />
-              <ToggleRow
-                label={qi("audioDiarizationLabel", "Diarization")}
-                checked={preset.typeDefaults?.audio?.diarize ?? false}
-                onChange={(value) =>
-                  updatePreset(presetKey, (config) => ({
-                    ...config,
-                    typeDefaults: {
-                      ...config.typeDefaults,
-                      audio: {
-                        ...config.typeDefaults?.audio,
-                        diarize: value
-                      }
-                    }
-                  }))
-                }
-              />
-              <ToggleRow
-                label={qi("documentOcrLabel", "OCR")}
-                checked={preset.typeDefaults?.document?.ocr ?? false}
-                onChange={(value) =>
-                  updatePreset(presetKey, (config) => ({
-                    ...config,
-                    typeDefaults: {
-                      ...config.typeDefaults,
-                      document: {
-                        ...config.typeDefaults?.document,
-                        ocr: value
-                      }
-                    }
-                  }))
-                }
-              />
-              <ToggleRow
-                label={qi("videoCaptionsLabel", "Captions")}
-                checked={preset.typeDefaults?.video?.captions ?? false}
-                onChange={(value) =>
-                  updatePreset(presetKey, (config) => ({
-                    ...config,
-                    typeDefaults: {
-                      ...config.typeDefaults,
-                      video: {
-                        ...config.typeDefaults?.video,
-                        captions: value
-                      }
-                    }
-                  }))
-                }
-              />
-            </div>
-
-            <Collapse
-              className="bg-transparent border-0"
-              items={[
-                {
-                  key: "advanced",
-                  label: t(
-                    "quickIngestSettings.advancedHeading",
-                    "Advanced options"
-                  ),
-                  className: "!border-0",
-                  children: (
-                    <>
-                      <p className="text-xs text-text-subtle mb-4">
-                        {t(
-                          "quickIngestSettings.advancedHint",
-                          "Configure advanced ingest fields for this preset."
-                        )}
-                      </p>
-                      <div className="space-y-4">
-                        {advancedFields.map((field) => {
-                          const value = preset.advancedValues?.[field.name]
-                          const labelText = field.title || field.name
-                          const descriptionText = field.description
-                          const setValue = (next: unknown) =>
-                            updatePresetAdvancedValue(presetKey, field.name, next)
-                          const selectOptions = getAdvancedFieldSelectOptions({
-                            fieldName: field.name,
-                            fieldEnum: field.enum,
-                            t,
-                            chatModels,
-                            embeddingModels
-                          })
-                          const fallbackEnumOptions = Array.isArray(field.enum)
-                            ? field.enum.map((entry: unknown) => ({
-                                value: String(entry),
-                                label: String(entry)
-                              }))
-                            : null
-                          const selectValue =
-                            value === undefined || value === null || value === ""
-                              ? undefined
-                              : String(value)
-                          const resolvedSelectOptions = selectOptions
-                            ? ensureSelectOption(selectOptions, selectValue)
-                            : fallbackEnumOptions
-                              ? ensureSelectOption(fallbackEnumOptions, selectValue)
-                              : null
-                          const isContextualModel =
-                            field.name === "contextual_llm_model"
-                          const isEmbeddingModel =
-                            field.name === "embedding_model"
-                          const shouldShowSearch =
-                            isContextualModel ||
-                            isEmbeddingModel ||
-                            (resolvedSelectOptions?.length ?? 0) > 6
-
-                          if (resolvedSelectOptions) {
-                            return (
-                              <div
-                                key={field.name}
-                                className="flex flex-wrap items-center justify-between gap-3"
-                              >
-                                <div className="min-w-[220px]">
-                                  <span className="text-text">{labelText}</span>
-                                  {descriptionText ? (
-                                    <div className="text-xs text-text-muted mt-1">
-                                      {descriptionText}
-                                    </div>
-                                  ) : null}
-                                </div>
-                                <Select
-                                  className="min-w-[220px]"
-                                  allowClear
-                                  showSearch={shouldShowSearch}
-                                  loading={
-                                    (isContextualModel && chatModelsLoading) ||
-                                    (isEmbeddingModel && embeddingModelsLoading)
-                                  }
-                                  value={selectValue}
-                                  onChange={(next) => setValue(next ?? undefined)}
-                                  options={resolvedSelectOptions}
-                                  aria-label={labelText}
-                                />
-                              </div>
-                            )
-                          }
-
-                          if (field.type === "boolean") {
-                            const isSet = value !== undefined
-                            return (
-                              <div
-                                key={field.name}
-                                className="flex flex-wrap items-center justify-between gap-3"
-                              >
-                                <div className="min-w-[220px]">
-                                  <span className="text-text">{labelText}</span>
-                                  {descriptionText ? (
-                                    <div className="text-xs text-text-muted mt-1">
-                                      {descriptionText}
-                                    </div>
-                                  ) : null}
-                                </div>
-                                <div className="flex items-center gap-2">
-                                  <Switch
-                                    checked={Boolean(value)}
-                                    onChange={(next) => setValue(next)}
-                                    aria-label={labelText}
-                                  />
-                                  <Button
-                                    size="small"
-                                    onClick={() => setValue(undefined)}
-                                    disabled={!isSet}
-                                  >
-                                    {qi("unset", "Unset")}
-                                  </Button>
-                                </div>
-                              </div>
-                            )
-                          }
-
-                          if (field.type === "integer" || field.type === "number") {
-                            const numericValue =
-                              typeof value === "number"
-                                ? value
-                                : value === null ||
-                                    value === undefined ||
-                                    value === ""
-                                  ? undefined
-                                  : Number(value)
-                            return (
-                              <div
-                                key={field.name}
-                                className="flex flex-wrap items-center justify-between gap-3"
-                              >
-                                <div className="min-w-[220px]">
-                                  <span className="text-text">{labelText}</span>
-                                  {descriptionText ? (
-                                    <div className="text-xs text-text-muted mt-1">
-                                      {descriptionText}
-                                    </div>
-                                  ) : null}
-                                </div>
-                                <InputNumber
-                                  className="min-w-[220px]"
-                                  value={
-                                    Number.isNaN(numericValue)
-                                      ? undefined
-                                      : numericValue
-                                  }
-                                  onChange={(next) => setValue(next ?? undefined)}
-                                  aria-label={labelText}
-                                  placeholder={labelText}
-                                />
-                              </div>
-                            )
-                          }
-
-                          return (
-                            <div
-                              key={field.name}
-                              className="flex flex-wrap items-center justify-between gap-3"
-                            >
-                              <div className="min-w-[220px]">
-                                <span className="text-text">{labelText}</span>
-                                {descriptionText ? (
-                                  <div className="text-xs text-text-muted mt-1">
-                                    {descriptionText}
-                                  </div>
-                                ) : null}
-                              </div>
-                              <Input
-                                className="min-w-[220px]"
-                                allowClear
-                                value={value === undefined ? "" : String(value)}
-                                onChange={(event) => {
-                                  const nextValue = event.target.value
-                                  setValue(nextValue === "" ? undefined : nextValue)
-                                }}
-                                aria-label={labelText}
-                                placeholder={labelText}
-                              />
-                            </div>
-                          )
-                        })}
-                      </div>
-                    </>
-                  )
-                }
-              ]}
-            />
-          </div>
-        )
-      })}
     </div>
   )
 }
