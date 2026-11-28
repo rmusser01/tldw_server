@@ -27,6 +27,7 @@ from tldw_Server_API.app.core.config import load_and_log_configs
 from tldw_Server_API.app.core.Context_Integrity.prompt_loader import load_prompt
 from tldw_Server_API.app.core.DB_Management.db_path_utils import get_user_media_db_path
 from tldw_Server_API.app.core.DB_Management.media_db.api import managed_media_database
+from tldw_Server_API.app.core.exceptions import WEB_CRAWL_CANCELLED_BEFORE_SAVE, WebCrawlFailedBeforeSave
 from tldw_Server_API.app.core.Ingestion_Media_Processing.chunking_options import (
     async_resolve_chunking_options_and_plan,
     attach_chunking_plan_to_result,
@@ -208,7 +209,7 @@ def raise_for_empty_failed_crawl(report: CrawlReport) -> None:
         "budget_exhausted": 429,
         "job_payload_too_large": 413,
     }.get(report.outcome.stop_reason, 500)
-    raise HTTPException(
+    raise WebCrawlFailedBeforeSave(
         status_code=status,
         detail={
             "message": "Web crawl failed",
@@ -371,6 +372,23 @@ class WebScrapingService:
             else deepcopy(list(report.articles))
         )
 
+    def _record_crawl_cancellation(
+        self, task_id: str, user_id: int | None, error: asyncio.CancelledError, *, before_media_save: bool
+    ) -> None:
+        """Record crawl progress and whether this cancellation can safely release a planned source."""
+        report = getattr(error, "report", None)
+        confirmed = isinstance(report, CrawlReport) and report.outcome.state == "cancelled"
+        setattr(error, WEB_CRAWL_CANCELLED_BEFORE_SAVE, confirmed and before_media_save)
+        if self.scraper is None:
+            return
+        updates: dict[str, Any] = {
+            "service_status": "cancelled",
+            "owner_user_id": str(user_id) if user_id is not None else None,
+        }
+        if report is not None and "crawl_outcome" not in self.scraper._progress.get(task_id, {}):
+            updates["crawl_outcome"] = public_crawl_outcome(report.outcome)
+        self.scraper._set_progress(task_id, **updates)
+
     async def process_web_scraping_task(
         self,
         scrape_method: str,
@@ -418,6 +436,7 @@ class WebScrapingService:
             await self.initialize()
 
         task_id = f"scrape_{uuid.uuid4().hex[:8]}"
+        media_save_started = False
         try:
             # Read crawl feature flags (env > config.txt); keep behavior unchanged if params provided
             cfg = load_and_log_configs() or {}
@@ -633,6 +652,7 @@ class WebScrapingService:
                         else:
                             stored.update(status="error", errors=errors)
             else:
+                media_save_started = True
                 stored = await self._store_persistent(
                     result,
                     keywords,
@@ -651,14 +671,9 @@ class WebScrapingService:
             return stored
 
         except asyncio.CancelledError as error:
-            report = getattr(error, "report", None)
-            updates = {"service_status": "cancelled", "owner_user_id": str(user_id) if user_id is not None else None}
-            if report is not None:
-                progress = self.scraper._progress.get(task_id, {})
-                if "crawl_outcome" not in progress:
-                    updates["crawl_outcome"] = public_crawl_outcome(report.outcome)
-            if self.scraper is not None:
-                self.scraper._set_progress(task_id, **updates)
+            self._record_crawl_cancellation(
+                task_id, user_id, error, before_media_save=mode == "persist" and not media_save_started
+            )
             raise
         except HTTPException:
             if self.scraper is not None:

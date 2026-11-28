@@ -2,7 +2,7 @@
 
 from dataclasses import replace
 from types import SimpleNamespace
-from unittest.mock import AsyncMock
+from unittest.mock import AsyncMock, Mock
 
 import pytest
 from fastapi import HTTPException, Response
@@ -420,6 +420,125 @@ def test_web_summary_quota_denied_before_fetch_permits_explicit_retry(plan_clien
         json={**body, "summarize_checkbox": False},
     )
     assert corrected.status_code == 200 and corrected.json()["item"]["media_id"] == 22
+
+
+def test_empty_crawl_can_retry_the_original_source_without_repeating_a_write(plan_client, monkeypatch):
+    from tldw_Server_API.app.core.DB_Management.db_path_utils import get_user_media_db_path
+    from tldw_Server_API.app.core.DB_Management.media_db.api import managed_media_database
+    from tldw_Server_API.app.core.Web_Scraping.contracts.execution import CrawlOutcome, CrawlReport
+    from tldw_Server_API.app.services import web_scraping_service
+
+    store, client = plan_client
+    url = "https://example.test/lecture"
+    query = _reserve(store, url, "url")
+    item = store.get_quick_ingest_source("plan", "source")
+    body = {"url_input": url, "scrape_method": "Individual URLs", "mode": "persist", "perform_chunking": False}
+    crawl = AsyncMock(
+        side_effect=[
+            CrawlReport((), CrawlOutcome("failed", "queue_overloaded", False)),
+            CrawlReport(
+                ({"url": url, "title": "Lecture", "content": "Lecture notes", "extraction_successful": True},),
+                CrawlOutcome("completed", "frontier_exhausted", False),
+            ),
+        ]
+    )
+    service = WebScrapingService()
+    service._initialized = True
+    service.scraper = SimpleNamespace(_batch_report=crawl, _set_progress=Mock())
+    persist = AsyncMock(wraps=service._store_persistent)
+    monkeypatch.setattr(service, "_store_persistent", persist)
+    monkeypatch.setattr(web_scraping_service, "get_web_scraping_service", lambda: service)
+
+    denied = client.post(_PATH + "/web", params=query, json=body)
+    assert denied.status_code == 503
+    assert denied.json()["detail"] == {
+        "message": "Web crawl failed",
+        "crawl_outcome": {"state": "failed", "stop_reason": "queue_overloaded", "has_partial_results": False},
+    }
+    persist.assert_not_awaited()
+    replay = client.post(_PATH + "/web", params=query, json=body).json()
+    assert not replay["dispatched"] and replay["dispatch_state"] == "settled"
+    assert replay["item"]["status"] == "failed" and replay["item"]["media_id"] is None
+    crawl.assert_awaited_once()
+
+    retry = {"retry_count": 1, "idempotency_key": "lecture-retry"}
+    assert store.claim_quick_ingest_source("plan", "source", **retry)[0]
+    saved = client.post(_PATH + "/web", params=retry, json=body)
+    assert saved.status_code == 200, saved.text
+    receipt = saved.json()["item"]
+    assert (receipt["collection_id"], receipt["id"]) == (item.collection_id, item.id)
+    (media_id,) = saved.json()["result"]["media_ids"]
+    assert receipt["media_id"] == media_id
+    with managed_media_database(client_id="1", db_path=get_user_media_db_path(1), existing_only=True) as db:
+        media = db.get_media_by_id(media_id)
+        assert media["url"] == url and "Lecture notes" in media["content"]
+    assert not client.post(_PATH + "/web", params=retry, json=body).json()["dispatched"]
+    assert crawl.await_count == 2
+    persist.assert_awaited_once()
+
+
+@pytest.mark.asyncio
+async def test_unconfirmed_web_error_cannot_release_a_claimed_source(attempt):
+    error = HTTPException(
+        503,
+        {
+            "message": "Web crawl failed",
+            "crawl_outcome": {"state": "failed", "stop_reason": "queue_overloaded", "has_partial_results": False},
+        },
+    )
+    operation = AsyncMock(side_effect=error)
+    with pytest.raises(HTTPException) as denied:
+        await dispatch.receive(attempt, "web", args("web"), operation)
+    assert denied.value is error
+    replay = await dispatch.receive(attempt, "web", args("web"), operation)
+    assert not replay["dispatched"] and replay["dispatch_state"] == "web"
+    assert not attempt.db.claim_quick_ingest_source("plan", "source", retry_count=1, idempotency_key="next")[0]
+    operation.assert_awaited_once()
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    "stopped_during_save,reported,expected_state",
+    [(False, True, "settled"), (False, False, "web"), (True, True, "web")],
+)
+async def test_confirmed_crawl_stop_only_releases_the_source_before_media_storage(
+    attempt, monkeypatch, stopped_during_save, reported, expected_state
+):
+    import asyncio
+
+    from tldw_Server_API.app.core.Web_Scraping.contracts.execution import CrawlOutcome, CrawlReport
+
+    stop = asyncio.CancelledError("crawl stopped")
+    if reported:
+        stop.report = CrawlReport.interrupted([], "cancelled")
+    article = {"url": "https://example.test/a", "content": "Lecture notes"}
+    completed = CrawlReport((article,), CrawlOutcome("completed", "frontier_exhausted", False))
+    crawl = AsyncMock(return_value=completed, side_effect=None if stopped_during_save else stop)
+    service = WebScrapingService()
+    service._initialized = True
+    service.scraper = SimpleNamespace(_batch_report=crawl, _set_progress=Mock(), _progress={})
+    persist = AsyncMock(side_effect=stop)
+    monkeypatch.setattr(service, "_store_persistent", persist)
+
+    async def submit(*, payload):
+        return await service.process_web_scraping_task(
+            scrape_method="Individual URLs",
+            url_input=payload.url_input,
+            user_id=1,
+        )
+
+    with pytest.raises(asyncio.CancelledError) as stopped:
+        await dispatch.receive(attempt, "web", args("web"), submit)
+    assert stopped.value is stop
+    replay = await dispatch.receive(attempt, "web", args("web"), submit)
+    assert not replay["dispatched"] and replay["dispatch_state"] == expected_state
+    if stopped_during_save:
+        persist.assert_awaited_once()
+    else:
+        persist.assert_not_awaited()
+    assert replay["item"].status == ("cancelled" if expected_state == "settled" else "processing")
+    claimed, _ = attempt.db.claim_quick_ingest_source("plan", "source", retry_count=1, idempotency_key="next")
+    assert claimed == (expected_state == "settled")
 
 
 def test_fallback_analysis_quota_before_save_projects_retryable_failed_receipt(plan_client, monkeypatch):

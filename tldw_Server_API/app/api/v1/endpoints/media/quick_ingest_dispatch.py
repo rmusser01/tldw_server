@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import asyncio
 import inspect
 import json
 from collections.abc import Awaitable, Callable
@@ -24,7 +25,11 @@ from tldw_Server_API.app.api.v1.schemas.media_collections import (
     positive_quick_ingest_media_id,
 )
 from tldw_Server_API.app.core.DB_Management.Collections_DB import CollectionsDatabase, MediaCollectionItemRow
-from tldw_Server_API.app.core.exceptions import BadRequestError
+from tldw_Server_API.app.core.exceptions import (
+    WEB_CRAWL_CANCELLED_BEFORE_SAVE,
+    BadRequestError,
+    WebCrawlFailedBeforeSave,
+)
 
 
 @dataclass(frozen=True)
@@ -186,6 +191,14 @@ async def receive(
         raw = await operation(**inputs)
     except MediaAnalysisQuotaDeniedBeforeSave:
         finish(status="failed", error_summary="Analysis quota reached before ingestion started.")
+        raise
+    except asyncio.CancelledError as exc:
+        if transport == "web" and getattr(exc, WEB_CRAWL_CANCELLED_BEFORE_SAVE, False) is True:
+            finish(status="cancelled")
+        raise
+    except WebCrawlFailedBeforeSave:
+        if transport == "web":
+            finish(status="failed", error_summary="The web crawl failed before any Media was saved.")
         raise
     except HTTPException as exc:
         if transport == "jobs" and isinstance(exc.__cause__, BadRequestError):
