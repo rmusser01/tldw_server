@@ -705,3 +705,17 @@ Without frame cancellation the added assertion failed for the recorded
 frame even though the existing nested timers completed. With both behaviors
 present, all six real-Joyride tests passed. No runtime or timing-policy
 change; no new ADR. Fresh required CI and a verified merge still apply.
+
+## November 16 Merge Closeout
+
+PR #3404 merged into dev at `3883a73712f952dee631094106326e4a35f64a3a`.
+The merge parents are the then-current dev `c210ccac36` and the exact
+reviewed head `0484fac3495aab7bd5c614593edac2e58798d9b6`, whose tree
+matches the merge commit. All eight required checks were explicit
+successes on that head, including trusted license audit `43814868636`.
+GitHub's protected merge accepted the pinned head without arming auto-merge.
+
+The final scoped local evidence was 153 UI and 23 AuthNZ/task contract
+tests, no skips, and 34 unchanged findings with zero errors in the
+inherited Python Bandit comparison. This is not a full-suite claim.
+TASK-15413 is Done.

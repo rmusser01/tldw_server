@@ -1,7 +1,7 @@
 ---
 id: TASK-15413
 title: Resolve UserProfiles Stage 2 verification follow-ups
-status: In Progress
+status: Done
 labels:
 - UserProfiles
 - testing
@@ -19,7 +19,7 @@ Resolve the explicitly recorded advisory shared-UI failure and non-green local v
 - [x] #1 CompanionHome setup-notice assertion has a deterministic delayed-layout reproduction and preserves all original expected titles and security behavior.
 - [x] #2 Recorded shared-UI local failures are reproduced or accurately requalified, with narrow fixes only where evidence establishes a root cause.
 - [x] #3 Root pytest collection and missing-Go ACP runner failures are investigated and corrected where justified without test skips or weakened runtime policy.
-- [ ] #4 Affected verification, touched-scope security checks when applicable and independent review are recorded; unresolved external constraints remain explicit.
+- [x] #4 Affected verification, touched-scope security checks when applicable and independent review are recorded; unresolved external constraints remain explicit.
 <!-- AC:END -->
 
 ## Implementation Notes
@@ -59,19 +59,21 @@ November 14: 55f49b582c passed all eight required gates but was behind dev 975ca
 PR #3404 frontend job 132439358670 (1fecdfd86b): reproducing the real hover tooltip cleanup after a rapid Save reopen caused the same missing leave animation after Escape. Ant Design portal test-mode registrations shared one Escape stack ID. The Escape case now opens by keyboard and sends real keyboard Escape after the reopened input has focus; Cancel/Close setup, assertions, runtime, timeouts and gates remain unchanged. SourceViewControls: 44/44 locally. Current-head hosted CI and verified merge are still required; plan records reproduction and limits.
 PR #3404 job 132832561209 on 556ed73566 showed the late ACP receipt test clicked Retry with loadingBefore=true and no new artifact GET or POST. Requester approved the inherited test-only correction: wait for its enabled, non-loading button before clicking, preserving the single POST, receipt and version assertions. WorkspaceHeader file passed 79/79 locally. No runtime or gate change; fresh required CI and verified merge remain mandatory.
 Resolved the #3473 real-Joyride test overlap: retain upstream async act and tracked animation-frame cancellation, while draining PR-owned real timeouts and microtasks before restoring mocks. Added frame assertion reproduced red without cancellation and passed in the full six-case file after reconciliation. Other 24 patches replay unchanged; no authored runtime or gate changes.
+Verified PR #3404 merged into dev on November 16, 2026 (Pacific): merge commit 3883a73712f952dee631094106326e4a35f64a3a has parents c210ccac36e81452745d2317a3e0fd2075af04f0 and independently reviewed head 0484fac3495aab7bd5c614593edac2e58798d9b6. All eight required statuses were explicit SUCCESS on that exact head, including the trusted license audit. No override or automated queue fallback.
 <!-- SECTION:IMPLEMENTATION_NOTES:END -->
 
 ## Final Summary
 
 <!-- SECTION:FINAL_SUMMARY:BEGIN -->
+Completed the verification-only UserProfiles Stage 2 follow-up in PR #3404. The merged work retains test coverage while synchronizing UI loading and cleanup, fixing test fixture ownership, and stabilizing backend collection and WebSocket checks. On the final head, 153 scoped UI and 23 AuthNZ/task contract tests passed without skips; the inherited Python Bandit comparison returned 34 unchanged findings and zero errors. The final head passed all eight required GitHub checks and was merged into current dev as 3883a73712. Scoped success is not a full-suite claim; historical advisory discrepancies and broader controls are documented in the plan and PR.
 <!-- SECTION:FINAL_SUMMARY:END -->
 
 ## Definition of Done
 <!-- DOD:BEGIN -->
-- [ ] #1 Acceptance criteria completed
-- [ ] #2 Tests or verification recorded
-- [ ] #3 Documentation updated when relevant
-- [ ] #4 Bandit run for touched code when applicable or document non-code/environment skip
-- [ ] #5 Final summary added
-- [ ] #6 Known skips or blockers documented
+- [x] #1 Acceptance criteria completed
+- [x] #2 Tests or verification recorded
+- [x] #3 Documentation updated when relevant
+- [x] #4 Bandit run for touched code when applicable or document non-code/environment skip
+- [x] #5 Final summary added
+- [x] #6 Known skips or blockers documented
 <!-- DOD:END -->
