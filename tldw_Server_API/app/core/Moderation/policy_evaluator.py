@@ -8,6 +8,7 @@ from collections.abc import Iterator
 from dataclasses import dataclass
 from typing import TYPE_CHECKING
 
+from tldw_Server_API.app.core.Moderation.execution_models import OutputBudget
 from tldw_Server_API.app.core.Moderation.models import (
     ModerationEvaluationResult as _ModerationEvaluationResult,
 )
@@ -223,24 +224,58 @@ class PolicyEvaluator:
         return matches
 
     @staticmethod
+    def bounded_literal_subn(
+        pattern: re.Pattern[str],
+        text: str,
+        replacement: str,
+        count: int,
+        output_budget: OutputBudget,
+    ) -> tuple[str, int]:
+        """Preserve subn's zero-length behavior while checking before allocation."""
+        parts = []
+        written = last = replaced = 0
+        for match in pattern.finditer(text):
+            start, end = match.span()
+            written += start - last + len(replacement)
+            output_budget.check(written)
+            parts.extend((text[last:start], replacement))
+            last = end
+            replaced += 1
+            if count and replaced >= count:
+                break
+        output_budget.check(written + len(text) - last)
+        parts.append(text[last:])
+        return "".join(parts), replaced
+
+    @staticmethod
     def apply_rule_redactions(
         text: str,
         matches: list[re.Match[str]],
         replacement: str,
+        *,
+        output_budget: OutputBudget | None = None,
     ) -> str:
         """Apply ordered, non-overlapping matches from left to right."""
 
         if not matches:
+            if output_budget is not None:
+                output_budget.check(len(text))
             return text
         parts = []
         last = 0
+        written = 0
         for match in matches:
             start, end = match.span()
             if start < last:
                 continue
+            written += start - last + len(replacement)
+            if output_budget is not None:
+                output_budget.check(written)
             parts.append(text[last:start])
             parts.append(replacement)
             last = end
+        if output_budget is not None:
+            output_budget.check(written + len(text) - last)
         parts.append(text[last:])
         return "".join(parts)
 
@@ -250,14 +285,22 @@ class PolicyEvaluator:
         policy: ModerationPolicy,
         phase: str | None,
         limits: EvaluationLimits,
+        *,
+        output_budget: OutputBudget | None = None,
     ) -> str:
         """Apply enabled policy redactions and return only the resulting text."""
 
         if not text or not policy.block_patterns:
+            if output_budget is not None:
+                output_budget.check(len(text))
             return text
         if phase == "input" and not policy.input_enabled:
+            if output_budget is not None:
+                output_budget.check(len(text))
             return text
         if phase == "output" and not policy.output_enabled:
+            if output_budget is not None:
+                output_budget.check(len(text))
             return text
         redacted = text
         for rule in policy.block_patterns:
@@ -288,11 +331,16 @@ class PolicyEvaluator:
                 if limit <= 0:
                     limit = 0
                 if len(redacted) <= limits.max_scan_chars:
-                    redacted = pattern.sub(
-                        lambda _match, value=replacement: value,
-                        redacted,
-                        count=limit,
-                    )
+                    if output_budget is not None:
+                        redacted, _count = self.bounded_literal_subn(
+                            pattern, redacted, replacement, limit, output_budget
+                        )
+                    else:
+                        redacted = pattern.sub(
+                            lambda _match, value=replacement: value,
+                            redacted,
+                            count=limit,
+                        )
                 else:
                     matches = self.collect_rule_matches(
                         redacted,
@@ -304,9 +352,12 @@ class PolicyEvaluator:
                             redacted,
                             matches,
                             replacement,
+                            output_budget=output_budget,
                         )
             except re.error:
                 continue
+        if output_budget is not None:
+            output_budget.check(len(redacted))
         return redacted
 
     def redact_text_with_count(
@@ -315,14 +366,22 @@ class PolicyEvaluator:
         policy: ModerationPolicy,
         phase: str | None,
         limits: EvaluationLimits,
+        *,
+        output_budget: OutputBudget | None = None,
     ) -> tuple[str, int]:
         """Apply enabled policy redactions and return text plus replacement count."""
 
         if not text or not policy.block_patterns:
+            if output_budget is not None:
+                output_budget.check(len(text))
             return text, 0
         if phase == "input" and not policy.input_enabled:
+            if output_budget is not None:
+                output_budget.check(len(text))
             return text, 0
         if phase == "output" and not policy.output_enabled:
+            if output_budget is not None:
+                output_budget.check(len(text))
             return text, 0
         redacted = text
         total_count = 0
@@ -351,11 +410,16 @@ class PolicyEvaluator:
                 if limit <= 0:
                     limit = 0
                 if len(redacted) <= limits.max_scan_chars:
-                    redacted, count = pattern.subn(
-                        lambda _match, value=replacement: value,
-                        redacted,
-                        count=limit,
-                    )
+                    if output_budget is not None:
+                        redacted, count = self.bounded_literal_subn(
+                            pattern, redacted, replacement, limit, output_budget
+                        )
+                    else:
+                        redacted, count = pattern.subn(
+                            lambda _match, value=replacement: value,
+                            redacted,
+                            count=limit,
+                        )
                 else:
                     matches = self.collect_rule_matches(
                         redacted,
@@ -368,10 +432,13 @@ class PolicyEvaluator:
                             redacted,
                             matches,
                             replacement,
+                            output_budget=output_budget,
                         )
                 total_count += count
             except re.error:
                 continue
+        if output_budget is not None:
+            output_budget.check(len(redacted))
         return redacted, total_count
 
     def evaluate_text(
@@ -382,6 +449,7 @@ class PolicyEvaluator:
         limits: EvaluationLimits,
         *,
         include_redacted_text: bool,
+        output_budget: OutputBudget | None = None,
     ) -> ModerationEvaluationResult:
         """Evaluate text against a policy without mutating borrowed inputs."""
 
@@ -458,7 +526,10 @@ class PolicyEvaluator:
         )
         redacted_text = None
         if include_redacted_text and best_action == "redact":
-            redacted_text = self.redact_text(text, policy, phase, limits)
+            if output_budget is None:
+                redacted_text = self.redact_text(text, policy, phase, limits)
+            else:
+                redacted_text = self.redact_text(text, policy, phase, limits, output_budget=output_budget)
         return _ModerationEvaluationResult(
             action=best_action,
             redacted_text=redacted_text,

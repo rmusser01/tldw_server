@@ -2,6 +2,28 @@
 
 from __future__ import annotations
 
+MODERATION_EXECUTION_REASONS = frozenset(
+    {
+        "deadline_exceeded",
+        "capacity_exhausted",
+        "size_exceeded",
+        "worker_unavailable",
+        "worker_crashed",
+        "invalid_response",
+        "cleanup_failed",
+    }
+)
+
+
+class ModerationExecutionError(RuntimeError):
+    """Content-free failure at the moderation execution boundary."""
+
+    def __init__(self, reason: str) -> None:
+        if not isinstance(reason, str) or reason not in MODERATION_EXECUTION_REASONS:
+            raise ValueError("invalid moderation execution reason")
+        self.reason = reason
+        super().__init__(reason)
+
 
 class ProviderUsageReservationError(Exception):
     """Stable, content-free reservation error without a backend exception graph."""

@@ -79,9 +79,8 @@ from tldw_Server_API.app.core.DB_Management.ChaChaNotes_DB import (
     ConflictError,
     InputError,
 )
-from tldw_Server_API.app.core.DB_Management.media_db.legacy_transcripts import (
-    upsert_transcript,
-)
+from tldw_Server_API.app.core.DB_Management.media_db import legacy_transcripts
+from tldw_Server_API.app.core.exception_types import ModerationExecutionError
 from tldw_Server_API.app.core.exceptions import AudioQuotaStoreUnavailable, LLMPolicyRefusal
 from tldw_Server_API.app.core.Ingestion_Media_Processing.Audio.audio_stream_protocol import (
     AUDIO_CHAT_ENDPOINT,
@@ -94,8 +93,8 @@ from tldw_Server_API.app.core.Ingestion_Media_Processing.Audio.audio_stream_prot
 from tldw_Server_API.app.core.Ingestion_Media_Processing.Audio.model_utils import normalize_model_and_variant
 from tldw_Server_API.app.core.Ingestion_Media_Processing.Audio.stt_policy import (
     RedactingWebSocketProxy,
-    apply_transcript_payload_policy,
-    apply_transcript_text_policy,
+    apply_transcript_payload_policy_async,
+    apply_transcript_text_policy_async,
     get_websocket_auth_principal,
 )
 from tldw_Server_API.app.core.LLM_Calls.adapter_utils import (
@@ -580,6 +579,16 @@ def _compose_transcript_snapshot(full_text: str, latest_text: str) -> str:
             return full
         return f"{full} {latest}".strip()
     return full or latest
+
+
+def _transcript_result_snapshot(payload: dict[str, Any], full_text: str) -> tuple[str, bool] | None:
+    kind = str(payload.get("type", "")).strip().lower()
+    text = payload.get("text")
+    if kind not in {"partial", "transcription", "full_transcript"} or not isinstance(text, str) or not text.strip():
+        return None
+    if kind == "full_transcript":
+        return text, True
+    return _compose_transcript_snapshot(full_text, text), bool(payload.get("is_final"))
 
 
 def _next_audio_provider_stream_chunk(iterator: Any) -> tuple[bool, Any]:
@@ -1209,12 +1218,21 @@ async def websocket_transcribe(
             db=None,
         )
 
+        pending_snapshot: tuple[dict[str, Any], str, bool] | None = None
+
         class _MetricRedactingWebSocketProxy(RedactingWebSocketProxy):
             async def receive_text(self) -> str:
                 return await receive_audio_websocket_text(self._websocket)
 
             async def send_json(self, payload: dict[str, Any]) -> None:
-                redacted_payload = apply_transcript_payload_policy(payload, policy=effective_stt_policy)
+                nonlocal pending_snapshot
+                # Only this frame can consume the snapshot staged by its callback.
+                snapshot = pending_snapshot if pending_snapshot is not None and pending_snapshot[0] is payload else None
+                if snapshot is not None:
+                    pending_snapshot = None
+                redacted_payload = await apply_transcript_payload_policy_async(payload, policy=effective_stt_policy)
+                if snapshot is not None:
+                    await _persist_transcript_snapshot(snapshot[1], is_final=snapshot[2])
                 if str(redacted_payload.get("type", "")).strip().lower() in {
                     "partial",
                     "final",
@@ -1327,10 +1345,8 @@ async def websocket_transcribe(
             if not snapshot or not persistence_enabled:
                 return
             original_snapshot = snapshot
-            snapshot = apply_transcript_text_policy(
-                snapshot,
-                policy=effective_stt_policy,
-                is_partial=not is_final,
+            snapshot = await apply_transcript_text_policy_async(
+                original_snapshot, policy=effective_stt_policy, is_partial=not is_final
             )
             emit_stt_redaction_total(
                 endpoint="audio.stream.transcribe",
@@ -1351,7 +1367,7 @@ async def websocket_transcribe(
                 return
             db_instance, media_id = context
             try:
-                write_payload = upsert_transcript(
+                write_payload = legacy_transcripts.upsert_transcript(
                     db_instance,
                     media_id=media_id,
                     transcription=snapshot,
@@ -1425,20 +1441,9 @@ async def websocket_transcribe(
             _ensure_stt_session_started()
 
         async def _on_transcript_result(result: dict[str, Any], full_transcript: str) -> None:
-            if not persistence_enabled:
-                return
-            result_type = str(result.get("type", "")).strip().lower()
-            if result_type not in {"partial", "transcription"}:
-                return
-            text = result.get("text")
-            if not isinstance(text, str) or not text.strip():
-                return
-            is_final = bool(result.get("is_final"))
-            snapshot = _compose_transcript_snapshot(full_transcript, text)
-            await _persist_transcript_snapshot(snapshot, is_final=is_final)
-
-        async def _on_full_transcript(text: str, _auto_commit: bool) -> None:
-            await _persist_transcript_snapshot(text, is_final=True)
+            nonlocal pending_snapshot
+            if persistence_enabled and (snapshot := _transcript_result_snapshot(result, full_transcript)) is not None:
+                pending_snapshot = (result, *snapshot)
 
         # Resource Governor: acquire a 'streams' concurrency lease (policy resolved via route_map)
         # Track and enforce minutes chunk-by-chunk
@@ -1562,7 +1567,6 @@ async def websocket_transcribe(
                 on_heartbeat=_on_heartbeat,
                 on_stream_config_resolved=_on_stream_config_resolved,
                 on_transcript_result=_on_transcript_result,
-                on_full_transcript=_on_full_transcript,
             )
             stt_session_close_reason = "client_stop"
         except _QuotaExceeded as qe:
@@ -1625,6 +1629,14 @@ async def websocket_transcribe(
                     if hasattr(persistence_db, "release_context_connection"):
                         persistence_db.release_context_connection()
 
+    except ModerationExecutionError:
+        stt_request_status = "internal_error"
+        stt_session_close_reason = "error"
+        if _outer_stream:
+            await _outer_stream.send_json(
+                {"type": "error", "code": "moderation_unavailable", "message": "Moderation is currently unavailable"}
+            )
+        await websocket.close(code=1011, reason="moderation_unavailable")
     except WebSocketDisconnect:
         logger.info("WebSocket disconnected")
     except _AUDIO_STREAMING_NONCRITICAL_EXCEPTIONS as e:
@@ -1781,6 +1793,7 @@ async def websocket_audio_chat_stream(
     stt_request_status = "ok"
     stt_session_close_reason = "client_disconnect"
     stt_session_started = False
+    moderation_failed = False
 
     def _policy_close_code() -> int:
         flag = str(os.getenv("AUDIO_WS_QUOTA_CLOSE_1008", "0")).strip().lower()
@@ -2324,7 +2337,9 @@ async def websocket_audio_chat_stream(
                 return payload
 
         async def _send_stream_payload(payload: dict[str, Any]) -> None:
-            redacted_payload = apply_transcript_payload_policy(payload, policy=effective_stt_policy)
+            if moderation_failed:
+                return
+            redacted_payload = await apply_transcript_payload_policy_async(payload, policy=effective_stt_policy)
             if str(redacted_payload.get("type", "")).strip().lower() in {
                 "partial",
                 "final",
@@ -2784,10 +2799,8 @@ async def websocket_audio_chat_stream(
             overlap_sender_task = None
             try:
                 raw_transcript_text = transcriber.get_full_transcript()
-                transcript_text = apply_transcript_text_policy(
-                    raw_transcript_text,
-                    policy=effective_stt_policy,
-                    is_partial=False,
+                transcript_text = await apply_transcript_text_policy_async(
+                    raw_transcript_text, policy=effective_stt_policy, is_partial=False
                 )
                 final_emit_at = time.time()
                 eos_detected_at = final_emit_at
@@ -3072,7 +3085,7 @@ async def websocket_audio_chat_stream(
             nonlocal active_turn_cancelled
             nonlocal turn_sequence
 
-            if active_turn_task is not None and not active_turn_task.done():
+            if moderation_failed or (active_turn_task is not None and not active_turn_task.done()):
                 return active_turn_id
 
             turn_sequence += 1
@@ -3083,6 +3096,7 @@ async def websocket_audio_chat_stream(
             async def _runner() -> None:
                 nonlocal active_turn_task
                 nonlocal active_turn_id
+                nonlocal stt_request_status, stt_session_close_reason, moderation_failed
                 try:
                     await _finalize_turn(
                         commit_at,
@@ -3090,6 +3104,21 @@ async def websocket_audio_chat_stream(
                         turn_id=turn_id,
                         commit_source=commit_source,
                     )
+                except ModerationExecutionError:
+                    moderation_failed = True
+                    stt_request_status = "internal_error"
+                    stt_session_close_reason = "error"
+                    with contextlib.suppress(_AUDIO_STREAMING_NONCRITICAL_EXCEPTIONS):
+                        transcriber.reset()
+                    if _outer_stream:
+                        await _outer_stream.send_json(
+                            {
+                                "type": "error",
+                                "code": "moderation_unavailable",
+                                "message": "Moderation is currently unavailable",
+                            }
+                        )
+                    await websocket.close(code=1011, reason="moderation_unavailable")
                 except asyncio.CancelledError:
                     logger.debug(f"audio.chat.stream turn cancelled: turn_id={turn_id}")
                 finally:
@@ -3336,12 +3365,13 @@ async def websocket_audio_chat_stream(
                     elif decision.intent == "commit":
                         await _start_turn(time.time(), auto=False, commit_source="manual_commit")
                     elif decision.intent == "stop":
-                        stt_session_close_reason = "client_stop"
+                        if not moderation_failed:
+                            stt_session_close_reason = "client_stop"
                         paused_audio_chunks.clear()
                         control_session.release_paused_audio()
                         if active_turn_task is not None and not active_turn_task.done():
                             await _await_child_task(active_turn_task)
-                        if _outer_stream:
+                        if _outer_stream and not moderation_failed:
                             await _outer_stream.done()
                         break
                 else:
@@ -3350,6 +3380,21 @@ async def websocket_audio_chat_stream(
                             {"type": "warning", "message": f"Unknown message type {msg_type}"}
                         )
 
+        except ModerationExecutionError:
+            moderation_failed = True
+            stt_request_status = "internal_error"
+            stt_session_close_reason = "error"
+            with contextlib.suppress(_AUDIO_STREAMING_NONCRITICAL_EXCEPTIONS):
+                transcriber.reset()
+            if _outer_stream:
+                await _outer_stream.send_json(
+                    {
+                        "type": "error",
+                        "code": "moderation_unavailable",
+                        "message": "Moderation is currently unavailable",
+                    }
+                )
+            await websocket.close(code=1011, reason="moderation_unavailable")
         except WebSocketDisconnect:
             stt_session_close_reason = "client_disconnect"
             logger.info("Audio chat WS disconnected")

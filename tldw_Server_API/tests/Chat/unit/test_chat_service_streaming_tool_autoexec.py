@@ -17,6 +17,7 @@ from tldw_Server_API.app.core.Chat.tool_auto_exec import (
     ToolExecutionBatchResult,
     ToolExecutionRecord,
 )
+from tldw_Server_API.app.core.exception_types import ModerationExecutionError
 from tldw_Server_API.app.core.Usage import usage_tracker
 from tldw_Server_API.app.core.Usage.llm_accounting import drain_accounting
 from tldw_Server_API.app.core.Usage.pricing_catalog import reset_pricing_catalog
@@ -207,6 +208,7 @@ async def _run_execute_streaming_call(
     moderation_getter=_NoModeration,
     native_persistence=None,
     self_monitoring_service=None,
+    forward_usage_chunk=False,
 ) -> StreamingResponse:
     cleaned_args = {
         "api_endpoint": selected_provider,
@@ -253,6 +255,7 @@ async def _run_execute_streaming_call(
         self_monitoring_service=self_monitoring_service,
         rg_commit_cb=rg_commit_cb,
         rg_refund_cb=rg_refund_cb,
+        forward_usage_chunk=forward_usage_chunk,
     )
 
 
@@ -1450,10 +1453,12 @@ async def test_a_stream_that_fails_writes_one_row_from_what_it_received(stream_u
     the tokens are committed, not refunded (AC #1, AC #2)."""
     committed: list[int] = []
     refunded: list[dict[str, Any]] = []
+    manager = _ProviderManagerStub("fallback")
 
     response = await _run_execute_streaming_call(
         llm_call_func=_content_then(then="fail_after_output"),
         save_message_fn=_save_nothing,
+        provider_manager=manager,
         rg_commit_cb=committed.append,
         rg_refund_cb=lambda **kwargs: refunded.append(kwargs),
     )
@@ -1465,6 +1470,7 @@ async def test_a_stream_that_fails_writes_one_row_from_what_it_received(stream_u
     assert committed == [row["total_tokens"]]
     assert refunded == []
     assert any('"success": false' in chunk for chunk in chunks)
+    assert manager.failures == [("openai", "RuntimeError")]
 
 
 @pytest.mark.asyncio
@@ -1690,3 +1696,126 @@ async def test_native_moonshot_display_thinking_denial_also_blocks_typed_history
     await _collect_sse_chunks(response)
     assert saved[0]["content"] == "Answer"
     assert "moonshot_reasoning_content" not in assistant_generation_extra(saved[0])
+
+
+@pytest.mark.asyncio
+@pytest.mark.unit
+@pytest.mark.parametrize("late_failure", [False, True], ids=["chunk", "saved-reasoning"])
+async def test_stream_moderation_unavailable_is_not_a_provider_failure(
+    stream_usage_rows, monkeypatch, late_failure,
+):
+    monkeypatch.setenv("MODERATION_STREAM_BUFFER_CHARS", "2" if late_failure else "0")
+    usage = {"prompt_tokens": 5, "completion_tokens": 2, "total_tokens": 7}
+
+    class Moderation(_NoModeration):
+        class _Policy(_NoModeration._Policy):
+            enabled = output_enabled = True
+
+        def evaluate_action(self, text, *_args):
+            if not late_failure or text == "Thinking":
+                raise ModerationExecutionError("capacity_exhausted")
+            return "pass", None, None
+
+    def provider():
+        yield 'data: {"choices":[{"delta":{"reasoning_content":"Thinking"}}]}\n\n'
+        # Providers can include content and the finish reason in the same frame.
+        yield 'data: {"choices":[{"delta":{"content":"Answer"},"finish_reason":"stop"}]}\n\n'
+        yield f'data: {json.dumps({"choices": [], "usage": usage})}\n\n'
+        yield "data: [DONE]\n\n"
+
+    manager = _ProviderManagerStub("fallback")
+    save = AsyncMock(return_value="should-not-save")
+    committed, refunded = [], []
+    response = await _run_execute_streaming_call(
+        llm_call_func=provider,
+        save_message_fn=save,
+        provider_manager=manager,
+        moderation_getter=Moderation,
+        native_persistence="retain_reasoning",
+        rg_commit_cb=committed.append,
+        rg_refund_cb=lambda **kwargs: refunded.append(kwargs),
+    )
+    chunks = await _collect_sse_chunks(response)
+
+    save.assert_not_called()
+    payloads = [payload for _, payload in _json_payload_chunks(chunks)]
+    errors = [payload["error"] for payload in payloads if "error" in payload]
+    assert errors == [{
+        "message": "Moderation is currently unavailable",
+        "type": "moderation_unavailable",
+        "code": "moderation_unavailable",
+    }]
+    assert '"success": false' in "".join(chunks)
+    (row,) = await _settled(stream_usage_rows)
+    assert committed == [row["total_tokens"]]
+    assert refunded == []
+    choices = [choice for payload in payloads for choice in payload.get("choices", [])]
+    if late_failure:
+        assert row["total_tokens"] == usage["total_tokens"]
+        assert [choice["delta"]["content"] for choice in choices if "content" in choice.get("delta", {})] == ["Answ"]
+    assert not any(choice.get("finish_reason") for choice in choices)
+    assert manager.failures == []
+    assert manager.successes == []
+
+
+@pytest.mark.asyncio
+@pytest.mark.unit
+@pytest.mark.parametrize("unified", ["0", "1"], ids=["direct", "unified"])
+async def test_stream_defers_finish_but_keeps_deltas_and_usage_order(monkeypatch, stream_usage_rows, unified):
+    from tldw_Server_API.app.core.Chat.persistence_service import assistant_generation_extra
+
+    monkeypatch.setenv("STREAMS_UNIFIED", unified)
+    monkeypatch.setenv("MODERATION_STREAM_BUFFER_CHARS", "2")
+    usage = {"prompt_tokens": 5, "completion_tokens": 2, "total_tokens": 7}
+    saved = []
+    content_seen = asyncio.Event()
+
+    class PassModeration(_NoModeration):
+        class _Policy(_NoModeration._Policy):
+            enabled = output_enabled = True
+
+        def evaluate_action(self, *_args):
+            return "pass", None, None
+
+    def provider():
+        async def stream():
+            yield 'data: {"choices":[{"index":0,"delta":{"content":"Answer"},"finish_reason":"length"}]}\n\n'
+            await asyncio.wait_for(content_seen.wait(), timeout=5)
+            yield f'data: {json.dumps({"choices": [], "usage": usage})}\n\n'
+            yield "data: [DONE]\n\n"
+
+        return stream()
+
+    async def save(_db, _conversation_id, payload, **_kwargs):
+        saved.append(payload)
+        return "saved-length-reply"
+
+    response = await _run_execute_streaming_call(
+        llm_call_func=provider,
+        save_message_fn=save,
+        moderation_getter=PassModeration,
+        forward_usage_chunk=True,
+    )
+    order = []
+    async for chunk in response.body_iterator:
+        for _, payload in _json_payload_chunks([chunk]):
+            for choice in payload.get("choices", []):
+                if choice["delta"].get("content") == "Answ":
+                    assert not saved
+                    order.append("content")
+                    content_seen.set()
+                if choice["delta"].get("content") == "er":
+                    assert saved
+                    order.append("tail")
+                if choice.get("finish_reason") == "length":
+                    assert saved
+                    order.append("length")
+            if payload.get("usage") == usage:
+                order.append("usage")
+
+    assert order == ["content", "tail", "length", "usage"]
+    (reply,) = saved
+    assert reply["content"] == "Answer"
+    assert assistant_generation_extra(reply)["finish_reason"] == "length"
+    (row,) = await _settled(stream_usage_rows)
+    assert row["total_tokens"] == usage["total_tokens"]

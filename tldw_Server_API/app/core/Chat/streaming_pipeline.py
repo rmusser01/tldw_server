@@ -9,11 +9,12 @@ The streaming implementation remains in ``streaming_utils``. This module gives
 
 from __future__ import annotations
 
+from collections.abc import Awaitable
 from dataclasses import dataclass
 from typing import Any, Callable
-from collections.abc import Awaitable
 from functools import partial
 from tldw_Server_API.app.core.Chat.streaming_utils import StopStreamWithError
+from tldw_Server_API.app.core.exception_types import ModerationExecutionError
 from typing import TYPE_CHECKING
 import asyncio
 import contextlib
@@ -39,7 +40,7 @@ class StreamingPipelineRequest:
     on_first_output: Callable[..., Any] | None = None
     idle_timeout: float | None = None
     heartbeat_interval: float | None = None
-    text_transform: Callable[[str], str] | None = None
+    text_transform: Callable[[str], str | Awaitable[str]] | None = None
     before_success_callback: Callable[..., Any] | None = None
     system_message_id: str | None = None
     continuation_metadata: dict[str, Any] | None = None
@@ -49,6 +50,7 @@ class StreamingPipelineRequest:
     forward_usage_chunk: bool | None = None
     capture_provider_reasoning: bool | None = None
     retain_reasoning: bool | None = None
+    defer_provider_finish: bool | None = None
 
 
 def create_chat_streaming_response(
@@ -78,6 +80,7 @@ def create_chat_streaming_response(
         "forward_usage_chunk": request.forward_usage_chunk,
         "capture_provider_reasoning": request.capture_provider_reasoning,
         "retain_reasoning": request.retain_reasoning,
+        "defer_provider_finish": request.defer_provider_finish,
     }
     factory_kwargs.update(
         {
@@ -521,7 +524,10 @@ async def tracked_streaming_generator(cst: "StreamCall"):
                         success=False,
                         error_type=error_type,
                     )
-                    if cst.provider_manager and error and not cancelled:
+                    if (
+                        cst.provider_manager and error and not cancelled
+                        and not isinstance(cst.stream_mod_state.get("pending_stop_error"), ModerationExecutionError)
+                    ):
                         cst.provider_manager.record_failure(cst.selected_provider, RuntimeError(error_type))
                     cst.stream_failure_recorded = True
                 except cs._CHAT_NONCRITICAL_EXCEPTIONS:
@@ -558,6 +564,7 @@ async def tracked_streaming_generator(cst: "StreamCall"):
                 forward_usage_chunk=cst.forward_usage_chunk,
                 capture_provider_reasoning=cst.capture_moonshot_reasoning or None,
                 retain_reasoning=_retain_stream_reasoning(cst) or None,
+                defer_provider_finish=True,
             ),
             stream_factory=cs.create_streaming_response_with_timeout,
         )

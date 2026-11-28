@@ -4,8 +4,10 @@
 from __future__ import annotations
 
 import asyncio
+import contextlib
 import importlib
 import json
+import threading
 from types import SimpleNamespace
 
 import pytest
@@ -13,8 +15,9 @@ import pytest
 from tldw_Server_API.app.api.v1.schemas.anthropic_messages import AnthropicMessagesRequest
 from tldw_Server_API.app.core.Chat import chat_service
 from tldw_Server_API.app.core.DB_Management.scope_context import scoped_context
+from tldw_Server_API.app.core.exception_types import ModerationExecutionError
 from tldw_Server_API.app.core.Moderation import gateway_hooks as hooks_mod
-from tldw_Server_API.app.core.Moderation.policy_evaluator import PolicyEvaluator
+from tldw_Server_API.app.core.Moderation.execution_runner import ModerationExecutionRunner
 from tldw_Server_API.app.core.Usage import llm_accounting
 from tldw_Server_API.tests.Moderation.conftest import reply
 
@@ -62,17 +65,21 @@ def _stream_frames(*texts: str, thinking: str | None = None) -> list[str]:
 
 @pytest.fixture
 def byok_native_provider(monkeypatch, messages_endpoint):
-    """A resolved BYOK credential and provider base URL, so a native call needs no real credential store."""
+    """A resolved BYOK credential with usage recording and no real credential store."""
+    used: list[str] = []
+
     class Runtime:
         def __init__(self, **_kw): ...
         async def resolve(self, provider, *, model=None):
             return SimpleNamespace(provider=provider, api_key="k", app_config={}, credentials_resolved=True)
-        async def mark_used(self, _h): ...
+        async def mark_used(self, credentials):
+            used.append(credentials.provider)
         async def close(self): ...
 
     monkeypatch.setattr("tldw_Server_API.app.core.Provider_Credentials.byok_helpers.derive_trusted_credential_scope", lambda _r, user: (user.id_int, [], [], False))
     monkeypatch.setattr(messages_endpoint, "ProviderCredentialRuntime", Runtime)
     monkeypatch.setattr(messages_endpoint, "_resolve_messages_base_url", lambda _p, _c: "http://provider.test/v1")
+    return used
 
 
 @pytest.fixture
@@ -322,6 +329,145 @@ async def test_a_blocked_native_stream_is_recorded_with_output_tokens(make_servi
     assert (row["prompt_tokens"], row["completion_tokens"]) == (17, 7)  # 28 chars produced // 4
 
 
+@pytest.mark.parametrize("stream", [False, True], ids=["json", "stream"])
+async def test_native_checks_run_off_event_loop(make_service, monkeypatch, messages_endpoint, byok_native_provider, native, stream):
+    make_service(enabled=True)
+    loop_thread = threading.get_ident()
+    checks: set[tuple[str | None, bool]] = set()
+    execute = ModerationExecutionRunner.execute
+
+    def observe(self, request, scope):
+        checks.add((request.phase, threading.get_ident() != loop_thread))
+        return execute(self, request, scope)
+
+    monkeypatch.setattr(ModerationExecutionRunner, "execute", observe)
+    with scoped_context(user_id=5):
+        response = await messages_endpoint._handle_messages(
+            AnthropicMessagesRequest(**{**native["body"], "stream": stream}),
+            current_user=SimpleNamespace(id=5, id_int=5), request=SimpleNamespace(),
+            anthropic_version=None, anthropic_beta=None,
+        )
+        if stream:
+            assert "ok" in "".join([item async for item in response.body_iterator])
+        else:
+            assert json.loads(response.body)["content"] == [{"type": "text", "text": "ok"}]
+    assert checks == {("input", True), ("output", True)}
+
+
+async def test_native_stream_admission_failure_closes_source_without_flushing_tail(make_service, monkeypatch):
+    make_service(enabled=True)
+    monkeypatch.setattr(hooks_mod, "_stream_buffer_chars", lambda: 1024)
+    execute = hooks_mod.run_moderation_async
+    closed = refuse_next = False
+
+    async def check(call, *, metadata):
+        if refuse_next:
+            raise ModerationExecutionError("capacity_exhausted")
+        return await execute(call, metadata=metadata)
+
+    async def source():
+        nonlocal closed, refuse_next
+        try:
+            for index, frame in enumerate(_stream_frames("buffered reply", "later reply")):
+                refuse_next = index == 3
+                yield frame
+        finally:
+            closed = True
+
+    monkeypatch.setattr(hooks_mod, "run_moderation_async", check)
+    stream = hooks_mod.wrap_anthropic_stream(source(), surface="messages", user_id=None)
+    async with contextlib.aclosing(stream):
+        out = []
+        async for item in stream:
+            if REFUSAL in item:
+                assert closed
+            out.append(item)
+    text = "".join(out)
+    assert "buffered reply" not in text and "later reply" not in text
+    events = _events(text)
+    assert [event for event, _ in events] == [
+        "message_start", "content_block_start", "content_block_delta", "content_block_stop", "message_delta", "message_stop",
+    ]
+    assert [data["index"] for _, data in events[1:4]] == [0, 0, 0]
+    assert events[-2][1]["delta"]["stop_reason"] == "refusal"
+
+
+async def test_native_tool_stream_is_unchanged_when_moderation_is_full(make_service, monkeypatch):
+    make_service(enabled=True)
+
+    async def reject_check(call, *, metadata):
+        raise ModerationExecutionError("capacity_exhausted")
+
+    monkeypatch.setattr(hooks_mod, "run_moderation_async", reject_check)
+    frames = _stream_frames()
+    frames[1] = _ev("content_block_start", {
+        "type": "content_block_start", "index": 0,
+        "content_block": {"type": "tool_use", "id": "tool-1", "name": "lookup", "input": {}},
+    })
+    frames.insert(2, _ev("content_block_delta", {
+        "type": "content_block_delta", "index": 0, "delta": {"type": "input_json_delta", "partial_json": "{}"},
+    }))
+    frames[-2] = _ev("message_delta", {
+        "type": "message_delta", "delta": {"stop_reason": "tool_use", "stop_sequence": None}, "usage": {"output_tokens": 9},
+    })
+
+    async def source():
+        for frame in frames:
+            yield frame
+
+    stream = hooks_mod.wrap_anthropic_stream(source(), surface="messages", user_id=None)
+    async with contextlib.aclosing(stream):
+        assert [frame async for frame in stream] == frames
+
+
+async def test_native_json_cancelled_during_output_check_records_provider_result(
+    make_service, monkeypatch, messages_endpoint, byok_native_provider, native,
+):
+    make_service(enabled=True)
+    native["response"] = _native_response(usage={"input_tokens": 17, "output_tokens": 9})
+    execute = hooks_mod.run_moderation_async
+    checking = asyncio.Event()
+    release = asyncio.Event()
+    cancelled = False
+    rows = []
+
+    async def check(call, *, metadata):
+        nonlocal cancelled
+        if metadata.phase == "output":
+            checking.set()
+            try:
+                await release.wait()
+            except asyncio.CancelledError:
+                cancelled = True
+                raise
+        return await execute(call, metadata=metadata)
+
+    async def log(**kwargs):
+        rows.append(kwargs)
+
+    monkeypatch.setattr(hooks_mod, "run_moderation_async", check)
+    monkeypatch.setattr("tldw_Server_API.app.core.Usage.usage_tracker.log_llm_usage", log)
+    monkeypatch.setattr(llm_accounting, "_accounting_loop", asyncio.get_running_loop())
+    with scoped_context(user_id=5):
+        task = asyncio.create_task(messages_endpoint._handle_messages(
+            AnthropicMessagesRequest(**native["body"]),
+            current_user=SimpleNamespace(id=5, id_int=5), request=SimpleNamespace(),
+            anthropic_version=None, anthropic_beta=None,
+        ))
+        try:
+            await asyncio.wait_for(checking.wait(), timeout=5)
+        finally:
+            task.cancel()
+            release.set()
+            with pytest.raises(asyncio.CancelledError):
+                await task
+    await llm_accounting.drain_accounting()
+    (row,) = rows
+    assert (row["prompt_tokens"], row["completion_tokens"]) == (17, 9)
+    assert byok_native_provider == [native["body"]["model"].split("/", 1)[0]]
+    assert cancelled
+
+
 def test_messages_gateway_stream_block_and_redact(client_user_only, monkeypatch, moderation_hooks, stub_llm_registry):
     from tldw_Server_API.tests.Moderation.conftest import DONE, finish_frame, openai_frame
 
@@ -339,25 +485,30 @@ def test_messages_gateway_stream_block_and_redact(client_user_only, monkeypatch,
     assert "secret" not in text and "[X]" in text
 
 
-def test_native_messages_global_off_zero_calls(client_user_only, make_service, native, monkeypatch):
-    make_service(enabled=False)
+@pytest.fixture
+def execution_requests(monkeypatch):
     calls: list[str] = []
-    for name in ("evaluate_text", "redact_text", "redact_text_with_count"):
-        real = getattr(PolicyEvaluator, name)
-        monkeypatch.setattr(PolicyEvaluator, name, lambda self, *a, _r=real, _n=name, **k: (calls.append(_n), _r(self, *a, **k))[1])
+    execute = ModerationExecutionRunner.execute
+
+    def observe(self, request, scope):
+        calls.append(request.operation)
+        return execute(self, request, scope)
+
+    monkeypatch.setattr(ModerationExecutionRunner, "execute", observe)
+    return calls
+
+
+def test_native_messages_global_off_zero_calls(client_user_only, make_service, native, execution_requests):
+    make_service(enabled=False)
     native["response"] = _native_response("forbidden secret")
     body = {**native["body"], "messages": [{"role": "user", "content": "forbidden secret"}]}
     assert client_user_only.post("/api/v1/messages", json=body).json()["content"][0]["text"] == "forbidden secret"
     native["frames"] = _stream_frames("forbidden secret")
     assert "forbidden secret" in _stream(client_user_only, body)
-    assert calls == []
+    assert execution_requests == []
 
 
-def test_count_tokens_is_not_moderated(client_user_only, moderation_hooks, monkeypatch, messages_endpoint):
-    calls: list[str] = []
-    real = PolicyEvaluator.evaluate_text
-    monkeypatch.setattr(PolicyEvaluator, "evaluate_text", lambda self, *a, **k: (calls.append("e"), real(self, *a, **k))[1])
-
+def test_count_tokens_is_not_moderated(client_user_only, moderation_hooks, monkeypatch, messages_endpoint, execution_requests):
     async def post(url, headers, payload, **_kw):
         return {"input_tokens": 3}
 
@@ -365,7 +516,7 @@ def test_count_tokens_is_not_moderated(client_user_only, moderation_hooks, monke
     body = {"model": "llama.cpp/test-model", "messages": [{"role": "user", "content": "forbidden"}]}
     response = client_user_only.post("/api/v1/messages/count_tokens", json=body)
     assert response.status_code == 200 and response.json()["input_tokens"] == 3
-    assert calls == []
+    assert execution_requests == []
 
 
 # --------------------------------------------------------------------------- the Anthropic functions

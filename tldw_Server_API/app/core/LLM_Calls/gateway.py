@@ -1041,6 +1041,11 @@ async def _map_async_stream_egress_errors(
             yield item
     except EgressPolicyError as exc:
         raise _map_provider_egress_error(provider, exc) from exc
+    finally:
+        close = getattr(stream, "aclose", None)
+        if callable(close):
+            with contextlib.suppress(Exception):
+                await close()
 
 
 def _privacy_safe_provider_errors_enabled(request: dict[str, Any]) -> bool:
@@ -1239,6 +1244,7 @@ class GatewayCall:
     request: dict[str, Any]
     stream: bool
     user_id: int | None  # current_llm_user_id() when the gateway was entered; never the client's OpenAI "user" field
+    is_async: bool = False  # gateway entry mode, independent of the provider transport
 
 
 PreCallHook = Callable[[GatewayCall], Any]
@@ -1309,13 +1315,16 @@ def _post_call_hooks(hooks: tuple[_HookPair, ...]) -> list[PostCallHook]:
     return [post_call for _, post_call in hooks if post_call is not None]
 
 
-def _gateway_call(kwargs: dict[str, Any], provider: str, request: dict[str, Any]) -> GatewayCall:
+def _gateway_call(
+    kwargs: dict[str, Any], provider: str, request: dict[str, Any], *, is_async: bool = False
+) -> GatewayCall:
     return GatewayCall(
         surface=kwargs.get("llm_surface"),
         provider=provider,
         request=request,
         stream=bool(request.get("stream")),
         user_id=current_llm_user_id(),
+        is_async=is_async,
     )
 
 
@@ -1410,7 +1419,7 @@ async def perform_chat_api_call_async(**kwargs: Any) -> Any:
     adapter = registry.get_adapter(provider)
     if adapter is None:
         raise ChatConfigurationError(provider=provider, message="LLM adapter unavailable.")
-    call = _gateway_call(kwargs, provider, request)
+    call = _gateway_call(kwargs, provider, request, is_async=True)
     for pre_call in _pre_call_hooks(hooks):
         await _async_hook_value(pre_call(call))
     result = await _call_adapter_async(registry, adapter, provider, call.request, internal)

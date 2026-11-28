@@ -12,18 +12,22 @@ import time
 from pathlib import Path as PathLib
 from typing import Any, Optional
 
+import soundfile as sf
 from fastapi import APIRouter, Depends, File, Form, HTTPException, Request, UploadFile
 from fastapi.responses import JSONResponse, Response
 from loguru import logger
-import soundfile as sf
 from starlette import status
-from tldw_Server_API.app.api.v1.API_Deps.auth_deps import check_rate_limit, require_expected_user, get_auth_principal, get_db_transaction, get_request_user, TokenScopeGuard, User
 
-from tldw_Server_API.app.api.v1.API_Deps.billing_deps import get_billing_org_id, require_within_limit
-from tldw_Server_API.app.core.Resource_Governance import cost_units
-from tldw_Server_API.app.core.Billing.enforcement import (
-    LimitCategory,
+from tldw_Server_API.app.api.v1.API_Deps.auth_deps import (
+    TokenScopeGuard,
+    User,
+    check_rate_limit,
+    get_auth_principal,
+    get_db_transaction,
+    get_request_user,
+    require_expected_user,
 )
+from tldw_Server_API.app.api.v1.API_Deps.billing_deps import get_billing_org_id, require_within_limit
 from tldw_Server_API.app.api.v1.API_Deps.personalization_deps import (
     UsageEventLogger,
     get_usage_event_logger,
@@ -39,13 +43,9 @@ from tldw_Server_API.app.core.Audio.error_payloads import _http_error_detail
 from tldw_Server_API.app.core.Audio.quota_helpers import EXPECTED_DB_EXC
 from tldw_Server_API.app.core.Audio.transcription_service import _map_openai_audio_model_to_whisper
 from tldw_Server_API.app.core.AuthNZ.principal_model import AuthPrincipal
+from tldw_Server_API.app.core.Billing.enforcement import LimitCategory
+from tldw_Server_API.app.core.exception_types import ModerationExecutionError
 from tldw_Server_API.app.core.exceptions import AudioQuotaStoreUnavailable
-from tldw_Server_API.app.core.Ingestion_Media_Processing.Audio.stt_policy import (
-    apply_transcript_text_policy,
-    build_audio_retention_decision,
-    redact_timed_segments,
-    retain_stt_audio_artifact,
-)
 from tldw_Server_API.app.core.Logging.log_context import ensure_request_id
 from tldw_Server_API.app.core.Metrics.metrics_manager import increment_counter
 from tldw_Server_API.app.core.Metrics.stt_metrics import (
@@ -54,6 +54,7 @@ from tldw_Server_API.app.core.Metrics.stt_metrics import (
     emit_stt_request_total,
     observe_stt_latency_seconds,
 )
+from tldw_Server_API.app.core.Resource_Governance import cost_units
 from tldw_Server_API.app.core.testing import is_test_mode
 from tldw_Server_API.app.core.Usage import concurrency_quota, quota_checks
 import tldw_Server_API.app.core.Usage.audio_quota as _audio_quota
@@ -1079,15 +1080,11 @@ async def create_transcription(
         raw_transcribed_text = transcribed_text
         raw_timed_segments = _normalize_timed_segments(segments_for_timing)
 
-        transcribed_text = apply_transcript_text_policy(
-            raw_transcribed_text,
-            policy=effective_stt_policy,
-            is_partial=False,
-        )
-        timed_segments = redact_timed_segments(
-            raw_timed_segments,
+        moderated = await _stt_policy.apply_transcript_payload_policy_async(
+            {"type": "final", "text": raw_transcribed_text, "segments": raw_timed_segments},
             policy=effective_stt_policy,
         )
+        transcribed_text, timed_segments = moderated["text"], moderated["segments"]
         if not effective_stt_policy.redact_pii:
             redaction_outcome = "not_requested"
         elif transcribed_text != raw_transcribed_text or timed_segments != raw_timed_segments:
@@ -1116,10 +1113,10 @@ async def create_transcription(
             except _AUDIO_TRANSCRIPTIONS_NONCRITICAL_EXCEPTIONS:
                 pass  # fail-open
 
-        retention_decision = build_audio_retention_decision(effective_stt_policy)
+        retention_decision = _stt_policy.build_audio_retention_decision(effective_stt_policy)
         if not retention_decision.delete_after_success and canonical_path:
             try:
-                await retain_stt_audio_artifact(
+                await _stt_policy.retain_stt_audio_artifact(
                     user_id=int(current_user.id),
                     source_path=canonical_path,
                     original_filename=file.filename,
@@ -1287,6 +1284,11 @@ async def create_transcription(
         _emit_success_metrics(redaction_outcome=redaction_outcome)
         return JSONResponse(content=response_data)
 
+    except ModerationExecutionError:
+        raise HTTPException(
+            status_code=503,
+            detail={"error_code": "moderation_unavailable", "message": "Moderation is currently unavailable"},
+        ) from None
     except HTTPException as exc:
         detail = exc.detail if isinstance(exc.detail, dict) else {}
         detail_status = str(

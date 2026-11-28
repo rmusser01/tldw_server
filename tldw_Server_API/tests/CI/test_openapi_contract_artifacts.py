@@ -2,8 +2,15 @@
 
 from __future__ import annotations
 
+import errno
 import importlib.util
 import json
+import os
+import shutil
+
+# Command-level tests execute trusted local programs without a shell.
+import subprocess  # nosec B404
+import sys
 from pathlib import Path
 
 import pytest
@@ -79,3 +86,158 @@ def test_required_drift_gate_checks_committed_path_union():
     makefile = (root / "Makefile").read_text()
     for source in (workflow, makefile):
         assert "--check-paths apps/packages/api-types/paths.d.ts" in source
+
+
+@pytest.fixture
+def openapi_make_project(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Path:
+    """Run real make/Python commands with controlled versions and a small exporter."""
+    if os.name == "nt":
+        pytest.skip("TASK-15477: OpenAPI Make recipes require a POSIX shell and executable symlinks")
+    bin_dir = tmp_path / "bin"
+    bin_dir.mkdir()
+    try:
+        for name in ("python3.12", "custom python"):
+            (bin_dir / name).symlink_to(sys.executable)
+    except NotImplementedError:
+        _openapi_capability_unavailable("Executable symlinks are unsupported")
+    except OSError as exc:
+        if exc.errno not in (errno.ENOSYS, errno.ENOTSUP, errno.EPERM):
+            raise
+        _openapi_capability_unavailable(f"Executable symlinks are unsupported: {exc}")
+    (tmp_path / "sitecustomize.py").write_text(
+        "import os, sys\nsys.version_info = (3, int(os.environ['OPENAPI_TEST_MINOR']), 0, 'final', 0)\n"
+    )
+    scripts = tmp_path / "Helper_Scripts"
+    scripts.mkdir()
+    (scripts / "export_openapi_schema.py").write_text(
+        "import json, sys\nfrom pathlib import Path\n"
+        "Path('export-invocation.json').write_text(json.dumps(\n"
+        "    {'python': sys.executable, 'args': sys.argv[1:]}))\n"
+    )
+    monkeypatch.setenv("PATH", str(bin_dir) + os.pathsep + os.environ["PATH"])
+    monkeypatch.setenv("PYTHONPATH", str(tmp_path))
+    monkeypatch.setenv("OPENAPI_TEST_MINOR", "12")
+    monkeypatch.delenv("OPENAPI_PYTHON", raising=False)
+    monkeypatch.delenv("MAKEFLAGS", raising=False)
+    return tmp_path
+
+
+def _openapi_capability_unavailable(reason: str) -> None:
+    """Keep required Linux coverage hard-failing while allowing unsupported hosts."""
+    if sys.platform.startswith("linux"):
+        pytest.fail(f"TASK-15477: required Linux CI capability unavailable: {reason}")
+    pytest.skip(f"TASK-15477: {reason}")
+
+
+def _run_openapi_make(project: Path, target: str, *assignments: str) -> subprocess.CompletedProcess[str]:
+    """Execute the checkout's actual OpenAPI recipe in the isolated project."""
+    make = shutil.which("make")
+    if make is None:
+        _openapi_capability_unavailable("GNU make is unavailable")
+    shell = shutil.which("sh")
+    if shell is None:
+        _openapi_capability_unavailable("POSIX shell is unavailable")
+    executable = str(Path(make).resolve())
+    # Only the resolved local make executable and its fixed version option are run.
+    version = subprocess.run(  # nosec B603
+        [executable, "--version"], capture_output=True, text=True, timeout=10, check=False, shell=False
+    )
+    if version.returncode != 0 or "GNU Make" not in version.stdout:
+        _openapi_capability_unavailable("GNU make is required for these recipes")
+    makefile = Path(__file__).resolve().parents[3] / "Makefile"
+    # The executable is resolved absolutely; every argument is a fixed target or test-owned path/assignment.
+    return subprocess.run(  # nosec B603
+        [
+            executable,
+            "-f",
+            str(makefile),
+            target,
+            f"SHELL={Path(shell).resolve()}",
+            f"CI_LOCAL_PYTHON={sys.executable}",
+            *assignments,
+        ],
+        cwd=project,
+        capture_output=True,
+        text=True,
+        timeout=30,
+        check=False,
+        shell=False,
+    )
+
+
+@pytest.mark.parametrize(
+    ("platform", "expected"), [("linux", pytest.fail.Exception), ("darwin", pytest.skip.Exception)]
+)
+def test_make_openapi_missing_tool_preserves_linux_ci_coverage(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, platform: str, expected: type[BaseException]
+) -> None:
+    monkeypatch.setattr(shutil, "which", lambda name: None)
+    monkeypatch.setattr(sys, "platform", platform)
+    with pytest.raises(expected, match="make"):
+        _run_openapi_make(tmp_path, "openapi-drift-check")
+
+
+@pytest.mark.parametrize("capability", ["POSIX shell", "GNU make"])
+@pytest.mark.parametrize(
+    ("platform", "expected"), [("linux", pytest.fail.Exception), ("darwin", pytest.skip.Exception)]
+)
+def test_make_openapi_unsupported_capability_preserves_linux_ci_coverage(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capability: str, platform: str, expected: type[BaseException]
+) -> None:
+    monkeypatch.setattr(sys, "platform", platform)
+    executables: dict[str, str | None] = {"make": str(tmp_path / "make"), "sh": str(tmp_path / "sh")}
+    if capability == "POSIX shell":
+        executables["sh"] = None
+    monkeypatch.setattr(shutil, "which", executables.get)
+    monkeypatch.setattr(subprocess, "run", lambda args, **kwargs: subprocess.CompletedProcess(args, 0, "BSD make", ""))
+    with pytest.raises(expected, match=capability):
+        _run_openapi_make(tmp_path, "openapi-drift-check")
+
+
+@pytest.mark.parametrize(
+    ("target", "expected_args"),
+    [
+        ("openapi-fingerprint", ["--fingerprint", "apps/packages/api-types/openapi.fingerprint.json"]),
+        (
+            "openapi-drift-check",
+            [
+                "--check",
+                "apps/packages/api-types/openapi.fingerprint.json",
+                "--check-paths",
+                "apps/packages/api-types/paths.d.ts",
+            ],
+        ),
+    ],
+)
+@pytest.mark.parametrize("override", [False, True], ids=["default", "explicit-path"])
+def test_make_openapi_uses_canonical_python(
+    openapi_make_project: Path, target: str, expected_args: list[str], override: bool
+) -> None:
+    project = openapi_make_project
+    python = project / "bin" / ("custom python" if override else "python3.12")
+    assignments = [f"OPENAPI_PYTHON={python}"] if override else []
+    result = _run_openapi_make(project, target, *assignments)
+    assert result.returncode == 0, result.stdout + result.stderr
+    invocation = json.loads((project / "export-invocation.json").read_text())
+    assert invocation == {"python": str(python), "args": expected_args}
+
+
+@pytest.mark.parametrize("target", ["openapi-fingerprint", "openapi-drift-check"])
+def test_make_openapi_rejects_wrong_python_before_export(
+    openapi_make_project: Path, monkeypatch: pytest.MonkeyPatch, target: str
+) -> None:
+    monkeypatch.setenv("OPENAPI_TEST_MINOR", "14")
+    result = _run_openapi_make(openapi_make_project, target, f"OPENAPI_PYTHON={sys.executable}")
+    assert result.returncode != 0
+    assert "Python 3.12" in result.stderr
+    assert "OPENAPI_PYTHON" in result.stderr
+    assert not (openapi_make_project / "export-invocation.json").exists()
+
+
+@pytest.mark.parametrize("target", ["openapi-fingerprint", "openapi-drift-check"])
+def test_make_openapi_missing_python_is_actionable(openapi_make_project: Path, target: str) -> None:
+    result = _run_openapi_make(openapi_make_project, target, "OPENAPI_PYTHON=/missing/python3.12")
+    assert result.returncode != 0
+    assert "Python 3.12" in result.stderr
+    assert "OPENAPI_PYTHON" in result.stderr
+    assert not (openapi_make_project / "export-invocation.json").exists()

@@ -305,6 +305,7 @@ async def test_client_disconnect_settles_partial_as_interrupted():
 
 async def test_disconnect_after_length_finish_keeps_length_status():
     handler = StreamingResponseHandler("conv", "model")
+    handler.defer_provider_finish = True
     recorder = Recorder()
 
     async def provider() -> AsyncIterator[str]:

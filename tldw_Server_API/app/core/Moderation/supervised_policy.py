@@ -15,8 +15,10 @@ Key capabilities:
 Integration point: called by the chat pipeline after standard moderation
 to apply guardian-imposed rules on supervised accounts.
 """
+
 from __future__ import annotations
 
+import contextlib
 import re
 import threading
 from dataclasses import dataclass
@@ -34,11 +36,21 @@ from tldw_Server_API.app.core.DB_Management.Guardian_DB import (
 from tldw_Server_API.app.core.DB_Management.guardian_db_resolver import (
     resolve_guardian_db_for_user_id,
 )
+from tldw_Server_API.app.core.exception_types import ModerationExecutionError
+from tldw_Server_API.app.core.Moderation.async_execution import run_moderation_async
+from tldw_Server_API.app.core.Moderation.conflict_resolution import resolve_conflicts
+from tldw_Server_API.app.core.Moderation.execution_models import (
+    ExecutionBounds,
+    FailureMetadata,
+    RegexRuleSnapshot,
+    SupervisedBatchResult,
+    execution_scope,
+)
+from tldw_Server_API.app.core.Moderation.execution_protocol import snapshot_supervised_request
 from tldw_Server_API.app.core.Moderation.governance_utils import (
     chat_type_matches,
     is_schedule_active,
 )
-from tldw_Server_API.app.core.Moderation.conflict_resolution import resolve_conflicts
 from tldw_Server_API.app.core.Moderation.moderation_service import (
     ModerationPolicy,
     PatternRule,
@@ -58,6 +70,7 @@ _SUPERVISED_NONCRITICAL_EXCEPTIONS = (
 @dataclass
 class SupervisedCheckResult:
     """Result from evaluating supervised policies for a dependent user."""
+
     action: str = "pass"  # pass | block | redact | warn | notify
     matched_policy_id: str | None = None
     matched_category: str = ""
@@ -78,7 +91,7 @@ class GuardianModerationRuntime:
     dependent_user_id: str
     chat_type: str = "regular"
     guardian_db: GuardianDB | None = None
-    supervised_engine: "SupervisedPolicyEngine | None" = None
+    supervised_engine: SupervisedPolicyEngine | None = None
 
 
 class SupervisedPolicyEngine:
@@ -145,8 +158,10 @@ class SupervisedPolicyEngine:
                     if not gp.enabled:
                         continue
                     if not is_schedule_active(
-                        gp.schedule_start, gp.schedule_end,
-                        gp.schedule_days, gp.schedule_timezone,
+                        gp.schedule_start,
+                        gp.schedule_end,
+                        gp.schedule_days,
+                        gp.schedule_timezone,
                     ):
                         continue
                     if not chat_type_matches(gp.scope_chat_types, chat_type):
@@ -182,88 +197,110 @@ class SupervisedPolicyEngine:
 
         Returns the highest-priority result (block > redact > warn > notify > pass).
         """
-        if not text or not text.strip():
-            return SupervisedCheckResult()
+        with execution_scope():
+            if not text or not text.strip():
+                return SupervisedCheckResult()
+            compiled_policies = self._get_compiled_policies(dependent_user_id, chat_type=chat_type)
+            if not compiled_policies:
+                return SupervisedCheckResult()
+            rules = [
+                RegexRuleSnapshot(regex.pattern, int(regex.flags), pol.action, pol.phase)
+                for pol, regex, _gp in compiled_policies
+            ]
+            batch = self._execute_supervised_batch(text, rules, phase)
+            return self._assemble_result(text, compiled_policies, batch)
 
-        compiled_policies = self._get_compiled_policies(dependent_user_id, chat_type=chat_type)
-        if not compiled_policies:
-            return SupervisedCheckResult()
-
-        # Priority: block=4, redact=3, warn=2, notify=1
-        action_priority = {"block": 4, "redact": 3, "warn": 2, "notify": 1}
-        best_result = SupervisedCheckResult()
-        best_priority = 0
-
-        for pol, regex, gp in compiled_policies:
-            # Phase filtering
-            if pol.phase != "both" and pol.phase != phase:
-                continue
-            # Check for match
-            match = regex.search(text)
-            if not match:
-                continue
-
-            priority = action_priority.get(pol.action, 0)
-            if priority <= best_priority:
-                continue
-
-            best_priority = priority
-            snippet = self._build_snippet(text, match, pol)
-
-            # Transparent mode: include rule/policy name in message
-            rule_name_visible = None
-            msg_to_dependent = pol.message_to_dependent or self._DEFAULT_BLOCK_MESSAGE
-            if gp and gp.transparent:
-                rule_name_visible = gp.name
-                msg_to_dependent = (
-                    f"[{gp.name}] Category: {pol.category or 'supervised'} — "
-                    f"{pol.message_to_dependent or self._DEFAULT_BLOCK_MESSAGE}"
-                )
-
-            best_result = SupervisedCheckResult(
-                action=pol.action,
-                matched_policy_id=pol.id,
-                matched_category=pol.category,
-                matched_pattern=regex.pattern,
-                severity=pol.severity,
-                message_to_dependent=msg_to_dependent,
-                notify_guardian=pol.notify_guardian,
-                notify_context=pol.notify_context,
-                context_snippet=snippet,
-                rule_name_visible=rule_name_visible,
+    async def check_text_async(
+        self,
+        text: str,
+        dependent_user_id: str,
+        phase: str = "input",
+        chat_type: str | None = None,
+    ) -> SupervisedCheckResult:
+        """Resolve borrowed DB state here; offload only the copied regex batch."""
+        with execution_scope():
+            if not text or not text.strip():
+                return SupervisedCheckResult()
+            compiled_policies = self._get_compiled_policies(dependent_user_id, chat_type=chat_type)
+            if not compiled_policies:
+                return SupervisedCheckResult()
+            rules = [
+                RegexRuleSnapshot(regex.pattern, int(regex.flags), pol.action, pol.phase)
+                for pol, regex, _gp in compiled_policies
+            ]
+            execute_batch = self._execute_supervised_batch
+            batch = await run_moderation_async(
+                lambda: execute_batch(text, rules, phase),
+                metadata=FailureMetadata("supervised_evaluate", phase, len(text)),
             )
+            return self._assemble_result(text, compiled_policies, batch)
 
-            # If we hit a block, can't do worse — early exit
-            if pol.action == "block":
-                break
+    @staticmethod
+    def _execute_supervised_batch(text: str, rules: list[RegexRuleSnapshot], phase: str) -> SupervisedBatchResult:
+        """Execute only copied matching data; keep governance/DB metadata outside."""
+        from tldw_Server_API.app.core.Moderation.execution_incidents import report_execution_failure
+        from tldw_Server_API.app.core.Moderation.execution_runner import get_execution_runner
 
-        # If action is redact, compute redacted text
-        if best_result.action == "redact":
-            redacted = text
-            for pol, regex, _gp in compiled_policies:
-                if pol.phase != "both" and pol.phase != phase:
-                    continue
-                if pol.action != "redact":
-                    continue
+        with execution_scope() as scope:
+            try:
+                request = snapshot_supervised_request(text, rules, phase, ExecutionBounds())
+                return get_execution_runner().execute(request, scope).result
+            except ModerationExecutionError as error:
                 try:
-                    redacted = regex.sub("[REDACTED]", redacted)
-                except re.error:
-                    continue
-            best_result.redacted_text = redacted
+                    report_execution_failure(
+                        error, operation="supervised_evaluate", phase=phase, scope=scope, input_chars=len(text)
+                    )
+                except Exception:  # noqa: BLE001 - reporting must never replace enforcement.
+                    with contextlib.suppress(Exception):
+                        logger.warning("Moderation failure reporting unavailable")
+                raise error from None
 
-        return best_result
+    def _assemble_result(
+        self,
+        text: str,
+        compiled_policies: list[tuple[SupervisedPolicy, re.Pattern, GovernancePolicy | None]],
+        batch: SupervisedBatchResult,
+    ) -> SupervisedCheckResult:
+        """Associate validated child indices with the exact submitted parent snapshot."""
+        if batch.winner_index is None:
+            return SupervisedCheckResult()
+        pol, regex, gp = compiled_policies[batch.winner_index]
+        snippet = self._build_snippet(text, batch.match_span, pol)
+
+        rule_name_visible = None
+        msg_to_dependent = pol.message_to_dependent or self._DEFAULT_BLOCK_MESSAGE
+        if gp and gp.transparent:
+            rule_name_visible = gp.name
+            msg_to_dependent = (
+                f"[{gp.name}] Category: {pol.category or 'supervised'} — "
+                f"{pol.message_to_dependent or self._DEFAULT_BLOCK_MESSAGE}"
+            )
+        return SupervisedCheckResult(
+            action=pol.action,
+            matched_policy_id=pol.id,
+            matched_category=pol.category,
+            matched_pattern=regex.pattern,
+            severity=pol.severity,
+            message_to_dependent=msg_to_dependent,
+            notify_guardian=pol.notify_guardian,
+            notify_context=pol.notify_context,
+            context_snippet=snippet,
+            rule_name_visible=rule_name_visible,
+            redacted_text=batch.redacted_text,
+        )
 
     @staticmethod
     def _build_snippet(
         text: str,
-        match: re.Match,
+        match: tuple[int, int],
         policy: SupervisedPolicy,
     ) -> str | None:
         if policy.notify_context == "full_message":
             return text[:500] if len(text) > 500 else text
         if policy.notify_context == "snippet":
-            start = max(0, match.start() - 30)
-            end = min(len(text), match.end() + 30)
+            match_start, match_end = match
+            start = max(0, match_start - 30)
+            end = min(len(text), match_end + 30)
             snippet = text[start:end].strip()
             return snippet[:200] if len(snippet) > 200 else snippet
         # topic_only — return just the category, no content
@@ -349,6 +386,7 @@ def dispatch_guardian_notification(
         from tldw_Server_API.app.core.Monitoring.notification_service import (
             get_notification_service,
         )
+
         payload: dict[str, Any] = {
             "type": "guardian_alert",
             "severity": result.severity,
@@ -394,6 +432,8 @@ class GuardianModerationProxy:
                 base_policy,
                 chat_type=self._chat_type,
             )
+        except ModerationExecutionError:
+            raise
         except _SUPERVISED_NONCRITICAL_EXCEPTIONS:
             logger.debug("Guardian policy overlay skipped in proxy")
             return base_policy
@@ -427,9 +467,5 @@ def bootstrap_guardian_moderation_runtime(
         dependent_user_id=str(dependent_user_id),
         chat_type=normalized_chat_type,
         guardian_db=guardian_db,
-        supervised_engine=(
-            get_supervised_policy_engine(guardian_db)
-            if guardian_db is not None
-            else None
-        ),
+        supervised_engine=(get_supervised_policy_engine(guardian_db) if guardian_db is not None else None),
     )

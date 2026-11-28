@@ -260,6 +260,9 @@ Notes:
 - `DATA_TABLES_LLM_MAX_TOKENS`: LLM response token budget for table generation (default `2000`).
 - `DATA_TABLES_LLM_TEMPERATURE`: LLM temperature for table generation (default `0.2`).
 
+## Moderation Worker
+- `SYSTEMROOT` and `WINDIR`: OS-provided Windows paths passed to the isolated moderation worker for native startup. These are not moderation settings; the worker does not inherit the rest of the server environment.
+
 ## Chat Commands & Weather
 - `CHAT_COMMANDS_ENABLED`: Enable slash-command preprocessing (`true|false`, default `false`).
 - `CHAT_COMMAND_INJECTION_MODE`: Slash-command injection mode (`system|preface|replace`, default `system`).

@@ -2,6 +2,7 @@
 
 import json
 import os
+import re
 import subprocess
 import sys
 from pathlib import Path
@@ -42,6 +43,7 @@ def _runtime_env(tmp_path, database_url, *, backend=None, mode="single_user"):
 
 
 def _run_runtime(tmp_path, env, script):
+    __tracebackhide__ = True
     result = subprocess.run(
         [sys.executable, "-c", script],
         cwd=tmp_path,
@@ -53,11 +55,36 @@ def _run_runtime(tmp_path, env, script):
     )
     # Never include raw subprocess output: startup diagnostics may contain DSNs.
     returncode = result.returncode
-    assert returncode == 0, "Runtime subprocess failed (diagnostics withheld)"
+    if returncode != 0:
+        detail = _runtime_failure_metadata(result.stderr)
+        result.stdout = result.stderr = ""
+        raise AssertionError(f"Runtime subprocess failed: {detail}")
     records = [line.removeprefix(RESULT_PREFIX) for line in result.stdout.splitlines()
                if line.startswith(RESULT_PREFIX)]
     assert len(records) == 1, "Runtime subprocess did not return its safe result"
     return json.loads(records[0])
+
+
+def _runtime_failure_metadata(stderr: str) -> str:
+    """Extract only traceback type/location tokens, never source lines or messages."""
+    exception = "unknown"
+    source = "unknown"
+    for line in stderr.splitlines():
+        error = re.fullmatch(r"([A-Za-z_][A-Za-z_0-9.]{0,120}(?:Error|Exception))(?::.*)?", line)
+        if error:
+            exception = error[1]
+        frame = re.fullmatch(r'\s*File "([^"]+)", line ([0-9]+), in [A-Za-z_<>][A-Za-z_0-9<>]*', line)
+        if frame:
+            filename = frame[1]
+            if filename == "<string>":
+                source = f"<string>:{frame[2]}"
+            else:
+                path = Path(filename).resolve()
+                if path.is_relative_to(REPO_ROOT) and path.is_file():
+                    relative = path.relative_to(REPO_ROOT).as_posix()
+                    if re.fullmatch(r"[A-Za-z_0-9/.-]+\.py", relative):
+                        source = f"{relative}:{frame[2]}"
+    return f"stage=child exception={exception} source={source}"
 
 
 SELECTION_SCRIPT = """
@@ -72,6 +99,52 @@ print('RUNTIME_RESULT=' + json.dumps({
     'fallback': _apply_single_user_fallback(settings.DATABASE_URL, settings.AUTH_MODE) != settings.DATABASE_URL,
 }))
 """
+
+
+def test_runtime_failure_reports_only_exception_and_source_metadata(tmp_path):
+    """A child failure remains diagnosable without exposing output or messages."""
+    env = _runtime_env(tmp_path, "sqlite:///:memory:")
+    script = "print('private-output-canary')\nraise ValueError('postgresql://private-dsn-canary')"
+    with pytest.raises(AssertionError) as failure:
+        _run_runtime(tmp_path, env, script)
+
+    message = str(failure.value)
+    assert "exception=ValueError" in message
+    assert "source=<string>:2" in message
+    assert "stage=child" in message
+    assert "private-output-canary" not in message
+    assert "private-dsn-canary" not in message
+    assert "postgresql://" not in message
+
+
+def test_runtime_failure_metadata_rejects_paths_escaping_repository(tmp_path):
+    """A lexical repository prefix is not enough to allow a source filename."""
+    source = tmp_path / "private-source-canary.py"
+    source.write_text("", encoding="utf-8")
+    escaping = REPO_ROOT / os.path.relpath(source, REPO_ROOT)
+
+    detail = _runtime_failure_metadata(
+        f'  File "{escaping}", line 12, in main\nTypeError: private-message-canary'
+    )
+
+    assert detail == "stage=child exception=TypeError source=unknown"
+
+
+def test_runtime_failure_metadata_reports_repository_source_without_message():
+    """Repository traceback locations are useful without printing source or values."""
+    detail = _runtime_failure_metadata(
+        f'  File "{__file__}", line 12, in main\nValueError: private-message-canary'
+    )
+
+    relative = Path(__file__).relative_to(REPO_ROOT).as_posix()
+    assert detail == f"stage=child exception=ValueError source={relative}:12"
+
+
+def test_runtime_failure_metadata_without_traceback_stays_neutral():
+    """Native child failures need not provide a Python traceback."""
+    assert _runtime_failure_metadata("private-output-canary") == (
+        "stage=child exception=unknown source=unknown"
+    )
 
 
 @pytest.mark.parametrize("root_exists", [True, False])

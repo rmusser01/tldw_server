@@ -10,6 +10,7 @@ from typing import Any
 
 from loguru import logger
 
+from tldw_Server_API.app.core.exception_types import MODERATION_EXECUTION_REASONS, ModerationExecutionError
 from tldw_Server_API.app.core.Workflows.adapters._registry import registry
 from tldw_Server_API.app.core.Workflows.adapters.control._config import WorkflowCallConfig
 
@@ -75,6 +76,9 @@ async def run_workflow_call_adapter(config: dict[str, Any], context: dict[str, A
 
             run = db.get_run(run_id)
             if run:
+                if run.status == "failed" and run.status_reason == "moderation_unavailable":
+                    reason = run.error if run.error in MODERATION_EXECUTION_REASONS else "invalid_response"
+                    raise ModerationExecutionError(reason) from None
                 return {"run_id": run_id, "status": run.status, "outputs": run.outputs or {}, "result": run.outputs}
             return {"run_id": run_id, "status": "unknown", "result": None}
         else:
@@ -85,6 +89,8 @@ async def run_workflow_call_adapter(config: dict[str, Any], context: dict[str, A
             engine.submit(run_id, mode="async")
             return {"run_id": run_id, "status": "submitted", "async": True}
 
+    except ModerationExecutionError:
+        raise
     except asyncio.TimeoutError:
         return {"error": "workflow_timeout", "run_id": run_id}
     except Exception:

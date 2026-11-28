@@ -1,6 +1,5 @@
 import asyncio
 import threading
-from typing import Any, Dict
 
 import pytest
 
@@ -33,8 +32,6 @@ async def test_chat_command_concurrency_respects_rate_limit(
 
     command_router._buckets.clear()
     command_router._global_buckets.clear()
-
-    from tldw_Server_API.app.api.v1.endpoints import chat as chat_endpoint
 
     lock = threading.Lock()
     results = {"ok": 0, "rate_limited": 0}
@@ -90,7 +87,13 @@ async def test_chat_command_concurrency_respects_rate_limit(
         )
 
     responses = await asyncio.gather(*[call() for _ in range(10)])
-    assert all(resp.status_code == 200 for resp in responses)
+    failures = []
+    for response in responses:
+        if response.status_code != 200:
+            detail = response.json().get("detail") if "application/json" in response.headers.get("content-type", "") else None
+            code = detail.get("error_code") if isinstance(detail, dict) else None
+            failures.append((response.status_code, response.headers.get("x-request-id"), code))
+    assert not failures, "Unexpected status, request ID, and error code"
     assert results["ok"] + results["rate_limited"] == 10
     assert results["ok"] <= 1
     assert results["rate_limited"] >= 1

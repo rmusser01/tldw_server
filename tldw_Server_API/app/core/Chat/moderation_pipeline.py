@@ -7,6 +7,7 @@ import inspect
 import json as _json
 from collections.abc import Awaitable, Callable
 from dataclasses import dataclass
+from functools import partial
 from typing import Any
 
 from fastapi import HTTPException, status
@@ -23,6 +24,9 @@ from tldw_Server_API.app.core.Chat.Chat_Deps import (
     ChatProviderError,
 )
 from tldw_Server_API.app.core.Chat.knowledge_save import split_reasoning_text
+from tldw_Server_API.app.core.exception_types import ModerationExecutionError
+from tldw_Server_API.app.core.Moderation.async_execution import run_moderation_async
+from tldw_Server_API.app.core.Moderation.execution_models import FailureMetadata, execution_scope
 from tldw_Server_API.app.core.Moderation.moderation_service import get_moderation_service
 from tldw_Server_API.app.core.Monitoring.topic_monitoring_service import get_topic_monitoring_service
 from tldw_Server_API.app.core.Chat.streaming_utils import StopStreamWithError
@@ -304,11 +308,29 @@ async def _apply_output_moderation(
             if not target_text:
                 continue
 
-            decision = _evaluate_output_moderation(
-                moderation=moderation,
-                eff_policy=eff_policy,
-                target_text=target_text,
-                require_policy_check=runtime.require_policy_check,
+            def evaluate_target(target_text=target_text, target_content=target_content):
+                decision = _evaluate_output_moderation(
+                    moderation=moderation,
+                    eff_policy=eff_policy,
+                    target_text=target_text,
+                    require_policy_check=runtime.require_policy_check,
+                )
+                redacted_content = (
+                    _redact_output_content(
+                        moderation=moderation,
+                        eff_policy=eff_policy,
+                        target_content=target_content,
+                        target_text=target_text,
+                        decision=decision,
+                    )
+                    if decision.action == "redact"
+                    else None
+                )
+                return decision, redacted_content
+
+            decision, redacted_content = await run_moderation_async(
+                evaluate_target,
+                metadata=FailureMetadata("evaluate", "output", len(target_text)),
             )
             _schedule_output_topic_monitoring(
                 runtime=runtime,
@@ -324,13 +346,6 @@ async def _apply_output_moderation(
                     req_user_id=req_user_id,
                 )
             if decision.action == "redact":
-                redacted_content = _redact_output_content(
-                    moderation=moderation,
-                    eff_policy=eff_policy,
-                    target_content=target_content,
-                    target_text=target_text,
-                    decision=decision,
-                )
                 _track_output_redaction(runtime, req_user_id, decision)
                 await _audit_output_redaction(runtime, decision)
                 if target is not None:
@@ -356,6 +371,11 @@ async def _apply_output_moderation(
             return OutputSafetyResult(first_choice.content, first_choice.content_text)
         fallback_content = get_fallback()
         return OutputSafetyResult(fallback_content, extract_text_from_content(fallback_content))
+    except ModerationExecutionError:
+        raise HTTPException(
+            status_code=503,
+            detail={"error_code": "moderation_unavailable", "message": "Moderation is currently unavailable"},
+        ) from None
     except HTTPException:
         raise
     except MandatoryAuditWriteError:
@@ -390,6 +410,8 @@ def _evaluate_output_moderation(
                 match_span = eval_res[4] if len(eval_res) >= 5 else None
             else:
                 action, redacted_value, matched_pattern = eval_res  # type: ignore[misc]
+        except ModerationExecutionError:
+            raise
         except _OUTPUT_SAFETY_NONCRITICAL_EXCEPTIONS:
             if require_policy_check:
                 raise
@@ -397,6 +419,8 @@ def _evaluate_output_moderation(
         if match_span and hasattr(moderation, "build_sanitized_snippet"):
             try:
                 sample = moderation.build_sanitized_snippet(target_text, eff_policy, match_span, matched_pattern)
+            except ModerationExecutionError:
+                raise
             except _OUTPUT_SAFETY_NONCRITICAL_EXCEPTIONS:
                 sample = None
     elif hasattr(moderation, "evaluate_action"):
@@ -407,6 +431,8 @@ def _evaluate_output_moderation(
                 category = eval_res[3] if len(eval_res) >= 4 else None
             else:
                 action, redacted_value, matched_pattern = eval_res  # type: ignore[misc]
+        except ModerationExecutionError:
+            raise
         except _OUTPUT_SAFETY_NONCRITICAL_EXCEPTIONS:
             if require_policy_check:
                 raise
@@ -415,6 +441,8 @@ def _evaluate_output_moderation(
     if action and action != "pass" and sample is None:
         try:
             _, sample = moderation.check_text(target_text, eff_policy, "output")
+        except ModerationExecutionError:
+            raise
         except _OUTPUT_SAFETY_NONCRITICAL_EXCEPTIONS:
             sample = None
     if not action:
@@ -598,7 +626,21 @@ def _emit_completion_metric(runtime: OutputModerationRuntime, outcome: str) -> N
         logger.warning("Chat output safety completion metric failed: {}", exc)
 
 
-def _out_transform(cst: "StreamCall", s: str) -> str:
+def _latch_stream_execution_failure(cst: "StreamCall", error: ModerationExecutionError) -> None:
+    cst.stream_holdback = ""
+    cst.stream_mod_state["pending_stop_error"] = error
+
+
+async def _out_transform(cst: "StreamCall", s: str) -> str:
+    with execution_scope():
+        try:
+            return await _out_transform_scoped(cst, s)
+        except ModerationExecutionError as error:
+            _latch_stream_execution_failure(cst, error)
+            raise
+
+
+async def _out_transform_scoped(cst: "StreamCall", s: str) -> str:
     if cst.stream_mod_state.get("pending_stop_error") is not None:
         return ""
     try:
@@ -639,49 +681,19 @@ def _out_transform(cst: "StreamCall", s: str) -> str:
             return out
         return s
     combined = f"{cst.stream_holdback}{s}" if cst.stream_holdback else s
-    resolved_action = None
-    matched_pattern = None
-    sample = None
-    redacted_combined = None
-    out_category = None
-    match_span = None
-    if hasattr(cst.moderation, "evaluate_action_with_match"):
-        try:
-            eval_res = cst.moderation.evaluate_action_with_match(combined, cst.eff_policy, "output")
-            if isinstance(eval_res, tuple) and len(eval_res) >= 3:
-                resolved_action, redacted_combined, matched_pattern = eval_res[0], eval_res[1], eval_res[2]
-                out_category = eval_res[3] if len(eval_res) >= 4 else None
-                match_span = eval_res[4] if len(eval_res) >= 5 else None
-            else:
-                resolved_action, redacted_combined, matched_pattern = eval_res  # type: ignore
-        except cs._CHAT_NONCRITICAL_EXCEPTIONS:
-            resolved_action = None
-        if match_span and hasattr(cst.moderation, "build_sanitized_snippet"):
-            try:
-                sample = cst.moderation.build_sanitized_snippet(combined, cst.eff_policy, match_span, matched_pattern)
-            except cs._CHAT_NONCRITICAL_EXCEPTIONS:
-                sample = None
-    elif hasattr(cst.moderation, "evaluate_action"):
-        try:
-            eval_res = cst.moderation.evaluate_action(combined, cst.eff_policy, "output")
-            if isinstance(eval_res, tuple) and len(eval_res) >= 3:
-                resolved_action, redacted_combined, matched_pattern = eval_res[0], eval_res[1], eval_res[2]
-                out_category = eval_res[3] if len(eval_res) >= 4 else None
-            else:
-                resolved_action, redacted_combined, matched_pattern = eval_res  # type: ignore
-        except cs._CHAT_NONCRITICAL_EXCEPTIONS:
-            resolved_action = None
-    if resolved_action and resolved_action != "pass" and sample is None:
-        try:
-            _, sample = cst.moderation.check_text(combined, cst.eff_policy, "output")
-        except cs._CHAT_NONCRITICAL_EXCEPTIONS:
-            sample = None
-    if not resolved_action:
-        flagged, sample = cst.moderation.check_text(combined, cst.eff_policy, "output")
-        if not flagged:
-            return _streaming_pipeline._emit_with_holdback(cst, combined)
-        resolved_action = cst.eff_policy.output_action
-        redacted_combined = cst.moderation.redact_text(combined, cst.eff_policy) if resolved_action == "redact" else None
+    decision = await run_moderation_async(
+        partial(
+            _evaluate_output_moderation,
+            moderation=cst.moderation,
+            eff_policy=cst.eff_policy,
+            target_text=combined,
+            require_policy_check=False,
+        ),
+        metadata=FailureMetadata("evaluate", "output", len(combined)),
+    )
+    resolved_action = decision.action
+    out_category = decision.category
+    sample = decision.sample
     if resolved_action == "block":
         if not cst.stream_mod_state["block_logged"]:
             with contextlib.suppress(cs._CHAT_NONCRITICAL_EXCEPTIONS):
@@ -733,15 +745,32 @@ def _out_transform(cst: "StreamCall", s: str) -> str:
             )
             cst.stream_mod_state["redact_logged"] = True
         redacted_out = (
-            redacted_combined
-            if isinstance(redacted_combined, str)
-            else cst.moderation.redact_text(combined, cst.eff_policy)
+            decision.redacted_value
+            if isinstance(decision.redacted_value, str)
+            else await run_moderation_async(
+                partial(cst.moderation.redact_text, combined, cst.eff_policy),
+                metadata=FailureMetadata("redact", "output", len(combined)),
+            )
         )
         return _streaming_pipeline._emit_with_holdback(cst, redacted_out)
     return _streaming_pipeline._emit_with_holdback(cst, combined)
 
 
 async def _apply_stream_output_policies(
+    cst: "StreamCall",
+    full_reply: str, *, enforce_resolved_action: bool = False,
+) -> tuple[str | None, bool]:
+    with execution_scope():
+        try:
+            return await _apply_stream_output_policies_scoped(
+                cst, full_reply, enforce_resolved_action=enforce_resolved_action,
+            )
+        except ModerationExecutionError as error:
+            _latch_stream_execution_failure(cst, error)
+            raise
+
+
+async def _apply_stream_output_policies_scoped(
     cst: "StreamCall",
     full_reply: str, *, enforce_resolved_action: bool = False
 ) -> tuple[str | None, bool]:
@@ -799,6 +828,7 @@ async def _apply_stream_output_policies(
             req_user_id = None
         eff_policy = moderation.get_effective_policy(str(req_user_id) if req_user_id is not None else cst.client_id, surface="chat.completions")
         if full_reply and eff_policy.enabled and eff_policy.output_enabled:
+            metadata = FailureMetadata("evaluate", "output", len(full_reply))
             action = None
             redacted = None
             sample = None
@@ -806,7 +836,9 @@ async def _apply_stream_output_policies(
             matched_pattern = None
             match_span = None
             if hasattr(moderation, "evaluate_action_with_match"):
-                eval_res = moderation.evaluate_action_with_match(full_reply, eff_policy, "output")
+                eval_res = await run_moderation_async(
+                    partial(moderation.evaluate_action_with_match, full_reply, eff_policy, "output"), metadata=metadata,
+                )
                 if isinstance(eval_res, tuple) and len(eval_res) >= 3:
                     action, redacted, matched_pattern = eval_res[0], eval_res[1], eval_res[2]
                     category = eval_res[3] if len(eval_res) >= 4 else None
@@ -816,10 +848,14 @@ async def _apply_stream_output_policies(
                 if match_span and hasattr(moderation, "build_sanitized_snippet"):
                     try:
                         sample = moderation.build_sanitized_snippet(full_reply, eff_policy, match_span, matched_pattern)
+                    except ModerationExecutionError:
+                        raise
                     except cs._CHAT_NONCRITICAL_EXCEPTIONS:
                         sample = None
             elif hasattr(moderation, "evaluate_action"):
-                eval_res = moderation.evaluate_action(full_reply, eff_policy, "output")
+                eval_res = await run_moderation_async(
+                    partial(moderation.evaluate_action, full_reply, eff_policy, "output"), metadata=metadata,
+                )
                 if isinstance(eval_res, tuple) and len(eval_res) >= 3:
                     action, redacted, matched_pattern = eval_res[0], eval_res[1], eval_res[2]
                     category = eval_res[3] if len(eval_res) >= 4 else None
@@ -827,12 +863,18 @@ async def _apply_stream_output_policies(
                     action, redacted, matched_pattern = eval_res  # type: ignore
             if action and action != "pass" and sample is None:
                 try:
-                    _, sample = moderation.check_text(full_reply, eff_policy, "output")
+                    _, sample = await run_moderation_async(
+                        partial(moderation.check_text, full_reply, eff_policy, "output"), metadata=metadata,
+                    )
+                except ModerationExecutionError:
+                    raise
                 except cs._CHAT_NONCRITICAL_EXCEPTIONS:
                     sample = None
             if action is None or enforce_resolved_action:
                 if action is None:
-                    flagged, sample = moderation.check_text(full_reply, eff_policy, "output")
+                    flagged, sample = await run_moderation_async(
+                        partial(moderation.check_text, full_reply, eff_policy, "output"), metadata=metadata,
+                    )
                     if flagged:
                         action = eff_policy.output_action
 
@@ -918,7 +960,12 @@ async def _apply_stream_output_policies(
                             user_id=str(req_user_id or cst.client_id) if (req_user_id or cst.client_id) else None,
                         )
                         cst.stream_mod_state["redact_capture_logged"] = True
-                    full_reply_to_save = moderation.redact_text(full_reply, eff_policy)
+                    full_reply_to_save = (
+                        redacted if isinstance(redacted, str) else await run_moderation_async(
+                            partial(moderation.redact_text, full_reply, eff_policy),
+                            metadata=FailureMetadata("redact", "output", len(full_reply)),
+                        )
+                    )
                 elif action == "warn":
                     if not cst.stream_mod_state["warn_capture_logged"]:
                         await cs._capture_moderation_review_item_safely_async(
@@ -932,6 +979,8 @@ async def _apply_stream_output_policies(
                             user_id=str(req_user_id or cst.client_id) if (req_user_id or cst.client_id) else None,
                         )
                         cst.stream_mod_state["warn_capture_logged"] = True
+    except ModerationExecutionError:
+        raise
     except cs._CHAT_NONCRITICAL_EXCEPTIONS:
         if enforce_resolved_action:
             return None, True

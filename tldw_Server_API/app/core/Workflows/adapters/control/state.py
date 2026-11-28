@@ -16,6 +16,7 @@ if TYPE_CHECKING:
 
 from loguru import logger
 
+from tldw_Server_API.app.core.exception_types import ModerationExecutionError
 from tldw_Server_API.app.core.Workflows.adapters._common import (
     resolve_artifacts_dir,
     resolve_context_user_id,
@@ -241,6 +242,8 @@ async def run_retry_adapter(config: dict[str, Any], context: dict[str, Any]) -> 
 
             return {"result": result, "attempts": attempt + 1, "success": True}
 
+        except ModerationExecutionError:
+            raise
         except _STATE_ADAPTER_EXCEPTIONS:
             last_error = "retry_step_error"
             if attempt < max_retries:
