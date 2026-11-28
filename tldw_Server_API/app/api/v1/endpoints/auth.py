@@ -9,6 +9,7 @@ import json
 import os
 import re
 import secrets
+import sqlite3
 import time
 from datetime import datetime, timedelta, timezone
 from importlib import import_module
@@ -17,6 +18,7 @@ from urllib.parse import urlsplit, urlunsplit
 
 #
 # 3rd-party imports
+import asyncpg
 from fastapi import APIRouter, Depends, Form, HTTPException, Query, Request, Response, status
 from fastapi.responses import RedirectResponse
 from fastapi.security import OAuth2PasswordRequestForm
@@ -60,6 +62,8 @@ from tldw_Server_API.app.api.v1.API_Deps.federation_deps import (
 #
 # Local imports
 from tldw_Server_API.app.api.v1.schemas.auth_schemas import (
+    AccountLockResponse,
+    LockAvailabilityResponse,
     DeprecatedUserResponse,
     MagicLinkRequest,
     MagicLinkVerifyRequest,
@@ -79,6 +83,22 @@ from tldw_Server_API.app.core.Audit.unified_audit_service import (
     AuditContext,
     AuditEventType,
     MandatoryAuditWriteError,
+)
+from tldw_Server_API.app.core.AuthNZ.account_lock import (
+    UNLOCK_PURPOSE,
+    AccountSecurityLockedError,
+    lock_account,
+    lock_availability_for_user,
+    StaleCredentialError,
+    TakeBackUnavailableError,
+    assert_account_not_locked,
+    assert_identity_write_allowed,
+    find_locked_user_by_previous_address,
+    is_security_locked,
+    magic_link_email_allowed,
+    magic_link_email_current,
+    redeem_unlock,
+    resend_unlock_link,
 )
 from tldw_Server_API.app.core.AuthNZ.auth_principal_resolver import bearer_credential
 from tldw_Server_API.app.core.AuthNZ.csrf_protection import (
@@ -131,6 +151,7 @@ from tldw_Server_API.app.core.AuthNZ.single_user_session import (
     mint_single_user_session,
     set_single_user_session_cookie,
 )
+from tldw_Server_API.app.core.AuthNZ.transaction_hooks import defer_until_after_commit
 from tldw_Server_API.app.core.AuthNZ.transaction_policy import get_authnz_transaction_policy
 from tldw_Server_API.app.core.Metrics.metrics_logger import log_counter, log_histogram
 from tldw_Server_API.app.core.Resource_Governance.governor import MemoryResourceGovernor, RGRequest
@@ -209,6 +230,8 @@ _AUTH_NONCRITICAL_EXCEPTIONS = (
     TokenExpiredError,
     WeakPasswordError,
 )
+# What storing a password-reset token raises on each backend (aiosqlite re-raises sqlite3 errors).
+_RESET_TOKEN_STORE_ERRORS = (sqlite3.Error, asyncpg.PostgresError)
 
 #######################################################################################################################
 #
@@ -680,6 +703,7 @@ async def federation_callback(
             status_code=status.HTTP_403_FORBIDDEN,
             detail="Account is inactive. Please contact support.",
         )
+    assert_account_not_locked(user)
 
     await provisioning_service.upsert_identity_link(
         provider=provider,
@@ -1826,6 +1850,7 @@ async def login(
                 status_code=status.HTTP_403_FORBIDDEN,
                 detail="Account is inactive. Please contact support."
             )
+        assert_account_not_locked(user)
 
         # If password needs rehashing, update it
         if needs_rehash:
@@ -1879,7 +1904,11 @@ async def login(
             await _ensure_mfa_cache_available(session_manager, settings)
             session_token = secrets.token_urlsafe(32)
             ttl_seconds = _get_mfa_login_ttl_seconds()
-            payload = {"user_id": int(user["id"]), "login_lockout_key": client_login_lockout_key}
+            payload = {
+                "user_id": int(user["id"]),
+                "login_lockout_key": client_login_lockout_key,
+                "issued_at": int(time.time()),
+            }
             try:
                 await session_manager.store_ephemeral_value(
                     _mfa_login_cache_key(session_token),
@@ -2304,6 +2333,30 @@ async def revoke_all_sessions(
         ) from e
 
 
+@router.get("/account/lock-availability", response_model=LockAvailabilityResponse)
+async def account_lock_availability(
+    interactive: InteractiveSession = Depends(require_interactive_session),
+) -> LockAvailabilityResponse:
+    """Whether the caller can lock their own account, and the masked addresses the unlock link would go to."""
+    result = await lock_availability_for_user(interactive.user_id)
+    return LockAvailabilityResponse(available=result.available, reason=result.reason, sent_to=result.sent_to)
+
+
+@router.post("/account/lock", response_model=AccountLockResponse)
+async def lock_own_account(
+    http_request: Request,
+    interactive: InteractiveSession = Depends(require_interactive_session),
+) -> AccountLockResponse:
+    """Lock the caller's own account: every session is signed out and only the mailed link unlocks it."""
+    result = await lock_account(
+        user_id=interactive.user_id,
+        acting_session_id=interactive.session_id,
+        ip_address=_auth_request_client_ip(http_request),
+        user_agent=http_request.headers.get("User-Agent"),
+    )
+    return AccountLockResponse(locked=True, email_sent=result.email_sent, sent_to=result.sent_to)
+
+
 #######################################################################################################################
 #
 # Token Refresh Endpoint
@@ -2389,8 +2442,11 @@ async def refresh_token(
                         response.headers["X-TLDW-Refresh-Reason"] = "revoked"
                     except _AUTH_NONCRITICAL_EXCEPTIONS:
                         pass
-                if await session_manager.get_revoke_reason(payload.refresh_token) == SESSION_CAP_REVOKE_REASON:
+                revoke_reason = await session_manager.get_revoke_reason(payload.refresh_token)
+                if revoke_reason == SESSION_CAP_REVOKE_REASON:
                     raise SessionReplacedError()
+                if await session_manager.revoked_by_current_lock(payload.refresh_token, revoke_reason):
+                    raise AccountSecurityLockedError()
                 raise InvalidTokenError("Refresh token has been revoked")
 
             # JWT standard uses 'sub' for subject (user ID)
@@ -2456,6 +2512,7 @@ async def refresh_token(
             new_access_token = single_user_key
             new_refresh_token = single_user_key
         else:
+            assert_account_not_locked(user, token_iat=token_payload.get("iat"))
             # Access token always refreshed; preserve session_id claim when available
             scope_claims = await _build_scope_claims(int(user["id"]))
             add_claims = dict(scope_claims)
@@ -2538,6 +2595,8 @@ async def refresh_token(
 
     except asyncio.CancelledError:
         raise
+    except AccountSecurityLockedError:
+        raise  # an HTTPException, which the noncritical clause below would turn into a 500
     except (DatabaseLockError, ConnectionPoolExhaustedError, DatabaseConcurrencyConflict) as e:
         log_counter("auth_refresh_database_busy")
         log_histogram("auth_refresh_duration", time.perf_counter() - start_time)
@@ -2617,7 +2676,12 @@ async def forgot_password(
         # Check if user exists
         user = await _fetch_user_by_email_for_password_reset(db, data.email)
 
-        if user and user["is_active"]:
+        if user and user["is_active"] and is_security_locked(user):
+            # A locked account gets its unlock link, to the typed address, never a reset link.
+            await resend_unlock_link(
+                user, data.email, ip_address=client_ip, user_agent=request.headers.get("User-Agent")
+            )
+        elif user and user["is_active"]:
             # Generate reset token
             reset_token = jwt_service.create_password_reset_token(
                 user_id=user["id"],
@@ -2626,13 +2690,19 @@ async def forgot_password(
             )
 
             # Store token in database for validation
-            await _store_password_reset_token(
-                db,
-                user_id=int(user["id"]),
-                token_hash=jwt_service.hash_password_reset_token(reset_token),
-                expires_at=datetime.utcnow() + timedelta(hours=1),
-                ip_address=client_ip,
-            )
+            try:
+                await _store_password_reset_token(
+                    db,
+                    user_id=int(user["id"]),
+                    token_hash=jwt_service.hash_password_reset_token(reset_token),
+                    expires_at=datetime.utcnow() + timedelta(hours=1),
+                    ip_address=client_ip,
+                )
+            except _RESET_TOKEN_STORE_ERRORS as exc:
+                # The same answer the locked branch gives, so a failure here cannot tell the two apart
+                # (TASK-15679); the table defect that causes it on fresh installs is TASK-15678.
+                logger.error("Password reset token not stored for user {}: {}", user["id"], type(exc).__name__)
+                return {"message": "If the email exists, a reset link has been sent"}
 
             # Send email
             email_service = _get_email_service()
@@ -2730,6 +2800,19 @@ async def reset_password(
                 detail="This reset token has already been used",
             )
 
+        # Lock the user's row until this reset commits, then refuse a locked account (423), a token from
+        # before the last unlock, or one for an address the account no longer has (400).
+        is_pg = await is_postgres_backend()
+        try:
+            await assert_identity_write_allowed(db, user_id, is_postgres=is_pg, token_iat=payload.get("iat"))
+        except StaleCredentialError:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST, detail="Invalid or expired reset token"
+            ) from None
+        user = await _auth_service.fetch_active_user_by_id(db, user_id)  # no row (an inactive user): as before
+        if user and str(payload.get("email") or "").strip().lower() != str(user.get("email") or "").strip().lower():
+            raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Invalid or expired reset token")
+
         # Validate new password (service raises WeakPasswordError on failure)
         try:
             password_service.validate_password_strength(data.new_password)
@@ -2751,9 +2834,13 @@ async def reset_password(
             now_utc=now_utc,
         )
 
-        # Revoke all existing sessions for security
-        blacklist = _token_blacklist.get_token_blacklist()
-        await blacklist.revoke_all_user_tokens(user_id, "Password reset")
+        # Sign every session out: on PostgreSQL inside the request (an error it raises rolls the reset back),
+        # on SQLite once the reset commits (this request holds the write lock until then).
+        async def _revoke_sessions() -> None:
+            await _token_blacklist.get_token_blacklist().revoke_all_user_tokens(user_id, "Password reset")
+
+        if is_pg or not defer_until_after_commit(_revoke_sessions):
+            await _revoke_sessions()
 
         if __settings.get_settings().PII_REDACT_LOGS:
             logger.info("Password reset completed for authenticated user (details redacted)")
@@ -2944,6 +3031,11 @@ async def request_magic_link(
         return MessageResponse(message="If the account exists, a sign-in link has been sent", details=None)
 
     user = await _auth_service.fetch_user_by_login_identifier(db, email)
+    user = user or await find_locked_user_by_previous_address(email)
+    if user and is_security_locked(user):
+        # A locked account gets its unlock link again, to the typed address only, never a sign-in link.
+        await resend_unlock_link(user, email, ip_address=client_ip, user_agent=request.headers.get("User-Agent"))
+        return MessageResponse(message="If the account exists, a sign-in link has been sent", details=None)
     user_id = int(user["id"]) if user and user.get("id") is not None else None
 
     # If registration is disabled and user doesn't exist, do not send an email.
@@ -3126,6 +3218,11 @@ async def verify_magic_link(
         )
     if user and user.get("is_active") in (False, 0):
         raise HTTPException(status_code=401, detail="Invalid or inactive user")
+    if user:  # refused before the link is spent
+        if not await magic_link_email_allowed(user, payload):  # an address the account no longer has
+            raise HTTPException(status_code=400, detail="Invalid magic link token")
+        if is_security_locked(user) and payload.get("purpose") != UNLOCK_PURPOSE:
+            raise AccountSecurityLockedError()
 
     jti, expiry = payload.get("jti"), payload.get("exp")
     try:
@@ -3150,6 +3247,17 @@ async def verify_magic_link(
         raise HTTPException(status_code=503, detail="Magic link sign-in is temporarily unavailable") from None
     if not claimed or expires_at <= datetime.now(timezone.utc):
         raise HTTPException(status_code=400, detail="Invalid magic link token")
+    if user and payload.get("purpose") == UNLOCK_PURPOSE:
+        try:  # when it unlocked nothing and the account is still locked, create_session refuses with the 423
+            await redeem_unlock(
+                user,
+                payload,
+                via="magic_link",
+                ip_address=_auth_request_client_ip(request),
+                user_agent=request.headers.get("User-Agent"),
+            )
+        except TakeBackUnavailableError:  # another account took the address after the check above
+            raise HTTPException(status_code=400, detail="Invalid magic link token") from None
 
     if not user:
         # Create a new user on first magic-link sign-in
@@ -3223,6 +3331,9 @@ async def verify_magic_link(
     session_id = temp_session_info["session_id"]
 
     async with session_manager.revoke_on_failure(session_id, int(user["id"])):
+        # A take-back that committed since the check above moved the email; this session is revoked.
+        if not await magic_link_email_current(int(user["id"]), payload):
+            raise HTTPException(status_code=400, detail="Invalid magic link token")
         scope_claims = await _build_scope_claims(int(user["id"]))
         add_claims = dict(scope_claims)
         add_claims["session_id"] = session_id
@@ -3580,6 +3691,14 @@ async def mfa_login(
                 status_code=status.HTTP_401_UNAUTHORIZED,
                 detail="Invalid credentials",
             )
+        try:
+            # A challenge cached before issued_at existed carries none and is checked for the lock only.
+            assert_account_not_locked(user, token_iat=payload.get("issued_at"))
+        except StaleCredentialError:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="MFA session expired or invalid",
+            ) from None
 
         mfa_service = _get_mfa_service()
         mfa_status = await mfa_service.get_user_mfa_status(user_id)

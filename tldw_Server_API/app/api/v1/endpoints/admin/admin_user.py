@@ -21,6 +21,8 @@ from tldw_Server_API.app.api.v1.schemas.admin_schemas import (
     AdminPasswordResetResponse,
     AdminPrivilegedActionRequest,
     AdminUserCreateRequest,
+    SecurityUnlockRequest,
+    SecurityUnlockResponse,
     UserDetailResponse,
     UserListResponse,
     UserSummary,
@@ -471,6 +473,18 @@ async def update_user(
         password_service,
         is_pg_fn=_get_is_pg_fn(),
     )
+
+
+@router.post("/users/{user_id}/security-unlock", response_model=SecurityUnlockResponse)
+async def security_unlock(
+    user_id: int,
+    request: SecurityUnlockRequest,
+    principal: AuthPrincipal = Depends(get_auth_principal),
+    password_service=Depends(get_password_service_dep),
+) -> SecurityUnlockResponse:
+    # No get_db_transaction here: clear_lock writes through other connections.
+    result = await admin_users_service.security_unlock(principal, user_id, request, password_service)
+    return SecurityUnlockResponse(**result)
 
 
 @router.post("/users/{user_id}/reset-password", response_model=AdminPasswordResetResponse)

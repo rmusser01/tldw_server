@@ -511,6 +511,33 @@ async def test_nonowner_serving_refuses_missing_users_previous_email(migrated_st
     assert _startup_snapshot(owner) == before  # nosec B101 -- schema remains untouched.
 
 
+def test_nonowner_serving_accepts_the_account_lock_columns(migrated_startup):
+    """The non-owner serving pool admits the migrated schema with the three account-lock columns."""
+    owner, runtime_dir, env, _ids = migrated_startup
+    present = owner.execute(
+        "SELECT table_name, column_name FROM information_schema.columns WHERE table_schema = 'public' "
+        "AND column_name IN ('security_locked_at', 'credentials_valid_after', 'suspended_at')"
+    ).rows
+    assert {(r["table_name"], r["column_name"]) for r in present} >= {  # nosec B101 -- the owner migration really created them.
+        ("users", "security_locked_at"),
+        ("users", "credentials_valid_after"),
+        ("api_keys", "suspended_at"),
+    }
+    assert _run_runtime(runtime_dir, env, _STARTUP_SCRIPT) == {"complete": True}  # nosec B101 -- real serving admission.
+
+
+@pytest.mark.asyncio
+async def test_nonowner_serving_refuses_missing_users_security_locked_at(migrated_startup):
+    """The non-owner pool refuses to initialize without users.security_locked_at; the owner is never asked to repair it."""
+    owner, runtime_dir, env, _ids = migrated_startup
+    async with unmanaged_authnz_pg_connection(owner.config.pg_database) as conn:
+        await conn.execute("ALTER TABLE public.users DROP COLUMN security_locked_at")
+    before = _startup_snapshot(owner)
+    result = _run_runtime(runtime_dir, env, _STARTUP_SCRIPT)
+    assert result == {"complete": False, "unexpected_error": "DatabaseError"}  # nosec B101 -- real fail-closed refusal.
+    assert _startup_snapshot(owner) == before  # nosec B101 -- schema remains untouched.
+
+
 @pytest.mark.asyncio
 async def test_nonowner_startup_keeps_optional_migrations_optional(migrated_startup):
     """The serving admission must not promote optional owner extras into fatal requirements."""

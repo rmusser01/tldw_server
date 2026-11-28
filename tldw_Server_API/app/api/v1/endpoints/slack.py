@@ -179,6 +179,13 @@ async def slack_events(request: Request) -> JSONResponse:
                     team_id=team_id,
                     action=str(mention_parsed.get("action") or ""),
                 )
+            locked_error = await _chatops_policy.locked_actor_error(actor_user_id)
+            if locked_error:
+                return _slack_policy_error_response(
+                    locked_error,
+                    team_id=team_id,
+                    action=str(mention_parsed.get("action") or ""),
+                )
             policy_error = _evaluate_slack_policy(
                 policy=policy,
                 team_id=team_id,
@@ -263,6 +270,10 @@ async def slack_commands(request: Request) -> JSONResponse:
     actor_user_id, mapping_error = _resolve_slack_actor_id(policy, slack_user_id)
     if mapping_error:
         return _slack_policy_error_response(mapping_error, team_id=team_id, action=action)
+
+    locked_error = await _chatops_policy.locked_actor_error(actor_user_id)
+    if locked_error:
+        return _slack_policy_error_response(locked_error, team_id=team_id, action=action)
 
     policy_error = _evaluate_slack_policy(
         policy=policy,

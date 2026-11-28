@@ -1557,7 +1557,6 @@ export interface AdminUserUpdateRequest {
   role?: string
   is_active?: boolean
   is_verified?: boolean
-  is_locked?: boolean
   storage_quota_mb?: number | null
 }
 

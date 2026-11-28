@@ -236,12 +236,13 @@ async def fetch_active_user_by_id(db, user_id: int) -> dict[str, Any] | None:
 
 
 async def fetch_user_by_email_for_password_reset(db: Any, email: str) -> dict[str, Any] | None:
-    """Fetch reset-eligible user fields by email, case-insensitive."""
+    """Fetch reset-eligible user fields by email, case-insensitive, with the lock fields the unlock mail needs."""
     email_l = str(email or "").strip().lower()
     try:
         row = await _fetchrow(
             db,
-            "SELECT id, username, email, is_active FROM users WHERE lower(email) = $1",
+            "SELECT id, username, email, is_active, security_locked_at, previous_email, email_changed_at "
+            "FROM users WHERE lower(email) = $1",
             email_l,
         )
         user = _normalize_user_row(row)

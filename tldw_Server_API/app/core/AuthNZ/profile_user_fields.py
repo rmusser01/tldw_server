@@ -30,5 +30,7 @@ RAW_SAFE_USER_UPDATE_FIELDS = frozenset(
         "is_locked",
         "locked_until",
         "metadata",
+        "security_locked_at",
+        "credentials_valid_after",
     }
 )

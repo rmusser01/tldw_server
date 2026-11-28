@@ -173,6 +173,10 @@ async def discord_interactions(request: Request) -> JSONResponse:
         if mapping_error:
             return _discord_policy_error_response(mapping_error, guild_id=guild_id, action=action)
 
+        locked_error = await _chatops_policy.locked_actor_error(actor_user_id)
+        if locked_error:
+            return _discord_policy_error_response(locked_error, guild_id=guild_id, action=action)
+
         policy_error = _evaluate_discord_policy(
             policy=policy,
             guild_id=guild_id,

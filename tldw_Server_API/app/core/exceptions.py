@@ -187,6 +187,13 @@ class APIKeyRotationRejected(ValueError, TransactionPassthroughError):
         super().__init__("API key not found or unauthorized")
 
 
+class APIKeySuspendedError(APIKeyRotationRejected):
+    """The source key is suspended after an account lock; the owner must restore it first."""
+
+    def __init__(self) -> None:
+        ValueError.__init__(self, "API key is suspended")
+
+
 # AuthNZ re-exports these bases so foundation code need not import AuthNZ.
 class UserRegistrationException(Exception):
     """Base exception for user registration system."""

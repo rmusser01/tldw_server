@@ -763,20 +763,24 @@ def test_server_ci_wake_only_handles_this_repository_pr_failures(mode, event, he
 
 
 @pytest.mark.parametrize(
-    ("job_id", "step_name", "digest"),
+    ("job_id", "step_name", "digest", "budget_minutes"),
     [
         ("global-coverage", "Run global coverage floor",
-         "14996dc3ac2432f01223fc7d1df48a0841f228263e5086d53b260edd6dac5178"),
+         "14996dc3ac2432f01223fc7d1df48a0841f228263e5086d53b260edd6dac5178", 30),
+        # 45 since TASK-15679: tests/AuthNZ_SQLite took 26 to 28.5 of its 30 minutes before the
+        # account-lock tests added about 10.5. The workload (the step's digest) is unchanged.
         ("authnz-coverage", "AuthNZ coverage floor",
-         "f9e3f60c9777835ee1ff663d370509a2c3b9ca3f2083908e8bafd91bbdae49f1"),
+         "f9e3f60c9777835ee1ff663d370509a2c3b9ca3f2083908e8bafd91bbdae49f1", 45),
     ],
 )
-def test_coverage_execution_has_an_independent_budget_and_unchanged_workload(job_id, step_name, digest):
+def test_coverage_execution_has_an_independent_budget_and_unchanged_workload(
+    job_id, step_name, digest, budget_minutes
+):
     """TASK-15637: the two floors must not consume one shared 30-minute budget."""
     jobs = _wf("coverage-required.yml")["jobs"]
     assert job_id in jobs, "Each unchanged coverage execution needs its own runner and budget"
     job = jobs[job_id]
-    assert job["timeout-minutes"] == 30
+    assert job["timeout-minutes"] == budget_minutes
     assert job["runs-on"] == "ubuntu-latest"
     assert job["needs"] == ["changes", "admission", "await_license"]
     assert not job.get("continue-on-error", False)

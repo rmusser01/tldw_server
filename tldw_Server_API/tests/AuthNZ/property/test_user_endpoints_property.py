@@ -128,6 +128,8 @@ class TestUserEndpointsProperty:
 
         mock_conn = AsyncMock()
         mock_conn.fetchval = AsyncMock(return_value=test_user_copy["password_hash"])
+        # The account-lock read (PostgreSQL branch): the row is not locked.
+        mock_conn.fetchrow = AsyncMock(return_value={"security_locked_at": None, "credentials_valid_after": None})
         mock_conn.execute = AsyncMock()
         mock_conn.commit = AsyncMock()
 

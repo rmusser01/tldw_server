@@ -390,6 +390,10 @@ class AuditEventType(Enum):
     AUTH_TOKEN_REFRESHED = "auth.token.refreshed"  # nosec B105
     AUTH_TOKEN_REVOKED = "auth.token.revoked"  # nosec B105
     AUTH_SESSION_EXPIRED = "auth.session.expired"
+    AUTH_SESSION_EVICTED = "auth.session.evicted"
+    AUTH_ACCOUNT_LOCKED = "auth.account.locked"
+    AUTH_ACCOUNT_UNLOCKED = "auth.account.unlocked"
+    AUTH_ACCOUNT_LOCK_EMAIL_SENT = "auth.account.lock_email_sent"
 
     # User Management
     USER_CREATED = "user.created"

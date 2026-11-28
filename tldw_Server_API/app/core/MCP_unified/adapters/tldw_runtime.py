@@ -230,6 +230,7 @@ class TldwServerAuthProvider:
     ) -> AuthenticatedIdentity | None:
         """Authenticate an AuthNZ websocket bearer token and project identity data."""
         try:
+            from fastapi import HTTPException
             from starlette.requests import Request
 
             from tldw_Server_API.app.core.AuthNZ.exceptions import (
@@ -239,6 +240,7 @@ class TldwServerAuthProvider:
             from tldw_Server_API.app.core.AuthNZ.User_DB_Handling import (
                 verify_jwt_and_fetch_user,
             )
+            from tldw_Server_API.app.core.exceptions import InactiveUserError
         except _TLDW_RUNTIME_ADAPTER_EXCEPTIONS as exc:
             logger.debug(
                 "MCP AuthNZ websocket dependencies unavailable: {}",
@@ -270,7 +272,8 @@ class TldwServerAuthProvider:
 
         try:
             user = await verify_jwt_and_fetch_user(Request(scope), token)
-        except (InvalidTokenError, TokenExpiredError) as exc:
+        # HTTPException: a dead token (401) or a locked account (423); either closes the socket 1008.
+        except (InvalidTokenError, TokenExpiredError, HTTPException, InactiveUserError) as exc:
             logger.debug(
                 "MCP AuthNZ websocket token authentication failed closed: {}",
                 exc.__class__.__name__,

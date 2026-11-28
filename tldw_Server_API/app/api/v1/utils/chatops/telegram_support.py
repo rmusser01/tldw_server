@@ -23,6 +23,7 @@ from tldw_Server_API.app.api.v1.schemas.telegram_schemas import (
     TelegramLinkedActorRevokeResponse,
     TelegramWebhookUpdate,
 )
+from tldw_Server_API.app.core.AuthNZ.account_lock import is_user_security_locked
 from tldw_Server_API.app.core.AuthNZ.database import get_db_pool
 from tldw_Server_API.app.core.AuthNZ.exceptions import (
     ConnectionPoolExhaustedError,
@@ -683,6 +684,9 @@ async def _handle_telegram_approval_callback_query(
         ):
             return _telegram_webhook_error(status.HTTP_403_FORBIDDEN, "approval_not_authorized")
 
+        if await is_user_security_locked(linked_auth_user_id):
+            return _telegram_webhook_error(status.HTTP_403_FORBIDDEN, "account_locked")
+
         consumed_pending = await approvals_repo.consume_pending_approval(
             parsed_callback["approval_token"],
             now=now,
@@ -965,6 +969,8 @@ async def telegram_webhook_impl(
             return _telegram_webhook_error(status.HTTP_403_FORBIDDEN, "account_link_required")
 
     if message_policy.command is not None and message_policy.command.action == "ask" and linked_actor is not None:
+        if await is_user_security_locked(int(linked_actor["auth_user_id"])):
+            return _telegram_webhook_error(status.HTTP_403_FORBIDDEN, "account_locked")
         if job_manager is None:
             job_manager = await _resolve_job_manager_for_request(request)
         request_id = _build_telegram_request_id(scope, update_id_int)

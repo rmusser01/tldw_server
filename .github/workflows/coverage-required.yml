@@ -206,7 +206,7 @@ jobs:
         )
       )
       && (needs.changes.result == 'success' && needs.changes.outputs.coverage_required == 'true')
-    timeout-minutes: 30
+    timeout-minutes: 45
     steps:
       - name: Checkout
         if: needs.changes.outputs.coverage_required == 'true'

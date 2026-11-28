@@ -442,6 +442,13 @@ class ACPTriggerManager:
             logger.warning("Webhook verification failed for trigger_id={}", trigger_id)
             return {"error": "verification_failed", "status": "rejected"}
 
+        # 5b. A security-locked owner acts through nobody: refuse before anything is built or submitted.
+        from tldw_Server_API.app.core.AuthNZ.account_lock import is_user_security_locked
+
+        if await is_user_security_locked(int(trigger["owner_user_id"])):
+            logger.info("Webhook for trigger_id={} refused: owner account is locked", trigger_id)
+            return {"error": "account_locked", "status": "rejected"}
+
         # 6. Build acp_run payload
         agent_config = trigger.get("agent_config", {})
         prompt_template = trigger.get("prompt_template", "")

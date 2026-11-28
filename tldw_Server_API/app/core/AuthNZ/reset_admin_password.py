@@ -20,6 +20,8 @@ from loguru import logger
 # Ensure project root is importable
 sys.path.insert(0, str(Path(__file__).parent.parent.parent.parent.parent))
 
+from tldw_Server_API.app.core.Audit.unified_audit_service import AuditEventType
+from tldw_Server_API.app.core.AuthNZ.account_lock import clear_lock, write_account_audit
 from tldw_Server_API.app.core.AuthNZ.password_service import PasswordService
 from tldw_Server_API.app.core.AuthNZ.settings import get_settings
 from tldw_Server_API.app.core.DB_Management.Users_DB import get_users_db
@@ -46,6 +48,7 @@ async def reset_user_password(
         print("[reset-password] Password does not meet the configured minimum requirements.")
         return False
 
+    password_changed = False
     try:
         users_db = await get_users_db()
 
@@ -64,12 +67,24 @@ async def reset_user_password(
 
         # Update password in database (works for both SQLite and PostgreSQL)
         await users_db.update_user(user_id, password_hash=new_hash)
+        password_changed = True
+        # The operator at the console is the recovery path for a locked account.
+        unlocked_at = await clear_lock(user_id)
 
         print(f"[reset-password] Password updated for user '{username}' (id={user_id}, role={user_role}).")
+        if unlocked_at is not None:
+            await write_account_audit(AuditEventType.AUTH_ACCOUNT_UNLOCKED, user_id=user_id, metadata={"via": "cli"})
+            print("[reset-password] The account's security lock was cleared.")
         return True
 
     except Exception as e:
-        print("[reset-password] Failed to reset password. Check server logs for details.")
+        if password_changed:
+            print(
+                f"[reset-password] The password of user '{username}' was changed, but the account's security lock"
+                " could not be cleared. Check server logs for details."
+            )
+        else:
+            print("[reset-password] Failed to reset password. Check server logs for details.")
         logger.opt(exception=True).error("reset_user_password failed: %s", e)
         return False
 
