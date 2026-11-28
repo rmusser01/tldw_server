@@ -11,6 +11,11 @@ import type {
 } from "@/types/setup-onboarding";
 import { McpToolsStep, type McpToolsStepProps } from "../steps/McpToolsStep";
 
+vi.mock("@/design-system/states", () => ({
+  READY_STATE_LABEL: "Registry ready",
+  UNAVAILABLE_STATE_LABEL: "Registry unavailable",
+}));
+
 const catalog: McpToolsCatalogResponse = {
   catalog_version: "2026-07-04",
   confirmation_version: "v1",
@@ -311,6 +316,25 @@ describe("McpToolsStep", () => {
       expect(validateMcpTools).toHaveBeenCalledWith({});
     });
     expect(await screen.findByText(/sample tool passed/i)).toBeInTheDocument();
+  });
+
+  it.each([
+    ["ready", "Registry ready"],
+    ["unavailable", "Registry unavailable"],
+    ["incomplete", "Incomplete"],
+  ])("shows the external validation status for %s", async (status, label) => {
+    const validateMcpTools = vi.fn().mockResolvedValue({
+      ...validated,
+      external_status: status,
+    });
+    renderMcpToolsStep(createProps({ validateMcpTools }));
+
+    fireEvent.click(screen.getByRole("button", { name: /save packs/i }));
+    const validate = screen.getByRole("button", { name: /run sample tool/i });
+    await waitFor(() => expect(validate).toBeEnabled());
+    fireEvent.click(validate);
+
+    expect(await screen.findByText(`External status: ${label}`)).toBeInTheDocument();
   });
 
   it("allows continuing after save even when validation has not run", async () => {
