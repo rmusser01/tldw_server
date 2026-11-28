@@ -71,7 +71,7 @@ Dry-run cleanup requests are intentionally not persisted as idempotent mutations
 | `POST` | `/packs/{pack_id}/items/bulk-review` | Apply one review status to many items. |
 | `POST` | `/packs/{pack_id}/items/upload` | Upload an image for a slot. |
 | `POST` | `/packs/{pack_id}/items/{item_id}/preferred` | Mark one item preferred for its slot. |
-| `GET` | `/packs/{pack_id}/manifest` | Export approved-only runtime manifest. |
+| `GET` | `/packs/{pack_id}/manifest` | Get the validated, approved-only v1 runtime manifest. |
 | `GET` | `/packs/{pack_id}/readiness` | Check runtime readiness. |
 | `POST` | `/packs/{pack_id}/prompt-preview` | Preview assembled prompt text and truncation diagnostics. |
 | `POST` | `/packs/{pack_id}/generate` | Enqueue a parent generation batch job. |
@@ -300,7 +300,7 @@ Runtime readiness:
 ```json
 {
   "ready": true,
-  "status": "ready_with_warnings",
+  "status": "ready",
   "warnings": ["depth_unavailable"],
   "errors": []
 }
@@ -316,7 +316,7 @@ Manifest export includes approved items only:
   "primary_character_id": 42,
   "content_rating": "general",
   "assets": {
-    "sprite": [
+    "sprites": [
       {
         "slot_key": "sprite_neutral",
         "item_id": 101,
@@ -327,6 +327,22 @@ Manifest export includes approved items only:
   }
 }
 ```
+
+Single and bulk approval validate each selected item's generated-file registration and check that its stored file is available. A bulk approval updates every selected item in one transaction. If a checked file reference changes before review is written, the API returns `409` with `vn_asset_approval_asset_changed` and the affected item ID. Refresh the item before retrying.
+
+The manifest endpoint validates the approved assets it would return. Readiness checks the same file references and requires every required slot to have an asset in the manifest. A depth companion appears in the manifest when its background parent is approved.
+
+If a selected asset fails validation, approval and manifest requests return `409` with `vn_asset_runtime_integrity_failed`. Each entry in `detail.details.issues` includes an `item_id` and a code. Readiness reports the same codes as `code:item_id` in `errors`.
+
+| Code | What to check |
+| --- | --- |
+| `vn_asset_registration_unavailable` | Restore or regenerate the item so it has a live generated-file registration for the same pack owner and item. |
+| `vn_asset_content_not_found` | Restore the file under the owner's outputs directory or regenerate it. |
+| `vn_asset_content_metadata_invalid` | Check the registered MIME type and image category. |
+| `vn_asset_content_size_mismatch` | Restore the complete file or regenerate it. The file must be nonempty and match a positive registered size. |
+| `policy_blocked` | Review the policy attached to the generated file. |
+
+Runtime readiness is separate from portability backup. A backup can include an incomplete or draft pack. Use strict export when all archived files need to be present.
 
 ## Uploads And Content
 

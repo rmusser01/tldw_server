@@ -9,8 +9,11 @@ from typing import Any
 from tldw_Server_API.app.core.AuthNZ.repos.generated_files_repo import SOURCE_FEATURE_VN_ASSETS
 from tldw_Server_API.app.core.DB_Management.db_path_utils import DatabasePaths
 from tldw_Server_API.app.core.Utils.path_utils import safe_join
+from tldw_Server_API.app.core.VN_Platform.errors import ERROR_POLICY_BLOCKED
 
 VN_ASSET_CONTENT_NOT_FOUND = "vn_asset_content_not_found"
+VN_ASSET_REGISTRATION_UNAVAILABLE = "vn_asset_registration_unavailable"
+VN_ASSET_CONTENT_METADATA_INVALID = "vn_asset_content_metadata_invalid"
 VN_ASSET_INVALID_IMAGE = "vn_asset_invalid_image"
 VN_ASSET_UNSUPPORTED_IMAGE_MIME = "vn_asset_unsupported_image_mime"
 VN_ASSET_IMAGE_MIME_TYPES = {
@@ -54,6 +57,51 @@ def resolve_vn_asset_storage_path(*, user_id: int, storage_path: str) -> Path:
         raise ValueError(VN_ASSET_CONTENT_NOT_FOUND) from exc
 
     return full_path
+
+
+def resolve_registered_vn_asset_content(
+    record: dict[str, Any] | None,
+    *,
+    user_id: int,
+    item_id: int,
+    fallback_mime_type: str | None,
+    require_image: bool = False,
+) -> tuple[Path, str]:
+    """Resolve a live, accessible VN registration to its owner-local file."""
+    if not record:
+        raise ValueError(VN_ASSET_REGISTRATION_UNAVAILABLE)
+    try:
+        matches_owner_and_item = generated_file_matches_vn_asset(record, user_id=user_id, item_id=item_id)
+    except (TypeError, OverflowError, ValueError) as exc:
+        raise ValueError(VN_ASSET_REGISTRATION_UNAVAILABLE) from exc
+    if not matches_owner_and_item:
+        raise ValueError(VN_ASSET_REGISTRATION_UNAVAILABLE)
+
+    media_type = str(record.get("mime_type") or fallback_mime_type or "")
+    normalized = media_type.split(";", 1)[0].strip().lower()
+    file_category = str(record.get("file_category") or "").strip().lower()
+    is_binary_fallback = not require_image and normalized == "application/octet-stream"
+    if (normalized not in VN_ASSET_IMAGE_MIME_TYPES and not is_binary_fallback) or file_category not in {"", "image"}:
+        raise ValueError(VN_ASSET_CONTENT_METADATA_INVALID)
+    if _truthy_policy_flag(record.get("policy_blocked")):
+        raise ValueError(ERROR_POLICY_BLOCKED)
+
+    try:
+        full_path = resolve_vn_asset_storage_path(user_id=user_id, storage_path=str(record.get("storage_path") or ""))
+        # lgtm[py/path-injection]: full_path is contained by resolve_vn_asset_storage_path.
+        if full_path.is_file():
+            return full_path, media_type
+    except (OSError, RuntimeError, ValueError) as exc:
+        raise ValueError(VN_ASSET_CONTENT_NOT_FOUND) from exc
+    raise ValueError(VN_ASSET_CONTENT_NOT_FOUND)
+
+
+def _truthy_policy_flag(value: Any) -> bool:
+    if isinstance(value, str):
+        return value.strip().lower() in {"1", "true", "yes", "blocked", "policy_blocked"}
+    if isinstance(value, (int, float)):
+        return value != 0
+    return False
 
 
 def image_format_from_mime_type(mime_type: str) -> str:

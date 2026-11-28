@@ -59,6 +59,14 @@ class BuddyConflictError(ValueError):
     """An optimistic Buddy resource version no longer matches stored state."""
 
 
+class VNAssetApprovalConflict(ValueError):
+    """The file checked for approval no longer matches the stored item."""
+
+    def __init__(self, item_id: int) -> None:
+        self.item_id = item_id
+        super().__init__("vn_asset_approval_asset_changed")
+
+
 class VNAssetGenerationError(ValueError):
     """A stable VN generation code with internal operation context."""
 
