@@ -36,6 +36,9 @@ test.describe('VN asset packs smoke', () => {
     await page.route(/\/api\/v1\/persona\/profiles(?:\?.*)?$/, async (route) => {
       await fulfillJson(route, 200, [{ id: 'smoke-profile', name: 'Smoke profile' }]);
     });
+    await page.route(/\/api\/v1\/users\/me\/profile(?:\?.*)?$/, async (route) => {
+      await fulfillJson(route, 200, { user: { id: 1, is_active: true } });
+    });
 
     await page.route(/\/api\/v1\/vn\/vn-assets(?:\/.*)?$/, async (route) => {
       const request = route.request();
@@ -67,6 +70,7 @@ test.describe('VN asset packs smoke', () => {
         const body = request.postDataJSON() as Record<string, unknown>;
         const created = {
           id: 1,
+          owner_user_id: 1,
           title: body.title,
           primary_character_id: body.primary_character_id,
           planned_output_count: 0,

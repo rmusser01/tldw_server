@@ -24,6 +24,7 @@ import {
   exportVNAssetPack,
   getStarterMatrices,
   getVNAssetGeneration,
+  getVNAssetItemPreview,
   getVNAssetManifest,
   getVNAssetPack,
   getVNAssetReadiness,
@@ -48,6 +49,18 @@ describe('vnAssets api client', () => {
     mocks.apiClient.get.mockResolvedValue({});
     mocks.apiClient.patch.mockResolvedValue({});
     mocks.apiClient.post.mockResolvedValue({});
+  });
+
+  it('loads preview bytes with the caller’s server and abort signal', async () => {
+    const signal = new AbortController().signal;
+    const baseURL = 'https://assets.example.test/api/v1';
+    const blob = new Blob(['preview'], { type: 'image/png' });
+    mocks.apiClient.get.mockResolvedValueOnce(blob);
+
+    await expect(getVNAssetItemPreview(7, 11, { baseURL, signal })).resolves.toBe(blob);
+    expect(mocks.apiClient.get).toHaveBeenCalledWith('/vn/vn-assets/packs/7/items/11/preview', {
+      baseURL, signal, responseType: 'blob',
+    });
   });
 
   it('calls pack and matrix endpoints with expected paths and payloads', async () => {
@@ -78,6 +91,7 @@ describe('vnAssets api client', () => {
   });
 
   it('calls generation, item review, readiness, manifest, and prompt endpoints', async () => {
+    const reviewConfig = { baseURL: 'https://assets.example.test/api/v1' };
     await listVNAssetSlots(1);
     await updateVNAssetSlot(1, 2, { variant_count: 3 });
     await startVNAssetGeneration(1, { slot_ids: [2], variant_count: 1 });
@@ -85,8 +99,8 @@ describe('vnAssets api client', () => {
     await cancelVNAssetGeneration(1);
     await listVNAssetItems(1);
     await reviewVNAssetItem(1, 5, { review_status: 'approved', preferred: true });
-    await bulkReviewVNAssetItems(1, { item_ids: [5, 6], review_status: 'hidden' });
-    await setPreferredVNAssetItem(1, 5);
+    await bulkReviewVNAssetItems(1, { item_ids: [5, 6], review_status: 'hidden' }, reviewConfig);
+    await setPreferredVNAssetItem(1, 5, reviewConfig);
     await getVNAssetReadiness(1);
     await getVNAssetManifest(1);
     await previewVNAssetPrompt(1, { slot_id: 2, variant_index: 0 });
@@ -107,8 +121,8 @@ describe('vnAssets api client', () => {
     expect(mocks.apiClient.post).toHaveBeenCalledWith('/vn/vn-assets/packs/1/items/bulk-review', {
       item_ids: [5, 6],
       review_status: 'hidden',
-    });
-    expect(mocks.apiClient.post).toHaveBeenCalledWith('/vn/vn-assets/packs/1/items/5/preferred');
+    }, reviewConfig);
+    expect(mocks.apiClient.post).toHaveBeenCalledWith('/vn/vn-assets/packs/1/items/5/preferred', undefined, reviewConfig);
     expect(mocks.apiClient.get).toHaveBeenCalledWith('/vn/vn-assets/packs/1/readiness');
     expect(mocks.apiClient.get).toHaveBeenCalledWith('/vn/vn-assets/packs/1/manifest');
     expect(mocks.apiClient.post).toHaveBeenCalledWith('/vn/vn-assets/packs/1/prompt-preview', {
