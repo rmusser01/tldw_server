@@ -35,6 +35,7 @@ Verified the base against remote dev at eb48892630330498346153332d6d3951fe942f41
 All 39 focused Vitest tests passed across five files. Type checking and scoped ESLint passed. Bandit found no Python files in the Items scope. Independent review verified that late search responses and failures are ignored, and an undo action refreshes the current filters.
 Before and after Chromium captures at 1440×900 and 390×844 show the empty results and failed-load panel on the WebUI Items route. The tests verify filter reset, a visible keyboard focus indicator on Retry, and recovery with Enter. Both viewports fit the error detail without horizontal scrolling.
 Read-only Git merge previews flagged adjacent baseline hunks with #3671 and #3673. A merge of the baseline by entry ID preserves the independent removals from all four slices. The merge preview with #3672 passed cleanly.
+Pull request https://github.com/rmusser01/tldw_server/pull/3674
 <!-- SECTION:IMPLEMENTATION_NOTES:END -->
 
 ## Final Summary
