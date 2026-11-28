@@ -27,7 +27,12 @@ from tldw_Server_API.app.core.config import load_and_log_configs
 from tldw_Server_API.app.core.Context_Integrity.prompt_loader import load_prompt
 from tldw_Server_API.app.core.DB_Management.db_path_utils import get_user_media_db_path
 from tldw_Server_API.app.core.DB_Management.media_db.api import managed_media_database
-from tldw_Server_API.app.core.exceptions import WEB_CRAWL_CANCELLED_BEFORE_SAVE, WebCrawlFailedBeforeSave
+from tldw_Server_API.app.core.exceptions import (
+    WEB_CRAWL_CANCELLED_BEFORE_SAVE,
+    LLMPolicyRefusal,
+    WebAnalysisRefusedBeforeSave,
+    WebCrawlFailedBeforeSave,
+)
 from tldw_Server_API.app.core.Ingestion_Media_Processing.chunking_options import (
     async_resolve_chunking_options_and_plan,
     attach_chunking_plan_to_result,
@@ -675,9 +680,11 @@ class WebScrapingService:
                 task_id, user_id, error, before_media_save=mode == "persist" and not media_save_started
             )
             raise
-        except HTTPException:
+        except HTTPException as error:
             if self.scraper is not None:
                 self.scraper._set_progress(task_id, service_status="failed")
+            if isinstance(error, LLMPolicyRefusal) and mode == "persist" and not media_save_started:
+                raise WebAnalysisRefusedBeforeSave(error) from error
             raise
         except Exception as e:  # noqa: BLE001 - sanitize the public service boundary
             if self.scraper is not None:

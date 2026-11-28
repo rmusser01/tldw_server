@@ -2287,3 +2287,11 @@ class LLMPolicyRefusal(HTTPException):
 
     def __init__(self, detail: str) -> None:
         super().__init__(status_code=400, detail=detail)
+
+
+class WebAnalysisRefusedBeforeSave(LLMPolicyRefusal):
+    """Web analysis was refused before the persistent scraper attempted a Media write."""
+
+    def __init__(self, refusal: LLMPolicyRefusal) -> None:
+        super().__init__(refusal.detail)
+        self.headers = refusal.headers

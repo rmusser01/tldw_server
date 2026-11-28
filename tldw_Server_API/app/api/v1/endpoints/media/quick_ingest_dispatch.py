@@ -28,6 +28,7 @@ from tldw_Server_API.app.core.DB_Management.Collections_DB import CollectionsDat
 from tldw_Server_API.app.core.exceptions import (
     WEB_CRAWL_CANCELLED_BEFORE_SAVE,
     BadRequestError,
+    WebAnalysisRefusedBeforeSave,
     WebCrawlFailedBeforeSave,
 )
 
@@ -195,6 +196,10 @@ async def receive(
     except asyncio.CancelledError as exc:
         if transport == "web" and getattr(exc, WEB_CRAWL_CANCELLED_BEFORE_SAVE, False) is True:
             finish(status="cancelled")
+        raise
+    except WebAnalysisRefusedBeforeSave as refusal:
+        if transport == "web":
+            finish(status="failed", error_summary=refusal.detail[:1000])
         raise
     except WebCrawlFailedBeforeSave:
         if transport == "web":

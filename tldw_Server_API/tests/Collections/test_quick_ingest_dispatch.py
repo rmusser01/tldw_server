@@ -541,6 +541,45 @@ async def test_confirmed_crawl_stop_only_releases_the_source_before_media_storag
     assert claimed == (expected_state == "settled")
 
 
+@pytest.mark.parametrize("during_save", [False, True], ids=["before-media-save", "during-media-save"])
+def test_web_summary_policy_refusal_settles_only_a_confirmed_unwritten_source(plan_client, monkeypatch, during_save):
+    from tldw_Server_API.app.core.exceptions import LLMPolicyRefusal
+    from tldw_Server_API.app.core.Web_Scraping.contracts.execution import CrawlOutcome, CrawlReport
+    from tldw_Server_API.app.services import web_scraping_service
+
+    store, client = plan_client
+    url = "https://example.test/lecture"
+    query = _reserve(store, url, "url")
+    article = {"url": url, "title": "Lecture", "content": "Lecture notes", "extraction_successful": True}
+    crawl = AsyncMock(return_value=CrawlReport((article,), CrawlOutcome("completed", "frontier_exhausted", False)))
+    refusal = LLMPolicyRefusal("Input violates moderation policy. " * 35)
+    refusal.headers = {"X-Policy-Decision": "refused"}
+    summarize = AsyncMock(return_value="Summary", side_effect=None if during_save else refusal)
+    persist = AsyncMock(side_effect=refusal)
+    service = WebScrapingService()
+    service._initialized = True
+    service.scraper = SimpleNamespace(_batch_report=crawl, _summarize_content=summarize, _set_progress=Mock())
+    monkeypatch.setattr(service, "_store_persistent", persist)
+    monkeypatch.setattr(web_scraping_service, "get_web_scraping_service", lambda: service)
+    body = {"url_input": url, "scrape_method": "Individual URLs", "mode": "persist", "summarize_checkbox": True}
+
+    denied = client.post(_PATH + "/web", params=query, json=body)
+    assert denied.status_code == 400 and denied.json()["detail"] == refusal.detail
+    assert denied.headers["X-Policy-Decision"] == "refused"
+    replay = client.post(_PATH + "/web", params=query, json=body).json()
+    assert not replay["dispatched"]
+    assert replay["dispatch_state"] == ("web" if during_save else "settled")
+    assert replay["item"]["status"] == ("processing" if during_save else "failed")
+    assert replay["item"]["media_id"] is None
+    if during_save:
+        persist.assert_awaited_once()
+    else:
+        persist.assert_not_awaited()
+        assert replay["item"]["error_summary"] == refusal.detail[:1000]
+    summarize.assert_awaited_once()
+    crawl.assert_awaited_once()
+
+
 def test_fallback_analysis_quota_before_save_projects_retryable_failed_receipt(plan_client, monkeypatch):
     from tldw_Server_API.app.services.storage_quota_service import StorageQuotaService
 
