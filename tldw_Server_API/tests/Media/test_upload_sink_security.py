@@ -15,6 +15,30 @@ from tldw_Server_API.app.core.Ingestion_Media_Processing.Upload_Sink import File
 pytestmark = pytest.mark.unit
 
 
+@pytest.mark.parametrize(
+    ("filename", "detected_mime", "accepted"),
+    [
+        ("clip.ogm", "video/x-ogm+ogg", True),
+        ("clip.OGM", "audio/ogg", True),
+        ("clip.ogm", "video/ogg", True),
+        ("clip.ogm", "application/ogg", True),
+        ("clip.mp4", "application/ogg", False),
+        ("clip.ogm", "application/pdf", False),
+    ],
+)
+def test_ogm_upload_mime_validation(tmp_path, monkeypatch, filename, detected_mime, accepted):
+    """Allow Ogg detections for OGM uploads while still rejecting MIME mismatches."""
+    from tldw_Server_API.app.core.Ingestion_Media_Processing import Upload_Sink as sink
+
+    monkeypatch.setattr(
+        sink, "puremagic", SimpleNamespace(from_file=lambda path, mime: detected_mime)
+    )
+    path = tmp_path / filename
+    path.write_bytes(b"sample")
+    result = sink.process_and_validate_file(path, FileValidator())
+    assert bool(result) is accepted, result.issues
+
+
 def test_validate_file_mime_mismatch_hard_fail(tmp_path, monkeypatch):
 
 

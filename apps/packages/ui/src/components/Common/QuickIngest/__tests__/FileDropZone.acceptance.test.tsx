@@ -88,26 +88,29 @@ describe("FileDropZone acceptance", () => {
     focusSpy.mockRestore()
   })
 
-  it("accepts mkv uploads even when the browser does not provide a MIME type", async () => {
-    const user = userEvent.setup()
-    const onFilesAdded = vi.fn()
-    const onFilesRejected = vi.fn()
+  it.each(["sample-video.mkv", "sample-video.ogm"])(
+    "accepts %s even when the browser does not provide a MIME type",
+    async (filename) => {
+      const user = userEvent.setup()
+      const onFilesAdded = vi.fn()
+      const onFilesRejected = vi.fn()
 
-    render(
-      <FileDropZone
-        onFilesAdded={onFilesAdded}
-        onFilesRejected={onFilesRejected}
-      />
-    )
+      render(
+        <FileDropZone
+          onFilesAdded={onFilesAdded}
+          onFilesRejected={onFilesRejected}
+        />
+      )
 
-    const input = screen.getByTestId("qi-file-input")
-    const mkvFile = new File(["video-bytes"], "sample-video.mkv")
+      const input = screen.getByTestId("qi-file-input")
+      const file = new File(["video-bytes"], filename)
 
-    await user.upload(input, mkvFile)
+      await user.upload(input, file)
 
-    expect(onFilesAdded).toHaveBeenCalledTimes(1)
-    expect(onFilesAdded.mock.calls[0]?.[0]).toHaveLength(1)
-    expect(onFilesAdded.mock.calls[0]?.[0]?.[0]?.name).toBe("sample-video.mkv")
-    expect(onFilesRejected).not.toHaveBeenCalled()
-  })
+      expect(onFilesAdded).toHaveBeenCalledTimes(1)
+      expect(onFilesAdded.mock.calls[0]?.[0]).toHaveLength(1)
+      expect(onFilesAdded.mock.calls[0]?.[0]?.[0]?.name).toBe(filename)
+      expect(onFilesRejected).not.toHaveBeenCalled()
+    }
+  )
 })

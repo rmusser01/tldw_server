@@ -83,7 +83,7 @@ const hostnameMatches = (hostname: string, allowedHost: string): boolean =>
 const detectTypeFromExtension = (name: string): DetectedMediaType => {
   const ext = name.split(".").pop()?.toLowerCase() || ""
   if (["mp3", "wav", "ogg", "flac", "m4a", "aac", "wma", "opus"].includes(ext)) return "audio"
-  if (["mp4", "mkv", "avi", "mov", "webm", "wmv", "flv", "m4v"].includes(ext)) return "video"
+  if (["mp4", "mkv", "ogm", "avi", "mov", "webm", "wmv", "flv", "m4v"].includes(ext)) return "video"
   if (["pdf"].includes(ext)) return "pdf"
   if (["epub"].includes(ext)) return "ebook"
   if (["docx", "txt", "rtf", "md", "markdown", "html", "htm", "xhtml", "xml", "json"].includes(ext)) return "document"

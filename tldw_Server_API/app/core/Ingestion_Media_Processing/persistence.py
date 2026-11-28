@@ -3002,6 +3002,7 @@ async def add_media_orchestrate(
                 "video": [
                     ".mp4",
                     ".mkv",
+                    ".ogm",
                     ".avi",
                     ".mov",
                     ".flv",

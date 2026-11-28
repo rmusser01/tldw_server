@@ -33,6 +33,10 @@ from tldw_Server_API.app.core.Ingestion_Media_Processing.Upload_Sink import (
 from tldw_Server_API.app.core.Utils.Utils import logging, sanitize_filename
 from tldw_Server_API.app.core.Utils.Utils import logging as logger
 
+_VIDEO_UPLOAD_EXTENSIONS = {
+    ".mp4", ".avi", ".mov", ".mkv", ".ogm", ".webm", ".flv", ".wmv", ".mpg", ".mpeg",
+}
+
 
 def first_saved_filename(saved_files: Any) -> str | None:
     """Return the first upload's original name without changing caller error handling."""
@@ -261,21 +265,7 @@ async def save_uploaded_files(
 
             inferred_media_key: str | None = None
             if candidates:
-                if any(
-                    c
-                    in {
-                        ".mp4",
-                        ".avi",
-                        ".mov",
-                        ".mkv",
-                        ".webm",
-                        ".flv",
-                        ".wmv",
-                        ".mpg",
-                        ".mpeg",
-                    }
-                    for c in candidates
-                ):
+                if any(c in _VIDEO_UPLOAD_EXTENSIONS for c in candidates):
                     inferred_media_key = "video"
                 elif any(
                     c

@@ -33,6 +33,12 @@ describe("media-routing upload inference", () => {
     expect(inferUploadMediaTypeFromFile("movie.avi", "video/avi")).toBe("video")
   })
 
+  it("routes OGM uploads and direct links as video", () => {
+    expect(inferUploadMediaTypeFromFile("movie.OGM", "")).toBe("video")
+    expect(inferUploadMediaTypeFromFile("movie.ogm", "application/ogg")).toBe("video")
+    expect(inferIngestTypeFromUrl("https://example.test/movie.ogm?token=123")).toBe("video")
+  })
+
   it("keeps URL HTML routes on web scraping while file HTML uploads go through documents", () => {
     expect(inferIngestTypeFromUrl("https://example.test/page.html")).toBe("html")
     expect(inferIngestTypeFromFilename("page.html")).toBe("document")

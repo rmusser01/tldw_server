@@ -22,6 +22,7 @@ const ACCEPTED_EXTENSIONS = [
   "mp4",
   "webm",
   "mkv",
+  "ogm",
   "avi",
   "mov"
 ] as const
@@ -248,4 +249,4 @@ export const formatSourceUploadSizeLimit = (bytes: number): string => {
 }
 
 export const buildSourceUploadAccept = (): UploadProps["accept"] =>
-  ".pdf,.docx,.txt,.md,.markdown,.epub,.html,.htm,.xhtml,.xml,.json,.mp3,.wav,.m4a,.ogg,.flac,.mp4,.webm,.mkv,.avi,.mov"
+  ACCEPTED_EXTENSIONS.map((extension) => `.${extension}`).join(",")

@@ -1,7 +1,7 @@
 import { inferUploadMediaTypeFromFile } from "@/services/tldw/media-routing"
 
 export const QUICK_INGEST_ACCEPT_STRING =
-  ".pdf,.txt,.rtf,.docx,.md,.markdown,.html,.htm,.xhtml,.xml,.json,.epub,.mp3,.wav,.m4a,.flac,.aac,.ogg,.mp4,.webm,.mkv,.mov,.avi,application/pdf,text/plain,text/markdown,text/html,text/xml,application/xml,application/xhtml+xml,application/json,application/rtf,application/vnd.openxmlformats-officedocument.wordprocessingml.document,application/epub+zip,audio/*,video/*"
+  ".pdf,.txt,.rtf,.docx,.md,.markdown,.html,.htm,.xhtml,.xml,.json,.epub,.mp3,.wav,.m4a,.flac,.aac,.ogg,.mp4,.webm,.mkv,.ogm,.mov,.avi,application/pdf,text/plain,text/markdown,text/html,text/xml,application/xml,application/xhtml+xml,application/json,application/rtf,application/vnd.openxmlformats-officedocument.wordprocessingml.document,application/epub+zip,audio/*,video/*"
 
 const API_FILE_LIMIT_MIB = 1024
 const configuredDocumentLimitMiB = (() => {
