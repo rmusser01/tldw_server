@@ -56,6 +56,7 @@ Counts are refreshed after each merged migration PR. GitHub owns mutable tracker
 ## References
 
 - `Docs/Design/tldw_web_design_system_contract.md`
+- [Shared component examples](https://github.com/rmusser01/tldw_server/blob/dev/Docs/Design/tldw_web_design_system_component_examples.md)
 - `Docs/Design/tldw_web_design_system_inventory.md`
 - `apps/packages/ui/scripts/verify-design-system-product-state.mjs`
 - `apps/packages/ui/scripts/design-system-product-state-baseline.json`

@@ -177,6 +177,9 @@ Inventory and later migration patterns include:
 Patterns should document required content regions, allowed actions, state
 transitions, diagnostics behavior, and testing hooks.
 
+For help choosing a primitive and verifying a product-state migration, see the
+[shared component examples](tldw_web_design_system_component_examples.md).
+
 ### 4. Product Surfaces
 
 Product surfaces consume primitives and patterns rather than inventing local
@@ -280,10 +283,8 @@ should experience tldw_server's design language, not AntD defaults.
 
 ## Canonical State Language
 
-Product states are first-class design-system concepts. The implementation plan
-should introduce a shared state registry or equivalent typed map so WebUI and
-extension code use the same state keys, labels, severity, action rules, and
-diagnostic behavior.
+The WebUI and extension share state keys, labels, and severity, along with
+guidance for actions and diagnostics, in the [typed state registry](../../apps/packages/ui/src/design-system/states.ts).
 
 Each canonical state must define:
 
