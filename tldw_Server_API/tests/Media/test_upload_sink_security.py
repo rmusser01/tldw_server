@@ -342,6 +342,9 @@ def test_failed_html_prefix_probe_retains_original_mime_rejection(tmp_path, monk
     path.write_bytes(b"\n" * 6 + HTML)
     validator = FileValidator()
     with monkeypatch.context() as patch:
+        puremagic_module = sink.puremagic
+        assert puremagic_module is not None
+        patch.setattr(puremagic_module, "from_file", lambda *args, **kwargs: "text/plain")
         if failure == "read":
             original = Path.open
 
@@ -352,9 +355,6 @@ def test_failed_html_prefix_probe_retains_original_mime_rejection(tmp_path, monk
 
             patch.setattr(Path, "open", fail_read)
         else:
-            puremagic_module = sink.puremagic
-            assert puremagic_module is not None
-
             def fail_magic(*args, **kwargs):
                 raise puremagic_module.PureError("unrecognized normalized prefix")
 

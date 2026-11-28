@@ -120,6 +120,14 @@ afterEach(() => {
 });
 
 describe('TeamsPage edit and delete flows', () => {
+  it('omits the Manage link for a malformed team ID', async () => {
+    apiMock.getTeams.mockResolvedValue([{ id: '5/6', name: 'Imported team', created_at: '2026-01-01' }]);
+    render(<TeamsPage />);
+
+    await screen.findByText('Imported team');
+    expect(screen.queryByRole('link', { name: 'Manage' })).toBeNull();
+  });
+
   it('updates and deletes a team with member-count acknowledgment', async () => {
     const user = userEvent.setup();
     render(<TeamsPage />);
@@ -127,6 +135,7 @@ describe('TeamsPage edit and delete flows', () => {
     const rowLabel = await screen.findByText('Team One');
     const row = rowLabel.closest('tr');
     expect(row).not.toBeNull();
+    expect(within(row as HTMLElement).getByRole('link', { name: 'Manage' }).getAttribute('href')).toBe('/teams/5');
 
     await user.click(within(row as HTMLElement).getByRole('button', { name: 'Edit' }));
 

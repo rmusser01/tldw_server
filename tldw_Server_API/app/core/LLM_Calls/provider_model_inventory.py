@@ -9,7 +9,8 @@ those providers defer to the provider (see has_model_listing).
 
 from __future__ import annotations
 
-import hashlib
+import hmac
+import secrets
 import threading
 import time
 from collections import OrderedDict
@@ -99,6 +100,7 @@ _TTL_SECONDS = 300.0
 _MAX_PAGES = 10
 _MAX_MODELS = 1000
 _MAX_CACHE_ENTRIES = 128
+_CACHE_FINGERPRINT_KEY = secrets.token_bytes(32)
 _MAX_RESPONSE_BYTES = 2 * 1024 * 1024
 # Short negative cache: a failing /models is not re-fetched on every call. Never auth_failed or not_found.
 _FAILURE_TTL_SECONDS = 20.0
@@ -393,7 +395,8 @@ def _parse_page(provider: str, payload: Any, *, page_number: int = 1) -> tuple[l
 def _cache_key(
     provider: str, endpoint: str, api_key: str, scope: ConfiguredEndpointScope | None = None,
 ) -> _CacheKey:
-    return provider, endpoint, hashlib.sha256(api_key.encode("utf-8")).hexdigest(), scope
+    fingerprint = hmac.digest(_CACHE_FINGERPRINT_KEY, api_key.encode("utf-8"), "sha256").hex()
+    return provider, endpoint, fingerprint, scope
 
 
 def _log_discovery_failure(provider: str, endpoint: str, status: str, *, lookup: bool = False) -> None:

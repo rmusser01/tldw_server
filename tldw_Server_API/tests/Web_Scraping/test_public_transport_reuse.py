@@ -135,6 +135,7 @@ def curl_server(monkeypatch, tmp_path, request):
             )
         )
         context = ssl.SSLContext(ssl.PROTOCOL_TLS_SERVER)
+        context.minimum_version = ssl.TLSVersion.TLSv1_2
         context.load_cert_chain(cert_path, key_path)
         context.set_servername_callback(lambda _socket, name, _context: server_names.append(name))
         server.socket = context.wrap_socket(server.socket, server_side=True)
