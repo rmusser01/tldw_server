@@ -5,6 +5,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest"
 import NotesManagerPage from "../NotesManagerPage"
 import { applyRefreshRotation } from "@/services/tldw/single-user-credential"
 import type { TldwConfig } from "@/services/tldw/TldwApiClient"
+import type { UserInfo } from "@/services/tldw/TldwAuth"
 import { Link, MemoryRouter, Route, Routes } from "react-router-dom"
 import OptionNotes from "@/routes/option-notes"
 import { getFlashcardSourceMeta } from "@/components/Flashcards/utils/source-reference"
@@ -35,6 +36,7 @@ const {
   canonicalBoundary: {
     storage: {} as Record<string, unknown>,
     getConfig: vi.fn(),
+    getCurrentUser: vi.fn<() => Promise<UserInfo>>(),
     userId: 7
   }
 }))
@@ -158,12 +160,7 @@ vi.mock("@plasmohq/storage/hook", () => ({
   ]
 }))
 vi.mock("@/services/tldw/TldwAuth", () => ({
-  tldwAuth: {
-    getCurrentUser: vi.fn(async () => ({
-      id: canonicalBoundary.userId,
-      is_active: true
-    }))
-  }
+  tldwAuth: { getCurrentUser: canonicalBoundary.getCurrentUser }
 }))
 
 const renderPage = () => {
@@ -344,10 +341,9 @@ describe("Notes pending saves through actual canonical storage hydration", () =>
     // NS-01); start every test without the previous test's drafts.
     localStorage.clear()
     canonicalBoundary.userId = 7
-    vi.mocked(tldwAuth.getCurrentUser).mockReset().mockImplementation(async () => ({
-      id: canonicalBoundary.userId,
-      is_active: true
-    } as Awaited<ReturnType<typeof tldwAuth.getCurrentUser>>))
+    canonicalBoundary.getCurrentUser.mockReset().mockImplementation(async () => ({
+      id: canonicalBoundary.userId, username: "notes-user", is_active: true
+    }))
     canonicalBoundary.storage = {
       serverUrl: "https://notes.test",
       authMode: "multi-user",
@@ -363,39 +359,44 @@ describe("Notes pending saves through actual canonical storage hydration", () =>
     seedBaseNotesMock()
   })
 
-  it("keeps a draft editable but Save unavailable until its initial owner is verified", async () => {
-    const owner = deferred<Awaited<ReturnType<typeof tldwAuth.getCurrentUser>>>()
-    vi.spyOn(tldwAuth, "getCurrentUser").mockImplementation(() => owner.promise)
+  it("enables Save for a new draft after its owner is verified", async () => {
+    const principal = deferred<UserInfo>()
+    canonicalBoundary.getCurrentUser.mockReturnValue(principal.promise)
     renderPage()
-    await act(async () => {})
-    const content = screen.getByPlaceholderText("Write your note here... (Markdown supported)")
-    fireEvent.change(content, { target: { value: "Draft awaiting its verified owner" } })
+    await waitFor(() => expect(canonicalBoundary.getCurrentUser).toHaveBeenCalled())
+    await act(async () => { fireEvent.click(screen.getByTestId("notes-new-note-button")) })
+    const title = screen.getByPlaceholderText("Title")
+    const content = screen.getByRole("textbox", { name: "Note content" })
+    fireEvent.change(title, { target: { value: "Study draft" } })
+    fireEvent.change(content, { target: { value: "Notes typed while the account loads." } })
 
+    const save = screen.getByTestId("notes-save-button")
+    const saveAndNew = screen.getByTestId("notes-save-and-new-button")
     expect(content).not.toHaveAttribute("readonly")
-    expect(screen.getByTestId("notes-save-button")).toBeDisabled()
-    expect(screen.getByTestId("notes-save-and-new-button")).toBeDisabled()
+    expect(save).toBeDisabled()
+    expect(saveAndNew).toBeDisabled()
+    expect(save).toHaveAccessibleDescription("Saving is unavailable until your account is verified")
+    expect(saveAndNew).toHaveAccessibleDescription("Saving is unavailable until your account is verified")
+    await act(async () => { fireEvent.keyDown(content, { key: "s", ctrlKey: true }) })
     expect(createCalls()).toHaveLength(0)
-    expect(screen.getByTestId("notes-save-button")).toHaveAccessibleDescription("Saving is unavailable until your account is verified")
-    expect(screen.getByTestId("notes-save-and-new-button")).toHaveAccessibleDescription("Saving is unavailable until your account is verified")
+    expect(mockMessageError).not.toHaveBeenCalled()
 
-    await act(async () => {
-      owner.resolve({ id: 7, is_active: true } as Awaited<ReturnType<typeof tldwAuth.getCurrentUser>>)
-      await owner.promise
-    })
-    await waitFor(() => expect(screen.getByTestId("notes-save-button")).toBeEnabled())
-    expect(content).toHaveValue("Draft awaiting its verified owner")
-    fireEvent.click(screen.getByTestId("notes-save-button"))
-    await waitFor(() => expect(createCalls()).toHaveLength(1))
-    expect(createCalls()[0][0]).toMatchObject({
-      body: expect.objectContaining({ content: "Draft awaiting its verified owner" }),
-      headers: expect.objectContaining({ "X-TLDW-Expected-User-ID": "7" })
+    await act(async () => principal.resolve({ id: 7, username: "notes-user", is_active: true }))
+    expect(save).toBeEnabled()
+    expect(content).toHaveValue("Notes typed while the account loads.")
+    fireEvent.click(save)
+    await waitFor(() => {
+      expect(createCalls()).toEqual([[expect.objectContaining({
+        body: expect.objectContaining({ title: "Study draft", content: "Notes typed while the account loads." }),
+        headers: expect.objectContaining({ "X-TLDW-Expected-User-ID": "7" })
+      })]])
     })
   })
 
   it.each(["unavailable", "inactive"])("keeps Save unavailable when the initial owner is %s", async (state) => {
-    const lookup = vi.spyOn(tldwAuth, "getCurrentUser")
+    const lookup = canonicalBoundary.getCurrentUser
     if (state === "unavailable") lookup.mockRejectedValue(new Error("Owner lookup unavailable"))
-    else lookup.mockResolvedValue({ id: 7, is_active: false } as Awaited<ReturnType<typeof tldwAuth.getCurrentUser>>)
+    else lookup.mockResolvedValue({ id: 7, username: "notes-user", is_active: false })
     renderPage()
     await act(async () => {})
     const content = screen.getByPlaceholderText("Write your note here... (Markdown supported)")

@@ -11,6 +11,9 @@ outputs:
   tldw_frontend_changed:
     description: Whether the primary web frontend paths changed.
     value: ${{ steps.classify.outputs.tldw_frontend_changed }}
+  outbound_browser_changed:
+    description: Whether browser outbound privacy check inputs changed.
+    value: ${{ steps.classify.outputs.outbound_browser_changed }}
   family_guardrails_changed:
     description: Whether family guardrails browser-gate paths changed.
     value: ${{ steps.classify.outputs.family_guardrails_changed }}

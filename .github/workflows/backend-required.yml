@@ -720,10 +720,35 @@ jobs:
               sys.exit(1)
           PY
 
+  outbound-backend:
+    name: Backend outbound privacy
+    runs-on: ubuntu-latest
+    needs: [changes, await_license]
+    if: >-
+      always() && !cancelled() &&
+      (
+        github.event_name == 'workflow_dispatch' ||
+        (github.event_name == 'pull_request' && needs.await_license.outputs.license_passed == 'true')
+      ) &&
+      (
+        needs.changes.result == 'success' &&
+        needs.changes.outputs.backend_changed == 'true'
+      )
+    timeout-minutes: 25
+    steps:
+      - name: Checkout
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd
+        with:
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
+          persist-credentials: false
+      - uses: ./.github/actions/outbound-privacy
+        with:
+          profile: backend
+
   backend-required:
     name: backend-required
     runs-on: ubuntu-latest
-    needs: [changes, await_license, non-utc-tests, chacha-owner-isolation, rag-pipeline, chat-executors]
+    needs: [changes, await_license, non-utc-tests, chacha-owner-isolation, rag-pipeline, chat-executors, outbound-backend]
     # Report failures for licensing or change detection instead of skipping the required check.
     if: >-
       always() && !cancelled() &&
@@ -773,6 +798,20 @@ jobs:
             true:success|false:skipped) ;;
             *)
               echo "::error::Non-UTC timestamp tests ended as '$TIMEZONE_RESULT' for backend_changed='$BACKEND_CHANGED'."
+              exit 1
+              ;;
+          esac
+
+      - name: Require outbound privacy to have passed
+        shell: bash
+        env:
+          OUTBOUND_DUE: ${{ needs.changes.outputs.backend_changed }}
+          OUTBOUND_RESULT: ${{ needs.outbound-backend.result }}
+        run: |
+          case "$OUTBOUND_DUE:$OUTBOUND_RESULT" in
+            true:success|false:skipped) ;;
+            *)
+              echo "::error::Backend outbound privacy ended as '$OUTBOUND_RESULT' with backend_changed='$OUTBOUND_DUE'."
               exit 1
               ;;
           esac

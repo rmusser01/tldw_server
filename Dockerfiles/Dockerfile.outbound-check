@@ -1,0 +1,65 @@
+# Test-only runtime images. The build context is projected from tracked source.
+FROM python:3.12-bookworm AS backend
+
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    ffmpeg libmagic1 portaudio19-dev \
+    && rm -rf /var/lib/apt/lists/*
+
+WORKDIR /opt/outbound-project
+COPY pyproject.toml README.md LICENSE ./
+COPY LICENSES LICENSES
+
+# CPU wheels keep this test image independent of the runner's accelerator.
+RUN --mount=type=cache,target=/root/.cache/uv \
+    python -m pip install --no-cache-dir uv \
+    && uv pip install --system --no-deps --index-url https://download.pytorch.org/whl/cpu 'torch>=2.11.0' \
+    && uv pip install --system -r pyproject.toml --extra dev 'huggingface-hub>=1,<2'
+
+COPY --chown=10001:10001 tldw_Server_API tldw_Server_API
+COPY --chown=10001:10001 apps/mcp-unified/src apps/mcp-unified/src
+COPY --chown=10001:10001 apps/extension/wxt.config.ts apps/extension/wxt.config.ts
+COPY --chown=10001:10001 apps/extension/entrypoints/background.ts apps/extension/entrypoints/background.ts
+COPY --chown=10001:10001 apps/packages/ui/src/components/Option/ResearchWorkspace/SourcesPane/AddSourceModal.tsx apps/packages/ui/src/components/Option/ResearchWorkspace/SourcesPane/AddSourceModal.tsx
+COPY --chown=10001:10001 packages/tldw_profile_core packages/tldw_profile_core
+COPY --chown=10001:10001 Helper_Scripts Helper_Scripts
+COPY --chown=10001:10001 Docs/Published Docs/Published
+RUN --mount=type=cache,target=/root/.cache/uv uv pip install --system --no-deps -e .
+
+RUN useradd -m -u 10001 -U outbound \
+    && install -d -o outbound -g outbound /outbound-report \
+    && chown outbound:outbound /opt/outbound-project
+ENV HOME=/home/outbound \
+    PYTHONDONTWRITEBYTECODE=1 \
+    PYTHONUNBUFFERED=1
+USER 10001:10001
+
+
+FROM oven/bun:1.3.2-debian AS bun-toolchain
+FROM node:20-bookworm-slim AS node-toolchain
+
+FROM backend AS browser
+
+USER root
+RUN apt-get update && apt-get install -y --no-install-recommends strace \
+    && rm -rf /var/lib/apt/lists/*
+COPY --from=bun-toolchain /usr/local/bin/bun /usr/local/bin/bun
+COPY --from=node-toolchain /usr/local/bin/node /usr/local/bin/node
+RUN ln -s bun /usr/local/bin/bunx
+
+COPY --chown=10001:10001 apps apps
+ENV PLAYWRIGHT_BROWSERS_PATH=/opt/outbound-chromium \
+    NEXT_TELEMETRY_DISABLED=1 \
+    SKIP_WXT_PREPARE=1
+RUN cd apps && bun install --frozen-lockfile
+RUN cd apps/tldw-frontend \
+    && bunx --no-install playwright install --with-deps chromium \
+    && chmod -R a+rX "$PLAYWRIGHT_BROWSERS_PATH"
+
+USER 10001:10001
+RUN cd apps/extension && bun run build:chrome:prod
+RUN cd apps/tldw-frontend \
+    && NEXT_PUBLIC_TLDW_DEPLOYMENT_MODE=quickstart NEXT_PUBLIC_API_URL='' \
+       TLDW_INTERNAL_API_ORIGIN=http://127.0.0.1:18081 bun run build:prod \
+    && mkdir -p .next/standalone/apps/tldw-frontend/public .next/standalone/apps/tldw-frontend/.next/static \
+    && cp -R public/. .next/standalone/apps/tldw-frontend/public/ \
+    && cp -R .next/static/. .next/standalone/apps/tldw-frontend/.next/static/

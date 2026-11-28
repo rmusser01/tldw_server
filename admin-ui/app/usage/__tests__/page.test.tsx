@@ -1,7 +1,7 @@
 /* @vitest-environment jsdom */
 import type { ReactNode } from 'react';
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
-import { render, screen, waitFor, cleanup } from '@testing-library/react';
+import { render, screen, waitFor, cleanup, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import UsagePage from '../page';
 import {
@@ -493,7 +493,8 @@ describe('UsagePage router analytics status shell', () => {
 
     await screen.findByRole('heading', { name: 'Usage Stats' });
     const tokenSelect = screen.getByLabelText('Token');
-    await user.selectOptions(tokenSelect, '12');
+    const tokenOption = await within(tokenSelect).findByRole('option', { name: 'Ops' });
+    await user.selectOptions(tokenSelect, tokenOption);
 
     await waitFor(() => {
       expect(routerClientMock.getRouterAnalyticsStatus).toHaveBeenLastCalledWith(
@@ -542,19 +543,16 @@ describe('UsagePage router analytics status shell', () => {
 
   it('exposes PP and TG headers with accessible names and hides the decorative tab separator', async () => {
     const user = userEvent.setup();
-    const { container } = render(<UsagePage />);
+    render(<UsagePage />);
 
     await screen.findByRole('heading', { name: 'Usage Stats' });
-    await user.click(screen.getByRole('tab', { name: /Providers/i }));
+    const providersTab = screen.getByRole('tab', { name: 'Providers' });
+    await user.click(providersTab);
 
     expect(await screen.findByRole('columnheader', { name: 'Prompt Tokens' })).toBeInTheDocument();
     expect(screen.getByRole('columnheader', { name: 'Total Generated Tokens' })).toBeInTheDocument();
 
-    const separator = Array.from(container.querySelectorAll('span')).find(
-      (element) => element.textContent === '|'
-    );
-    expect(separator).not.toBeNull();
-    expect(separator?.getAttribute('aria-hidden')).toBe('true');
+    expect(providersTab.previousElementSibling?.getAttribute('aria-hidden')).toBe('true');
   });
 
   it('renders access tab data from router analytics access endpoint', async () => {

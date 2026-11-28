@@ -662,7 +662,8 @@ def test_llm_provider_readiness_marks_external_custom_openai_without_key_unavail
             }
         }
     )
-    _api_openai_com_admitted_offline(monkeypatch)
+    resolver = Mock(return_value=("93.184.216.34",))
+    monkeypatch.setattr("tldw_Server_API.app.core.Utils.egress.resolve_host_ips", resolver)
 
     with _client_for_config(monkeypatch, parser) as client:
         response = client.get("/api/v1/llm/providers")
@@ -674,6 +675,7 @@ def test_llm_provider_readiness_marks_external_custom_openai_without_key_unavail
     assert provider["readiness_reason_code"] == "missing_credentials"
     assert "requires credentials" in provider["readiness_message"]
     assert provider["chat_provider"] == "custom-openai-api"
+    resolver.assert_not_called()
 
 
 @pytest.mark.unit

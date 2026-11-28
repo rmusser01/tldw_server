@@ -416,7 +416,13 @@ def test_frontend_required_uses_isolated_vitest_shards() -> None:
     assert Path("apps/patches/jsdom@28.1.0.patch").is_file()
 
     final_job = jobs["frontend-required"]
-    assert final_job["needs"] == ["changes", "admission", "frontend-unit-tests", "await_license"]
+    assert final_job["needs"] == [
+        "changes",
+        "admission",
+        "frontend-unit-tests",
+        "outbound-browser",
+        "await_license",
+    ]
     assert final_job["timeout-minutes"] == 120
     final_steps = final_job["steps"]
     assert not any(step.get("name") == "Run frontend unit tests" for step in final_steps)

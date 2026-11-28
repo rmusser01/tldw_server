@@ -648,3 +648,100 @@ def test_omnivoice_install_checks_download_policy_before_running_installer(monke
         install_manager._install_omnivoice()
 
     assert calls == [("ensure_downloads_allowed", "OmniVoice sidecar runtime")]
+
+
+@pytest.fixture
+def installer_inventory():
+    from Helper_Scripts.ci.outbound_inventory import Inventory
+
+    root = Path(__file__).resolve().parents[3]
+    return Inventory.load(root / "Helper_Scripts/ci/outbound_inventory.json")
+
+
+def _capture_package_install_commands(monkeypatch, *, fallback_to_uv=False):
+    """Record install argv and treat the pip version command as a local fixture."""
+    commands = []
+
+    def probe(command, **_kwargs):
+        assert command == [sys.executable, "-m", "pip", "--version"]
+        return types.SimpleNamespace(returncode=0)
+
+    def record(command):
+        commands.append(command)
+        if fallback_to_uv and command[0] == sys.executable:
+            raise SetupSubprocessError("fixture pip install failed")
+
+    monkeypatch.setattr(install_manager.subprocess, "run", probe)
+    monkeypatch.setattr(install_manager, "_run_subprocess", record)
+    monkeypatch.setattr(install_manager.shutil, "which", lambda name: "/fixture/uv" if name == "uv" else None)
+    monkeypatch.setattr(importlib.util, "find_spec", lambda _name: None)
+    monkeypatch.delenv("TLDW_SETUP_SKIP_PIP", raising=False)
+    monkeypatch.delenv("TLDW_SETUP_PIP_INDEX_URL", raising=False)
+    return commands
+
+
+@pytest.mark.parametrize(
+    ("cuda", "fallback_to_uv", "onnx_asset"),
+    [(False, False, "onnxruntime"), (True, True, "onnxruntime-gpu")],
+    ids=["cpu-python-pip", "cuda-uv-fallback"],
+)
+def test_kokoro_package_install_argv_matches_reviewed_inventory(
+    monkeypatch, installer_inventory, cuda, fallback_to_uv, onnx_asset,
+):
+    commands = _capture_package_install_commands(monkeypatch, fallback_to_uv=fallback_to_uv)
+    monkeypatch.setenv("TLDW_SETUP_PIP_INDEX_URL", "https://fixture-index.invalid/simple")
+    monkeypatch.setattr(install_manager, "_cuda_available", lambda: cuda)
+    requirements = install_manager.TTS_DEPENDENCIES["kokoro"]
+    install_manager._install_requirement_list(requirements)
+
+    assets = installer_inventory.capabilities["setup.python-packages"].assets
+    expected = []
+    for asset_id in ("kokoro", "kokoro-onnx", onnx_asset, "phonemizer", "espeak-phonemizer", "huggingface-hub"):
+        argv = [assets[asset_id].identity.resource, "--index-url", "https://fixture-index.invalid/simple"]
+        expected.append([sys.executable, "-m", "pip", "install", "--upgrade", "--no-input", *argv])
+        if fallback_to_uv:
+            expected.append(["/fixture/uv", "pip", "install", "--upgrade", *argv])
+    assert commands == expected
+
+
+@pytest.mark.parametrize(("backend", "asset_id"), [("higgs", "higgs-audio"), ("vibevoice", "vibevoice")])
+def test_installer_vcs_argv_matches_reviewed_source_when_enabled(monkeypatch, installer_inventory, backend, asset_id):
+    commands = _capture_package_install_commands(monkeypatch)
+    monkeypatch.delenv("TLDW_SETUP_ALLOW_UNPINNED_VCS", raising=False)
+    requirement, = (item for item in install_manager.TTS_DEPENDENCIES[backend] if item.package.startswith("git+"))
+
+    with pytest.raises(install_manager.PipInstallBlockedError, match="Unpinned VCS"):
+        install_manager._ensure_requirement(requirement)
+    assert commands == []
+
+    monkeypatch.setenv("TLDW_SETUP_ALLOW_UNPINNED_VCS", "1")
+    install_manager._ensure_requirement(requirement)
+    asset = installer_inventory.capabilities["setup.python-packages"].assets[asset_id]
+    assert commands == [[sys.executable, "-m", "pip", "install", "--upgrade", "--no-input", asset.identity.resource]]
+
+
+def test_omnivoice_sidecar_argv_matches_reviewed_inventory(monkeypatch, tmp_path, installer_inventory):
+    from Helper_Scripts.TTS_Installers import install_tts_omnivoice_sidecar as installer
+
+    checkout = tmp_path / "sources" / "checkout"
+    interpreter = tmp_path / "venv/bin/python"
+    commands = []
+
+    def record(command, *, cwd=None):
+        commands.append((command, cwd))
+
+    monkeypatch.setattr(installer, "_run_checked_command", record)
+    monkeypatch.setattr(installer.shutil, "which", lambda name: "/fixture/git" if name == "git" else None)
+    installer.clone_repository(installer.DEFAULT_REPO_URL, checkout)
+    assert checkout.parent.is_dir()
+    checkout.mkdir()  # Represents the checkout created by the mocked git command.
+    installer.install_sidecar_runtime(interpreter_path=interpreter, repo_root=tmp_path, source_checkout=checkout)
+
+    assets = installer_inventory.capabilities["setup.omnivoice"].assets
+    pip = [str(interpreter), "-m", "pip", "install"]
+    assert commands == [
+        (["/fixture/git", "clone", assets["omnivoice.repo"].identity.resource, str(checkout)], None),
+        ([*pip, "--upgrade", assets["pip"].identity.resource], None),
+        ([*pip, *(assets[key].identity.resource for key in ("fastapi", "uvicorn", "httpx", "pydantic", "loguru"))], None),
+        ([*pip, "-e", str(checkout)], tmp_path),
+    ]

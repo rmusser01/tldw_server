@@ -1296,17 +1296,6 @@ const SearchTab: React.FC<{
     []
   )
 
-  const getFaviconUrl = React.useCallback((rawUrl: string): string | null => {
-    if (!rawUrl) return null
-    try {
-      const parsed = new URL(rawUrl)
-      if (!parsed.hostname) return null
-      return `https://www.google.com/s2/favicons?sz=32&domain=${encodeURIComponent(parsed.hostname)}`
-    } catch {
-      return null
-    }
-  }, [])
-
   const handleSearch = async () => {
     if (!query.trim() || searchBlocked) return
 
@@ -1498,7 +1487,6 @@ const SearchTab: React.FC<{
               const record = item as Record<string, unknown>
               const resultUrl = getResultUrl(record)
               const resultSnippet = getResultSnippet(record)
-              const faviconUrl = getFaviconUrl(resultUrl)
               const resultTitle = item.title || resultUrl || `Result ${idx + 1}`
               const importState = importStates[idx]
               const isImported = importState?.status === "imported"
@@ -1531,14 +1519,11 @@ const SearchTab: React.FC<{
                     />
                     <div className="min-w-0 flex-1">
                       <div className="flex items-start gap-2">
-                        {faviconUrl ? (
-                          <img
-                            src={faviconUrl}
-                            alt=""
-                            data-testid={`search-result-favicon-${idx}`}
-                            className="mt-0.5 h-4 w-4 shrink-0 rounded"
-                          />
-                        ) : null}
+                        <Link
+                          aria-hidden="true"
+                          data-testid="search-result-icon"
+                          className="mt-0.5 h-4 w-4 shrink-0 text-text-muted"
+                        />
                         <div className="min-w-0 flex-1">
                           <p className="truncate text-sm font-medium text-text">
                             {resultTitle}

@@ -1,7 +1,7 @@
 import pytest
+from Helper_Scripts.ci.path_classifier import classify_paths
 
 from tldw_Server_API.tests.lint._moved_endpoint_code import REPO_ROOT, moved_files
-from Helper_Scripts.ci.path_classifier import classify_paths
 
 
 def test_ui_only_change_disables_backend_and_coverage() -> None:
@@ -234,6 +234,66 @@ def test_unrelated_backend_change_leaves_the_rag_job_off() -> None:
 
 def test_rag_split_tool_change_runs_backend_required() -> None:
     assert classify_paths(["Helper_Scripts/rag_split/rag_split.py"])["backend_changed"] is True
+
+
+@pytest.mark.parametrize(
+    ("path", "backend", "browser"),
+    (
+        ("Helper_Scripts/ci/outbound_inventory.json", True, True),
+        ("Helper_Scripts/ci/outbound_check.py", True, True),
+        ("Dockerfiles/Dockerfile.outbound-check", True, True),
+        ("tldw_Server_API/tests/helpers/offline_network.py", True, True),
+        ("tldw_Server_API/scripts/run_server_guarded_mcp.py", True, True),
+        ("apps/mcp-unified/src/mcp_unified/federation/http_transport.py", True, True),
+        ("packages/tldw_profile_core/src/tldw_profile_core/__init__.py", True, True),
+        ("tldw_Server_API/app/main.py", True, True),
+        ("tldw_Server_API/app/__init__.py", True, True),
+        ("tldw_Server_API/app/services/startup_pre_core.py", True, True),
+        ("tldw_Server_API/app/api/v1/endpoints/setup.py", True, True),
+        ("tldw_Server_API/app/api/v1/endpoints/control_plane.py", True, True),
+        ("tldw_Server_API/app/api/v1/endpoints/llm_providers.py", True, True),
+        ("tldw_Server_API/app/api/v1/endpoints/auth.py", True, True),
+        ("tldw_Server_API/app/core/http_client.py", True, True),
+        ("tldw_Server_API/app/core/LLM_Calls/tokenizer_resolver.py", True, True),
+        ("tldw_Server_API/app/core/LLM_Calls/provider_readiness.py", True, True),
+        ("tldw_Server_API/app/services/readiness_service.py", True, True),
+        ("tldw_Server_API/app/core/Security/middleware.py", True, True),
+        ("tldw_Server_API/app/core/Security/setup_csp.py", True, True),
+        ("tldw_Server_API/app/Setup_UI/setup.html", True, True),
+        ("tldw_Server_API/app/static/setup/js/setup.js", True, True),
+        ("tldw_Server_API/app/static/setup/css/setup.css", True, True),
+        ("tldw_Server_API/Config_Files/config.txt", True, True),
+        ("Helper_Scripts/TTS_Installers/install_tts_omnivoice_sidecar.py", True, False),
+        ("apps/extension/wxt.config.ts", True, True),
+        ("apps/extension/entrypoints/background.ts", True, True),
+        (
+            "apps/packages/ui/src/components/Option/ResearchWorkspace/SourcesPane/AddSourceModal.tsx",
+            True,
+            True,
+        ),
+        ("apps/extension/playwright.outbound.config.ts", False, True),
+        ("apps/patches/jsdom@28.1.0.patch", False, True),
+        (".github/actions/outbound-privacy/action.yml", True, True),
+        (".github/actions/detect-required-gate-changes/action.yml", True, True),
+        ("Helper_Scripts/ci/path_classifier.py", True, True),
+        ("tldw_Server_API/tests/AuthNZ/test_auth.py", True, False),
+        ("Docs/Development/Local-CI.md", False, False),
+    ),
+)
+def test_outbound_check_paths_select_consuming_gate(path: str, backend: bool, browser: bool) -> None:
+    flags = classify_paths([path])
+    assert flags["backend_changed"] is backend
+    assert flags.get("outbound_browser_changed") is browser
+
+
+@pytest.mark.parametrize("path", [
+    "tldw_Server_API/app/api/v1/endpoints/auth.py",
+    "Helper_Scripts/ci/outbound_inventory.json",
+])
+def test_outbound_browser_inputs_do_not_trigger_frontend_shards(path: str) -> None:
+    flags = classify_paths([path])
+    assert flags.get("outbound_browser_changed") is True
+    assert flags["tldw_frontend_changed"] is False
 
 
 @pytest.mark.parametrize(
