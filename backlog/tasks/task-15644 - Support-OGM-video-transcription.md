@@ -33,6 +33,7 @@ A real MPEG-4/Vorbis OGM sample passed staging, FFmpeg extraction (48,000 frames
 Verification passed for 85 backend tests (one expected failure; 11 HTML cases omitted from the rerun) and 116 frontend tests. ESLint passed on touched UI files, Ruff showed no new diagnostics, and Bandit found no issues in touched production code.
 Renumbered for the dev PR because open PR #3615 already holds TASK-15642. The dev port preserves the shared standard video upload size cap.
 Verified the dev port with 16 focused backend tests, 170 shared UI tests, and a real OGM-to-PCM smoke test with stubbed speech recognition. Bandit and Python syntax checks passed on the touched production scope.
+PR #3624 backend CI found save_uploaded_files at 480 lines against a 479-line ceiling. Moving the video extension set to module scope reduced the function to 465 lines and preserved upload classification. The size ratchet and OGM upload regressions passed locally, as did Ruff, Bandit, and Python syntax checks.
 <!-- SECTION:IMPLEMENTATION_NOTES:END -->
 
 ## Final Summary
