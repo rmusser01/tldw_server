@@ -713,3 +713,14 @@ async def test_receipt_lease_uses_unique_catalog_provider_for_unqualified_model(
         == "ollama"
     )
     assert sharing._shared_chat_lease_seconds(body) == 960
+
+
+async def test_plain_http_exception_with_string_detail_is_a_clean_4xx() -> None:
+    """TASK-13950.27: a string ``detail`` (a gateway refusal's shape) must not crash the failure path into a 500."""
+    with pytest.raises(HTTPException) as exc_info:
+        await _run(failure=HTTPException(400, "text"))
+
+    assert exc_info.value.status_code == 400
+    assert exc_info.value.detail == "text"
+    _events, store, _limiter, _audit = exc_info.value.test_state
+    assert store.retry_codes == ["shared_workspace_unavailable"]

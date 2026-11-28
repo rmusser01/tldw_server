@@ -10,6 +10,7 @@ from dataclasses import dataclass, field
 from typing import Any
 
 from tldw_Server_API.app.core.DB_Management.chacha.operation_scope import chacha_operation
+from tldw_Server_API.app.core.exceptions import LLMPolicyRefusal
 
 from .acp_adapter import resolve_acp_branch_capability, select_branch_strategy
 from .branch_runner import BranchPromptRunner
@@ -429,6 +430,9 @@ class ChatMacroExecutor:
             except TimeoutError:
                 last_error_code = "timeout"
                 last_error = f"Branch timed out after {macro.execution.timeout_seconds} seconds."
+            except LLMPolicyRefusal as exc:  # moderation is deterministic: a failed branch, never retried
+                last_error_code, last_error = "llm_policy_refused", str(exc.detail)
+                break
             except Exception as exc:  # noqa: BLE001 - branch failures are recorded per branch
                 last_error_code = "branch_failed"
                 last_error = redact_sensitive_text(str(exc) or type(exc).__name__)

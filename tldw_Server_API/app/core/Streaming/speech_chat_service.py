@@ -5,7 +5,7 @@ Non-streaming Speech-to-Speech chat orchestration (STT → LLM → TTS).
 
 This module wires together:
   - STT: Audio_Transcription_Lib.transcribe_audio
-  - LLM: adapter registry (async) with legacy fallback
+  - LLM: the gateway (moderation hooks, model validation), with the voice.speech_chat surface
   - TTS: TTSServiceV2.generate_speech
   - Session storage: ChaChaNotes conversations/messages
 
@@ -36,8 +36,6 @@ from tldw_Server_API.app.core.Audio.tts_service import (
 )
 from tldw_Server_API.app.core.AuthNZ.User_DB_Handling import User
 from tldw_Server_API.app.core.Chat.bounded_daemon import (
-    SYNC_ADAPTER_CALL_POOL,
-    await_bounded_sync_call,
     await_owned_worker,
 )
 from tldw_Server_API.app.core.Chat.chat_helpers import (
@@ -54,15 +52,13 @@ from tldw_Server_API.app.core.Chat.streaming_utils import (
 )
 from tldw_Server_API.app.core.config_llm_providers import get_default_provider
 from tldw_Server_API.app.core.DB_Management.ChaChaNotes_DB import CharactersRAGDB
+from tldw_Server_API.app.core.exceptions import LLMPolicyRefusal
 from tldw_Server_API.app.core.Ingestion_Media_Processing.Audio.Audio_Transcription_Lib import (
     is_transcription_error_message,
     transcribe_audio,
 )
-from tldw_Server_API.app.core.LLM_Calls.adapter_registry import get_registry
 from tldw_Server_API.app.core.LLM_Calls.adapter_utils import (
-    normalize_provider,
     provider_auth_is_resolved,
-    resolve_provider_model,
     split_system_message,
 )
 from tldw_Server_API.app.core.LLM_Calls.provider_metadata import provider_requires_api_key
@@ -128,6 +124,7 @@ _LLM_EXTRA_PARAM_RESERVED_KEYS = {
     "functions",
     "http_client_factory",
     "http_fetcher",
+    "llm_surface",
     "max_tokens",
     "maxp",
     "messages",
@@ -311,28 +308,6 @@ def _provider_llm_extra_params(extra_params: dict[str, Any] | None) -> dict[str,
             continue
         safe_params[key] = value
     return safe_params
-
-
-async def _run_bounded_speech_sync_call(
-    call: Callable[[], Any],
-    *,
-    on_abandoned: Callable[[], Any],
-    cleanup_claimed: threading.Event,
-    on_abandoned_success: Callable[[], Any] | None = None,
-) -> Any:
-    """Run one sync speech adapter call with bounded late-work ownership."""
-    return await await_bounded_owned_operation(
-        await_bounded_sync_call(
-            call,
-            pool=SYNC_ADAPTER_CALL_POOL,
-            exhaustion_message="Provider adapter capacity is exhausted",
-        ),
-        timeout_seconds=SPEECH_CHAT_LLM_TIMEOUT_SECONDS,
-        timeout_message="speech-chat-provider-call timed out",
-        on_abandoned=on_abandoned,
-        cleanup_claimed=cleanup_claimed,
-        on_abandoned_success=on_abandoned_success,
-    )
 
 
 def _stt_extra_params(stt_extra_params: dict[str, Any] | None) -> dict[str, Any]:
@@ -526,7 +501,7 @@ async def run_speech_chat_turn(
       1. Decode and normalize input audio to mono.
       2. Run STT to obtain a user transcript.
       3. Resolve character + conversation and load recent history.
-      4. Call LLM via adapter registry (async) with legacy fallback.
+      4. Call the LLM through the gateway (surface voice.speech_chat).
       5. Persist user/assistant messages into ChaChaNotes.
       6. Run TTS to synthesize assistant reply and base64-encode it.
     """
@@ -694,7 +669,6 @@ async def run_speech_chat_turn(
                 model=llm_model,
             )
         )
-        adapter = get_registry().get_adapter(normalize_provider(llm_provider))
         system_message = (character_card or {}).get("system_prompt")
         request_messages = messages_payload
         if system_message is None:
@@ -744,106 +718,43 @@ async def run_speech_chat_turn(
             return _classify_provider_response(await candidate)
 
         async def _dispatch_validate_and_mark() -> tuple[Any, str]:
-            if adapter is not None:
-                resolved_model = llm_model or resolve_provider_model(llm_provider, app_config)
-                if not resolved_model:
-                    raise HTTPException(
-                        status_code=status.HTTP_400_BAD_REQUEST,
-                        detail="llm_config.model is required for speech chat v1",
-                    )
-                request_payload = {
-                    "messages": request_messages,
-                    "system_message": system_message,
-                    "model": resolved_model,
-                    "api_key": api_key,
-                    "temperature": request_data.llm_config.temperature,
-                    "max_tokens": request_data.llm_config.max_tokens,
-                    "response_format": {"type": "text"},
-                    "user": str(getattr(current_user, "id", client_id)),
-                    "app_config": app_config,
-                    "credentials_resolved": True,
-                    PROVIDER_CALL_CREDENTIALS_CONTEXT_KEY: provider_credentials,
-                }
-                request_payload.update(llm_extra_params)
-                try:
-                    if getattr(adapter, "async_chat_is_native", False) is True:
-                        try:
-                            response = await await_bounded_owned_operation(
-                                _await_and_classify_provider_response(
-                                    adapter.achat(
-                                        request_payload,
-                                        timeout=SPEECH_CHAT_LLM_TIMEOUT_SECONDS,
-                                    )
-                                ),
-                                timeout_seconds=SPEECH_CHAT_LLM_TIMEOUT_SECONDS,
-                                timeout_message="speech-chat-provider-call timed out",
-                                on_abandoned=_cleanup_abandoned_dispatch,
-                                cleanup_claimed=runtime_cleanup_claimed,
-                                on_abandoned_success=_mark_late_provider_success,
-                            )
-                        except NotImplementedError:
-                            response = await _run_bounded_speech_sync_call(
-                                lambda: _classify_provider_response(
-                                    adapter.chat(
-                                        request_payload,
-                                        timeout=SPEECH_CHAT_LLM_TIMEOUT_SECONDS,
-                                    )
-                                ),
-                                on_abandoned=_cleanup_abandoned_dispatch,
-                                cleanup_claimed=runtime_cleanup_claimed,
-                                on_abandoned_success=_mark_late_provider_success,
-                            )
-                    else:
-                        response = await _run_bounded_speech_sync_call(
-                            lambda: _classify_provider_response(
-                                adapter.chat(
-                                    request_payload,
-                                    timeout=SPEECH_CHAT_LLM_TIMEOUT_SECONDS,
-                                )
-                            ),
-                            on_abandoned=_cleanup_abandoned_dispatch,
-                            cleanup_claimed=runtime_cleanup_claimed,
-                            on_abandoned_success=_mark_late_provider_success,
+            try:
+                response = await await_bounded_owned_operation(
+                    _await_and_classify_provider_response(
+                        chat_api_call_async(
+                            api_endpoint=llm_provider,
+                            messages_payload=request_messages,
+                            api_key=api_key,
+                            temp=request_data.llm_config.temperature,
+                            maxp=None,
+                            model=llm_model,
+                            topk=None,
+                            topp=None,
+                            max_tokens=request_data.llm_config.max_tokens,
+                            response_format={"type": "text"},
+                            streaming=False,
+                            user=str(getattr(current_user, "id", client_id)),
+                            llm_surface="voice.speech_chat",
+                            system_message=system_message,
+                            app_config=app_config,
+                            credentials_resolved=True,
+                            **{
+                                PROVIDER_CALL_CREDENTIALS_CONTEXT_KEY: provider_credentials,
+                            },
+                            timeout=SPEECH_CHAT_LLM_TIMEOUT_SECONDS,
+                            **llm_extra_params,
                         )
-                except HTTPException:
-                    raise RuntimeError("Speech chat provider request failed") from None
-            else:
-                try:
-                    response = await await_bounded_owned_operation(
-                        _await_and_classify_provider_response(
-                            chat_api_call_async(
-                                api_endpoint=llm_provider,
-                                messages_payload=request_messages,
-                                api_key=api_key,
-                                temp=request_data.llm_config.temperature,
-                                maxp=None,
-                                model=llm_model,
-                                topk=None,
-                                topp=None,
-                                max_tokens=request_data.llm_config.max_tokens,
-                                response_format={"type": "text"},
-                                streaming=False,
-                                user_identifier=str(
-                                    getattr(current_user, "id", client_id)
-                                ),
-                                system_message=system_message,
-                                app_config=app_config,
-                                credentials_resolved=True,
-                                **{
-                                    PROVIDER_CALL_CREDENTIALS_CONTEXT_KEY: provider_credentials,
-                                },
-                                timeout=SPEECH_CHAT_LLM_TIMEOUT_SECONDS,
-                                **llm_extra_params,
-                            )
-                        ),
-                        timeout_seconds=SPEECH_CHAT_LLM_TIMEOUT_SECONDS,
-                        timeout_message="speech-chat-provider-call timed out",
-                        on_abandoned=_cleanup_abandoned_dispatch,
-                        cleanup_claimed=runtime_cleanup_claimed,
-                        on_abandoned_success=_mark_late_provider_success,
-                    )
-                except HTTPException:
-                    raise RuntimeError("Speech chat provider request failed") from None
+                    ),
+                    timeout_seconds=SPEECH_CHAT_LLM_TIMEOUT_SECONDS,
+                    timeout_message="speech-chat-provider-call timed out",
+                    on_abandoned=_cleanup_abandoned_dispatch,
+                    cleanup_claimed=runtime_cleanup_claimed,
+                    on_abandoned_success=_mark_late_provider_success,
+                )
+            except LLMPolicyRefusal:
+                raise
+            except HTTPException:
+                raise RuntimeError("Speech chat provider request failed") from None
             response_text = (extract_response_content(response) or "").strip()
             if not response_text:
                 raise HTTPException(

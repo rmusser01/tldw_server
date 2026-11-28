@@ -1848,6 +1848,16 @@ class SharedWorkspaceGenerationFailed(SharedWorkspaceChatServiceError):
         super().__init__("Shared workspace generation is temporarily unavailable.")
 
 
+class SharedWorkspaceGenerationRefused(SharedWorkspaceChatServiceError):
+    """Raised when moderation refused the grounded prompt or answer (the route answers 400)."""
+
+    code = "llm_policy_refused"
+    retryable = False
+
+    def __init__(self) -> None:
+        super().__init__("The shared workspace question was refused by moderation policy.")
+
+
 class _SharedWorkspaceDataUnavailable(SharedWorkspaceChatServiceError):
     """Internal marker for unavailable canonical shared-workspace data."""
 

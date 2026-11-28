@@ -68,7 +68,7 @@ import {
   DEFAULT_PRESETS,
   type PresetMap,
 } from "./QuickIngest/presets"
-import { getEligibleQueueItems, validateQueueItem } from "./QuickIngest/queue-items"
+import { getEligibleQueueItems, restoreQueueFile } from "./QuickIngest/queue-items"
 import { canRetryWizardResult, getSavedMediaIds } from "./QuickIngest/result-actions"
 import type {
   CommonOptions,
@@ -110,6 +110,7 @@ type QuickIngestRequestPayload = {
     playlist?: PlaylistQueueMetadata
     conferenceOverride?: ConferenceItemMetadataOverride
     processAgain?: boolean
+    sourceUrlEdited?: boolean
   }>
   files: Array<{
     id: string
@@ -152,7 +153,6 @@ const RESULT_SUCCESS_STATUS_TOKENS = [
   "ready",
 ]
 
-const RESULT_CANCELLED_STATUS_TOKENS = ["cancelled", "canceled"]
 const FILE_REATTACH_WARNING = "Reattach this file after refresh to process it."
 const PERSISTED_REATTACH_POLL_INTERVAL_MS = 1_500
 const QUICK_INGEST_MODAL_STYLES = {
@@ -207,13 +207,9 @@ const normalizeResultStatus = (status: unknown): "ok" | "error" => {
   return "error"
 }
 
-const isCancelledError = (value: unknown) =>
-  RESULT_CANCELLED_STATUS_TOKENS.some((token) =>
-    String(value || "").trim().toLowerCase().includes(token)
-  )
-
 const normalizeWizardResult = (
-  item: Partial<WizardResultItem> | null | undefined
+  item: Partial<WizardResultItem> | null | undefined,
+  legacyRuntime = false
 ): WizardResultItem | null => {
   if (!item?.id) return null
   const id = String(item.id).trim()
@@ -239,6 +235,8 @@ const normalizeWizardResult = (
       isDbMessageDuplicate(dataRecord) ||
       completedIngestJobIndicatesSkipped(item.data)
     )
+  // The extension worker's legacy cancellation result has only an error message.
+  const legacyCancellation = legacyRuntime && /^cancell?ed(?: by user)?\.?$/i.test(String(error || "").trim())
   return {
     id,
     status: derivedStatus,
@@ -247,9 +245,7 @@ const normalizeWizardResult = (
         ? "skipped"
         : derivedStatus === "ok"
           ? item.outcome || "processed"
-          : isCancelledError(error)
-            ? "cancelled"
-            : item.outcome || "failed",
+          : item.outcome || (legacyCancellation ? "cancelled" : "failed"),
     url: item.url,
     fileName: item.fileName,
     type: String(item.type || "item"),
@@ -308,7 +304,7 @@ const buildTerminalProgress = (
   previous: ItemProgress,
   result: WizardResultItem
 ): ItemProgress => {
-  const cancelled = result.outcome === "cancelled" || isCancelledError(result.error)
+  const cancelled = result.outcome === "cancelled"
   const nextStatus: ItemProgressStatus =
     result.status === "ok" ? "complete" : cancelled ? "cancelled" : "failed"
   return {
@@ -353,8 +349,7 @@ const buildFailureResults = (
   })
 
 const buildQueueFileKey = (item: WizardQueueItem): string | undefined => {
-  if (item.fileStub?.key) return item.fileStub.key
-  if (!item.file) return undefined
+  if (!item.file) return item.fileStub?.key
   const lastModified = Number.isFinite(item.file.lastModified) ? item.file.lastModified : 0
   return `${item.file.name}::${item.file.size}::${lastModified}`
 }
@@ -365,6 +360,7 @@ const buildPersistedQueueItems = (
   items.map((item) => ({
     id: item.id,
     kind: item.kind || (item.url ? "url" : "file"),
+    fileOrigin: item.fileOrigin,
     fileName: item.fileName || item.file?.name,
     name: item.fileName || item.file?.name,
     key: buildQueueFileKey(item),
@@ -381,6 +377,7 @@ const buildPersistedQueueItems = (
     playlist: item.playlist,
     conferenceOverride: item.conferenceOverride,
     processAgain: item.processAgain,
+    sourceUrlEdited: item.sourceUrlEdited,
     fileStub:
       item.file || item.fileStub
         ? {
@@ -450,7 +447,8 @@ const resolveQueueItemForReattachedJob = (
   if (mappedItemId) {
     return items.find((item) => item.id === mappedItemId)
   }
-  return resolveTrackedQueueItems(items, tracking)[index]
+  const originalIndex = tracking?.jobIds?.indexOf(jobId) ?? -1
+  return resolveTrackedQueueItems(items, tracking)[originalIndex >= 0 ? originalIndex : index]
 }
 
 const resolveTrackingBatchIds = (
@@ -510,16 +508,17 @@ const hydrateQueueItems = (
         playlist: item.playlist,
         conferenceOverride: item.conferenceOverride,
         processAgain: item.processAgain,
+        sourceUrlEdited: item.sourceUrlEdited,
       }
     }
 
-    const warnings = Array.from(
-      new Set([...(item.validation.warnings ?? []), FILE_REATTACH_WARNING])
-    )
+    const warnings = (item.validation.warnings ?? []).filter(warning => warning !== FILE_REATTACH_WARNING)
+    if (item.fileOrigin !== "paste") warnings.push(FILE_REATTACH_WARNING)
 
     return {
       id: item.id,
       kind: "file",
+      fileOrigin: item.fileOrigin,
       fileName: item.fileName || item.name,
       detectedType: item.detectedType,
       icon: item.icon,
@@ -533,6 +532,7 @@ const hydrateQueueItems = (
       playlist: item.playlist,
       conferenceOverride: item.conferenceOverride,
       processAgain: item.processAgain,
+      sourceUrlEdited: item.sourceUrlEdited,
       fileStub: item.fileStub || {
         key: item.key,
         lastModified: item.lastModified,
@@ -588,6 +588,10 @@ const buildResultSummaryFromState = (
   )
   const cancelled = state.results.filter((item) => item.outcome === "cancelled")
   const firstSuccess = successes[0]
+  const attemptedIds = new Set([
+    ...state.processingState.perItemProgress.map(item => item.id),
+    ...state.results.map(item => item.id),
+  ])
 
   return {
     ...existingSession.resultSummary,
@@ -610,7 +614,7 @@ const buildResultSummaryFromState = (
       lifecycle === "interrupted"
         ? Date.now()
         : existingSession.resultSummary.completedAt,
-    totalCount: state.results.length || state.queueItems.length,
+    totalCount: attemptedIds.size || state.queueItems.length,
     successCount: successes.length,
     failedCount: failures.length,
     cancelledCount: cancelled.length,
@@ -745,6 +749,8 @@ const mapReattachedJobStatusToProgress = (
   result?: unknown
 ): ItemProgressStatus => {
   switch (status) {
+    case "unknown":
+      return "unknown"
     case "pending":
     case "queued":
       return "queued"
@@ -887,6 +893,7 @@ const buildQuickIngestPayload = (
       playlist: item.playlist,
       conferenceOverride: item.conferenceOverride,
       processAgain: item.processAgain,
+      sourceUrlEdited: item.sourceUrlEdited,
     }))
 
   const files = validItems
@@ -997,6 +1004,8 @@ const WizardModalContent: React.FC<WizardModalContentProps> = ({
   const runStartedAtRef = useRef<number | null>(null)
   const cancelledSessionIdsRef = useRef<Set<string>>(new Set())
   const cancelRequestedRef = useRef(false)
+  const stopRequestRef = useRef<string | null>(null)
+  const [stopRequestInFlight, setStopRequestInFlight] = useState(false)
   const cancelledItemIdsRef = useRef(new Set<string>())
   const cancelledJobIdsRef = useRef(new Set<number>())
   const [jobStatusUnavailable, setJobStatusUnavailable] = useState(false)
@@ -1038,7 +1047,6 @@ const WizardModalContent: React.FC<WizardModalContentProps> = ({
     return result
   }, [queueItems, session.tracking])
   const initialTrackedQueueItemsRef = useRef(trackedQueueItems)
-  const initialCurrentStepRef = useRef(currentStep)
   const itemProgressRef = useRef(processingState.perItemProgress)
   itemProgressRef.current = processingState.perItemProgress
   const initialElapsedRef = useRef(state.processingState.elapsed)
@@ -1124,7 +1132,7 @@ const WizardModalContent: React.FC<WizardModalContentProps> = ({
   useEffect(() => {
     persistedTrackingRef.current = session.tracking
     const sessionId = String(session.tracking?.sessionId || "").trim()
-    if (sessionId) {
+    if (sessionId && !hasStartedRunRef.current && processingState.status === "running") {
       activeSessionIdRef.current = sessionId
     }
     const startedAt = session.tracking?.startedAt
@@ -1135,7 +1143,7 @@ const WizardModalContent: React.FC<WizardModalContentProps> = ({
     ) {
       runStartedAtRef.current = startedAt
     }
-  }, [session.tracking])
+  }, [session.tracking, processingState.status])
 
   useEffect(() => {
     if (!shouldAttemptPersistedReattach) {
@@ -1246,31 +1254,26 @@ const WizardModalContent: React.FC<WizardModalContentProps> = ({
       setJobStatusUnavailable(snapshot.statusUnavailable === true)
 
       const latestTracking = persistedTrackingRef.current || currentTracking
-      const perItemProgress = buildProgressFromReattachedJobs(
+      const reportedProgress = buildProgressFromReattachedJobs(
         reattachQueueItems,
         snapshot.jobs,
         latestTracking,
         cancelledItemIdsRef.current
       )
+      const progress = new Map(itemProgressRef.current.map(item => [item.id, item]))
+      for (const [index, jobId] of normalizeTrackedJobIds(latestTracking).entries()) {
+        const item = resolveQueueItemForReattachedJob(reattachQueueItems, latestTracking, undefined, jobId, index)
+        if (!item || progress.has(item.id)) continue
+        const unknown = buildTrackedItemProgress(item.id, { status: "unknown" })
+        const previous = resultsRef.current.find(result => result.id === item.id)
+        progress.set(item.id, previous ? buildTerminalProgress(unknown, previous) : unknown)
+      }
+      for (const item of reportedProgress) progress.set(item.id, item)
+      const perItemProgress = [...progress.values()]
       const elapsed =
         typeof startedAt === "number" && Number.isFinite(startedAt)
           ? Math.max(0, Math.floor((Date.now() - startedAt) / 1000))
           : initialElapsedRef.current
-
-      if (snapshot.lifecycle === "processing") {
-        const currentProgress = new Map(
-          (snapshot.statusUnavailable ? itemProgressRef.current : []).map((item) => [item.id, item])
-        )
-        for (const item of perItemProgress) currentProgress.set(item.id, item)
-        updateProcessingState({
-          status: "running",
-          perItemProgress: [...currentProgress.values()],
-          elapsed,
-          estimatedRemaining: 0,
-        })
-        scheduleNextPoll(snapshot.statusUnavailable)
-        return
-      }
 
       const reattachedResults = snapshot.lifecycle === "partial_failure" && snapshot.jobs.length === 0
         ? buildFailureResults(
@@ -1289,29 +1292,39 @@ const WizardModalContent: React.FC<WizardModalContentProps> = ({
         preserveConfirmedCancellation(result, cancelledItemIdsRef.current)
       )
       const mergedResults = mergeWizardResults(resultsRef.current, confirmedResults)
-      resultsRef.current = mergedResults
-      setResults(mergedResults)
+      if (confirmedResults.length) {
+        resultsRef.current = mergedResults
+        setResults(mergedResults)
+      }
+      const resultIds = new Set(mergedResults.map(result => result.id))
+      const allOutcomesKnown = perItemProgress.length > 0 && perItemProgress.every(item => resultIds.has(item.id))
+      if (snapshot.lifecycle === "processing" && !allOutcomesKnown) {
+        updateProcessingState({ status: "running", perItemProgress, elapsed, estimatedRemaining: 0 })
+        scheduleNextPoll(snapshot.statusUnavailable)
+        return
+      }
+
+      // A reload may leave an in-flight upload without a durable job ID.
+      const interrupted = !allOutcomesKnown
       updateProcessingState({
         status:
-          snapshot.lifecycle === "completed"
-            ? "complete"
-            : snapshot.lifecycle === "cancelled"
+          interrupted || snapshot.lifecycle === "partial_failure"
+            ? "error"
+            : mergedResults.length > 0 && mergedResults.every(result => result.outcome === "cancelled")
               ? "cancelled"
-              : "error",
+              : "complete",
         perItemProgress,
         elapsed,
         estimatedRemaining: 0,
       })
       hasStartedRunRef.current = false
       activeSessionIdRef.current = null
-      if (snapshot.lifecycle === "interrupted") {
+      if (interrupted) {
         markInterrupted(
           snapshot.errorMessage || "Quick ingest could not reconnect to live job status."
         )
       }
-      if (initialCurrentStepRef.current < 5) {
-        goNext()
-      }
+      goNext()
     }
 
     void pollPersistedTracking().catch(() => { /* Owner changes abandon client polling. */ })
@@ -1338,9 +1351,12 @@ const WizardModalContent: React.FC<WizardModalContentProps> = ({
 
   const applyResults = useCallback(
     (incoming: WizardResultItem[]) => {
-      const confirmedResults = incoming.map((result) =>
-        preserveConfirmedCancellation(result, cancelledItemIdsRef.current)
-      )
+      const extractOnly = oneScreen && !presetConfig.storeRemote && !presetConfig.reviewBeforeStorage
+      const confirmedResults = incoming.map((item) => {
+        const result = preserveConfirmedCancellation(item, cancelledItemIdsRef.current)
+        return extractOnly && result.data != null
+          ? { ...result, omitDataOnReload: true } : result
+      })
       const next = mergeWizardResults(resultsRef.current, confirmedResults)
       resultsRef.current = next
       setResults(next)
@@ -1353,7 +1369,7 @@ const WizardModalContent: React.FC<WizardModalContentProps> = ({
       }
       return next
     },
-    [setResults, updateItemProgress]
+    [oneScreen, presetConfig.storeRemote, presetConfig.reviewBeforeStorage, setResults, updateItemProgress]
   )
 
   const finalizeStatusInterruption = useCallback((confirmedResults: WizardResultItem[]) => {
@@ -1408,32 +1424,6 @@ const WizardModalContent: React.FC<WizardModalContentProps> = ({
     [finalizeRun, trackedQueueItems, validQueueItems, retryIds]
   )
 
-  const handleCancelAll = useCallback(() => {
-    if (!operation.isCurrent() || cancelRequestedRef.current) return
-    cancelRequestedRef.current = true
-
-    if (persistedReattachTimerRef.current != null) {
-      window.clearTimeout(persistedReattachTimerRef.current)
-      persistedReattachTimerRef.current = null
-    }
-
-    const persistedTracking = persistedTrackingRef.current
-    const sessionId = String(
-      activeSessionIdRef.current || persistedTracking?.sessionId || ""
-    ).trim()
-    if (sessionId) {
-      cancelledSessionIdsRef.current.add(sessionId)
-      cancelQuickIngestSessionBestEffort({
-        requestScope: operation.requestScope, signal: operation.signal, assertCurrent: operation.assertCurrent,
-        sessionId,
-        batchIds: resolveTrackingBatchIds(persistedTracking),
-        reason: "user_cancelled",
-      })
-    }
-
-    finalizeFailure("Cancelled by user.", "cancelled")
-  }, [finalizeFailure, operation])
-
   const handleCancelItem = useCallback(async (itemId: string) => {
     const sessionId = activeSessionIdRef.current
     const jobIds = trackedJobIdsByItem.get(itemId)
@@ -1451,9 +1441,58 @@ const WizardModalContent: React.FC<WizardModalContentProps> = ({
     return confirmed
   }, [cancelItem, operation, trackedJobIdsByItem])
 
+  const handleCancelAll = useCallback(() => {
+    if (!operation.isCurrent() || cancelRequestedRef.current) return
+    const persistedTracking = persistedTrackingRef.current
+    const sessionId = activeSessionIdRef.current || ""
+    const restoredJobs = !hasStartedRunRef.current && persistedTracking?.mode === "webui-direct" && Boolean(persistedTracking.jobIds?.length)
+    if (restoredJobs || (sessionId && (sessionId.startsWith("qi-direct-") || persistedTracking?.mode === "webui-direct"))) {
+      if (stopRequestRef.current === sessionId) return
+      stopRequestRef.current = sessionId
+      setStopRequestInFlight(true)
+      updateProcessingState({ bulkStop: "requested" })
+      const finishRequest = (acknowledged: boolean) => {
+        if (!operation.isCurrent() || stopRequestRef.current !== sessionId) return
+        stopRequestRef.current = null
+        setStopRequestInFlight(false)
+        if (!acknowledged && sessionId === (activeSessionIdRef.current || "")) {
+          updateProcessingState({ bulkStop: "unconfirmed" })
+        }
+      }
+      const batchIds = resolveTrackingBatchIds(persistedTracking)
+      if (restoredJobs && (!sessionId || !batchIds.length)) {
+        const unresolved = [...trackedJobIdsByItem.keys()].filter(id =>
+          !cancelledItemIdsRef.current.has(id) && !resultsRef.current.some(result => result.id === id)
+        )
+        void Promise.all(unresolved.map(handleCancelItem)).then(
+          outcomes => finishRequest(outcomes.length > 0 && outcomes.every(Boolean)), () => finishRequest(false)
+        )
+      } else {
+        void cancelQuickIngestSession({
+          requestScope: operation.requestScope, signal: operation.signal, assertCurrent: operation.assertCurrent,
+          sessionId, batchIds, reason: "user_cancelled",
+        }).then(response => finishRequest(response?.ok === true), () => finishRequest(false))
+      }
+      return
+    }
+
+    cancelRequestedRef.current = true
+    if (sessionId) {
+      cancelledSessionIdsRef.current.add(sessionId)
+      cancelQuickIngestSessionBestEffort({
+        requestScope: operation.requestScope, signal: operation.signal, assertCurrent: operation.assertCurrent,
+        sessionId,
+        batchIds: resolveTrackingBatchIds(persistedTracking),
+        reason: "user_cancelled",
+      })
+    }
+
+    finalizeFailure("Cancelled by user.", "cancelled")
+  }, [finalizeFailure, handleCancelItem, operation, trackedJobIdsByItem, updateProcessingState])
+
   const markRunActive = useCallback(() => {
     runStartedAtRef.current = Date.now()
-    updateProcessingState({ perItemProgress: validQueueItems.map(item => ({
+    updateProcessingState({ bulkStop: undefined, perItemProgress: validQueueItems.map(item => ({
       id: item.id, status: "processing", progressPercent: 0,
       currentStage: "Waiting for server result", estimatedRemaining: 0,
     })) })
@@ -1471,7 +1510,7 @@ const WizardModalContent: React.FC<WizardModalContentProps> = ({
       }
 
       if (message.type === "tldw:quick-ingest/progress") {
-        const result = normalizeWizardResult(message.payload?.result)
+        const result = normalizeWizardResult(message.payload?.result, true)
         if (result) {
           applyResults([result])
         }
@@ -1480,7 +1519,7 @@ const WizardModalContent: React.FC<WizardModalContentProps> = ({
 
       if (message.type === "tldw:quick-ingest/completed") {
         const normalizedResults = (message.payload?.results || [])
-          .map((item) => normalizeWizardResult(item))
+          .map((item) => normalizeWizardResult(item, true))
           .filter((item): item is WizardResultItem => Boolean(item))
         if (message.payload?.summary?.interruptedJobIds?.length) {
           finalizeStatusInterruption(normalizedResults)
@@ -1538,6 +1577,7 @@ const WizardModalContent: React.FC<WizardModalContentProps> = ({
   const startRun = useCallback(async () => {
     if (!operation.isCurrent() || hasStartedRunRef.current || validQueueItems.length === 0) return
     hasStartedRunRef.current = true
+    activeSessionIdRef.current = null
     cancelledItemIdsRef.current.clear()
     cancelledJobIdsRef.current.clear()
     setJobStatusUnavailable(false)
@@ -1652,6 +1692,9 @@ const WizardModalContent: React.FC<WizardModalContentProps> = ({
         requestScope: operation.requestScope, signal: operation.signal, assertCurrent: operation.assertCurrent,
         __quickIngestSessionId: sessionId,
         isJobCancellationConfirmed: (itemId) => cancelledItemIdsRef.current.has(itemId),
+        onStopUnconfirmed: () => {
+          if (operation.isCurrent() && activeSessionIdRef.current === sessionId) updateProcessingState({ bulkStop: "unconfirmed" })
+        },
         onJobStatusUnavailable: (unavailable) => {
           if (operation.isCurrent() && !cancelRequestedRef.current) setJobStatusUnavailable(unavailable)
         },
@@ -1696,7 +1739,7 @@ const WizardModalContent: React.FC<WizardModalContentProps> = ({
         .map((item) => normalizeWizardResult(item))
         .filter((item): item is WizardResultItem => Boolean(item))
 
-      if (response.interruptedJobIds?.length) {
+      if (response.interruptedJobIds?.length || response.interruptedItemIds?.length) {
         finalizeStatusInterruption(normalizedResults)
         return
       }
@@ -1739,7 +1782,7 @@ const WizardModalContent: React.FC<WizardModalContentProps> = ({
   ])
 
   useEffect(() => {
-    if (currentStep !== 4 || processingState.status !== "running") return
+    if (currentStep !== 4 || processingState.status !== "running" || session.lifecycle === "interrupted") return
     if (session.lifecycle === "processing" && session.tracking) {
       const canReattachDirectJobs =
         session.tracking.mode === "webui-direct" &&
@@ -1747,9 +1790,13 @@ const WizardModalContent: React.FC<WizardModalContentProps> = ({
       if (session.tracking.mode !== "webui-direct" || canReattachDirectJobs) {
         return
       }
+      if (processingState.bulkStop && !hasStartedRunRef.current) {
+        finalizeStatusInterruption([])
+        return
+      }
     }
     void startRun()
-  }, [currentStep, processingState.status, session.lifecycle, session.tracking, startRun])
+  }, [currentStep, processingState.status, processingState.bulkStop, session.lifecycle, session.tracking, startRun, finalizeStatusInterruption])
 
   // Modal title with item count
   const modalTitle = useMemo(() => {
@@ -1760,9 +1807,24 @@ const WizardModalContent: React.FC<WizardModalContentProps> = ({
     return base
   }, [qi, queueItems.length, currentStep])
 
+  const [processingPrompt, setProcessingPrompt] = useState<"leave" | "stop" | null>(null)
+  const stayButton = useRef<HTMLButtonElement>(null)
+  const requestStop = useCallback(() => setProcessingPrompt("stop"), [])
+  useEffect(() => {
+    if (!isProcessingActive || !open || state.isMinimized) setProcessingPrompt(null)
+  }, [isProcessingActive, open, state.isMinimized])
+  useEffect(() => {
+    if (processingPrompt) stayButton.current?.focus()
+  }, [processingPrompt])
+  const remaining = processingState.perItemProgress.filter(item =>
+    item.status !== "complete" && item.status !== "failed" && item.status !== "cancelled" && item.status !== "unknown"
+  ).length
+
   // Close handler with confirmation when processing
   const handleCloseAttempt = useCallback(() => {
-    if (isProcessingActive) {
+    if (oneScreen && isProcessingActive) {
+      setProcessingPrompt("leave")
+    } else if (isProcessingActive) {
       Modal.confirm({
         title: qi(
           "wizard.closeConfirm.title",
@@ -1802,7 +1864,7 @@ const WizardModalContent: React.FC<WizardModalContentProps> = ({
     } else {
       onClose()
     }
-  }, [handleCancelAll, isProcessingActive, qi, minimize, onClose])
+  }, [oneScreen, handleCancelAll, isProcessingActive, qi, minimize, onClose])
 
   const beginRetry = useCallback((ids: string[]) => {
     if (!ids.length) return
@@ -1830,6 +1892,7 @@ const WizardModalContent: React.FC<WizardModalContentProps> = ({
     })
     updateProcessingState({
       status: "running",
+      bulkStop: undefined,
       correctionItemIds: undefined,
       perItemProgress: ids.map(id => ({
         id, status: "queued", progressPercent: 0, currentStage: "", estimatedRemaining: 0,
@@ -1928,22 +1991,23 @@ const WizardModalContent: React.FC<WizardModalContentProps> = ({
 
   const handleReattach = useCallback((id: string, file: File) => {
     if (!operation.isCurrent()) return
-    setQueueItems(queueItems.map(item => {
-      if (item.id !== id) return item
-      if (file.name !== item.fileName || file.size !== item.fileSize) return { ...item, validation: { valid: false, errors: [qi("wizard.results.reattachMismatch", "Choose the original file with the same name and size.")] } }
-      const attached = { ...item, file, mimeType: file.type, fileSize: file.size }
-      return { ...attached, validation: validateQueueItem(attached) }
-    }))
+    const mismatch = qi("wizard.results.reattachMismatch", "Choose the original file with the same name and size.")
+    setQueueItems(queueItems.map(item => item.id === id ? restoreQueueFile(item, file, "upload", mismatch) : item))
   }, [operation, qi, queueItems, setQueueItems])
 
-  const handleCorrectItems = useCallback((ids: string[]) => {
+  const handleCorrectItems = useCallback((ids: string[], repairSource = false) => {
     if (!operation.isCurrent()) return
+    if (repairSource) {
+      setQueueItems(queueItems.map(item => ids.includes(item.id)
+        ? { ...item, validation: { ...item.validation, valid: false } }
+        : item))
+    }
     setRetryIds(ids)
     updateProcessingState({ correctionItemIds: ids })
     retryRequestsRef.current = session.tracking?.durableMode === "durable_collection" ? buildConferenceRetryRequestItems(resultsRef.current.filter(item => ids.includes(item.id))) : []
     retryCollectionIdRef.current = session.tracking?.collectionId
-    goToStep(2)
-  }, [goToStep, operation, session.tracking, updateProcessingState])
+    goToStep(repairSource ? 1 : 2)
+  }, [goToStep, operation, queueItems, session.tracking, setQueueItems, updateProcessingState])
 
   // Navigation callbacks for WizardResultsStep CTAs
   const navigateInPlace = useNavigate()
@@ -2094,6 +2158,36 @@ const WizardModalContent: React.FC<WizardModalContentProps> = ({
     [navigate, operation]
   )
 
+  const interruption = useMemo(() => {
+    if (!oneScreen || session.lifecycle !== "interrupted") return
+    const activeIds = new Set([
+      ...normalizeTrackedItemIds(session.tracking),
+      ...trackedJobIdsByItem.keys(),
+      ...processingState.perItemProgress.map(progress => progress.id),
+    ])
+    const sources = queueItems.filter(item =>
+      activeIds.has(item.id) && !results.some(result => result.id === item.id)
+    ).map(item => ({
+      id: item.id,
+      name: item.conferenceOverride?.title || item.fileName || item.url || item.id,
+      jobIds: trackedJobIdsByItem.get(item.id) ?? [],
+      lastProgress: processingState.perItemProgress.find(progress => progress.id === item.id),
+    }))
+    const tracking = session.tracking
+    return {
+      sources,
+      onCheckMedia: () => navigate("/media"),
+      onCheckStatus: tracking?.mode === "webui-direct" && sources.some(source => source.jobIds.length > 0)
+        ? () => {
+          if (!operation.isCurrent()) return
+          markProcessingTracking(tracking)
+          updateProcessingState({ status: "running" })
+          goToStep(4)
+        } : undefined,
+    }
+  }, [oneScreen, session.lifecycle, session.tracking, trackedJobIdsByItem, processingState.perItemProgress,
+    queueItems, results, navigate, operation, markProcessingTracking, updateProcessingState, goToStep])
+
   // Render the current step
   const stepContent = useMemo(() => {
     if (oneScreen && currentStep <= 3) {
@@ -2137,18 +2231,19 @@ const WizardModalContent: React.FC<WizardModalContentProps> = ({
         return (
           <ProcessingStep
             oneScreen={oneScreen}
-            onCancelAll={handleCancelAll}
+            onCancelAll={oneScreen ? requestStop : handleCancelAll}
             jobStatusUnavailable={jobStatusUnavailable}
+            stopRequestInFlight={stopRequestInFlight}
             onCancelItem={handleCancelItem}
             trackedJobIdsByItem={trackedJobIdsByItem}
-            localItemCancellation={session.tracking?.mode !== "webui-direct"}
+            localItemCancellation={!oneScreen && session.tracking?.mode !== "webui-direct"}
             onMinimize={onClose}
           />
         )
       case 5:
         return (
           <>
-            {session.lifecycle === "interrupted" && (
+            {!oneScreen && session.lifecycle === "interrupted" && (
               <div role="alert">{INGEST_JOB_STATUS_INTERRUPTED}</div>
             )}
             {navigationError && <div role="alert">{navigationError}</div>}
@@ -2162,6 +2257,7 @@ const WizardModalContent: React.FC<WizardModalContentProps> = ({
             )}
             <WizardResultsStep
             oneScreen={oneScreen}
+            interruption={interruption}
             reviewDrafts={oneScreen && draftBatch?.sourceKey === reviewSourceKey && draftBatch.count > 0 ? {
               count: draftBatch.count,
               onOpen: () => navigate("/content-review?batch=" + encodeURIComponent(draftBatch.batchId)),
@@ -2188,6 +2284,8 @@ const WizardModalContent: React.FC<WizardModalContentProps> = ({
     draftBatch,
     reviewSourceKey,
     replacementItems,
+    requestStop,
+    interruption,
     navigate,
     currentStep,
     reviewError,
@@ -2196,6 +2294,7 @@ const WizardModalContent: React.FC<WizardModalContentProps> = ({
     handleCancelAll,
     handleCancelItem,
     jobStatusUnavailable,
+    stopRequestInFlight,
     session.lifecycle,
     session.tracking?.mode,
     trackedJobIdsByItem,
@@ -2238,6 +2337,41 @@ const WizardModalContent: React.FC<WizardModalContentProps> = ({
           <div className="min-h-[300px]">{stepContent}</div>
         </>}
       </Modal>
+
+      {oneScreen && <Modal
+        open={open && isProcessingActive && Boolean(processingPrompt)}
+        title={processingPrompt === "stop" ? qi("web.stopTitle", "Stop the remaining import?") : qi("web.leaveTitle", "Leave this import?")}
+        centered closable={false} width={440} footer={null}
+        className="qi-processing-prompt"
+        onCancel={() => setProcessingPrompt(null)}
+        afterOpenChange={visible => { if (visible) stayButton.current?.focus() }}
+      >
+        <p className="text-sm text-text">
+          {remaining > 0 ? remaining === 1 ? qi("web.oneActive", "1 source is still active.") :
+            qi("web.sourcesActive", "{{count}} sources are still active.", { count: remaining })
+            : qi("web.waitingForStatus", "Waiting for the latest source status.")}
+        </p>
+        <p className="mt-1 text-sm text-text-muted">{processingPrompt === "stop"
+          ? qi("web.stopHelp", "Saved items stay in Media. Quick Ingest will check which jobs stopped.")
+          : qi("web.leaveHelp", "You can keep working here while your import continues in the background.")}</p>
+        <div className="mt-5 flex flex-wrap justify-end gap-2">
+          <Button ref={stayButton} onClick={() => setProcessingPrompt(null)}>
+            {processingPrompt === "stop" ? qi("web.keepImporting", "Keep importing") : qi("web.stayHere", "Stay here")}
+          </Button>
+          <Button danger onClick={() => {
+            if (processingPrompt === "leave") requestStop()
+            else {
+              setProcessingPrompt(null)
+              handleCancelAll()
+            }
+          }}>{qi("web.stopRemaining", "Stop remaining sources")}</Button>
+          {processingPrompt === "leave" && <Button type="primary" onClick={() => {
+            setProcessingPrompt(null)
+            minimize()
+            onClose()
+          }}>{qi("web.continueBackground", "Continue in background")}</Button>}
+        </div>
+      </Modal>}
 
       {/* Floating progress widget (renders via portal when minimized) */}
       <FloatingProgressWidget />

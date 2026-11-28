@@ -828,6 +828,7 @@ def _shared_chat_service_http_error(exc: SharedWorkspaceChatServiceError) -> HTT
         "retrieval_unavailable": 503,
         "no_provider_configured": 503,
         "generation_failed": 503,
+        "llm_policy_refused": 400,
         "shared_workspace_unavailable": 503,
     }
     code = exc.code if exc.code in status_by_code else "shared_workspace_unavailable"
@@ -1149,7 +1150,7 @@ async def _orchestrate_shared_workspace_chat(
         )
         return response
 
-    code = str(error.detail.get("code") or "shared_workspace_unavailable")
+    code = str((error.detail if isinstance(error.detail, dict) else {}).get("code") or "shared_workspace_unavailable")
     transition = await _mark_shared_chat_failure(store, claim, code)
     if transition.completed_response is not None:
         completed = transition.completed_response
@@ -1166,7 +1167,7 @@ async def _orchestrate_shared_workspace_chat(
         return completed
     if transition.replacement_error is not None:
         error = transition.replacement_error
-        code = str(error.detail.get("code") or "shared_workspace_unavailable")
+        code = str((error.detail if isinstance(error.detail, dict) else {}).get("code") or "shared_workspace_unavailable")
     await _audit_shared_chat(
         audit,
         context=context,
