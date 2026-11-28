@@ -28,6 +28,7 @@ During TASK-15586 private-beta verification, a browser-only EPUB chat displayed 
 Observed during same-account PDF and EPUB verification for Hosted PR #336 (https://github.com/rmusser01/tldw-hosted/pull/336). The server-saved copies reopened in question-then-reply order. A starting point for investigation is getChatHistory in apps/packages/ui/src/db/dexie/chat.ts, which retrieves local messages by history_id without specifying chronological order.
 ADR required: no. The fix restores browser-only message order and preserves the native document-chat association described in Docs/ADR/100-document-workspace-chat-association.md.
 IndexedDB returned local rows in message-ID order. Document Workspace now sorts deduplicated rows by saved timestamps before projecting both the display and model context. The Vitest regression and both real-document Playwright cases reproduced the inversion before the fix. With the fix, 37 focused Vitest checks and all six Document Workspace chat Playwright checks passed, including PDF and EPUB tab switches and reloads, cross-device sync, and Save to server. Bandit does not apply to TypeScript and Markdown changes.
+Public Dev PR: https://github.com/rmusser01/tldw_server/pull/3678. Shared UI and WebUI TypeScript checks and targeted ESLint passed.
 <!-- SECTION:IMPLEMENTATION_NOTES:END -->
 
 ## Final Summary
