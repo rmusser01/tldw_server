@@ -1,7 +1,7 @@
 ---
 id: TASK-15586
 title: Sync Document Workspace conversations across devices
-status: In Progress
+status: Done
 labels:
 - document-workspace
 - chat
@@ -48,12 +48,13 @@ The [full shared UI typecheck](https://github.com/rmusser01/tldw_server/pull/360
 Dev merged [PR #3534](https://github.com/rmusser01/tldw_server/pull/3534) at 42e8a3fcf9 after all eight required checks passed. Rebased TASK-15586 onto that merge. All 492 focused shared UI tests and 74 SQLite and PostgreSQL tests passed on the new base. Shared UI and WebUI type checking and the OpenAPI drift check passed. Bandit reported no findings on changed production lines.
 Dev PR #3647 exposed a duplicate ADR number and invalid published links. Assigned the proposed decision ADR-100, updated its links in the spec and plan, and regenerated the public docs from their canonical sources.
 Fixed Dev CI size and endpoint-patching checks by reusing the shared compare helpers, grouping the chat actor and optional document dependency, extracting greeting and message access work, and supplying the test Sync profile through the service factory. The generated API diff changes only descriptions on the create-chat and send-message operations. The focused SQLite and PostgreSQL suite passed all 74 cases, and the shared UI lint and import-cycle gates passed locally.
+Private-beta verification completed for the live Hosted release after PR #336 (https://github.com/rmusser01/tldw-hosted/pull/336). Two independently signed-in browsers on one account opened the same PDF and EPUB and found their saved conversations. For each fixture, the Chrome browser-only test chat had zero matching server rows before explicit Save to server and one afterward. The in-app pane showed each Chrome-saved chat exactly once with the full question first and reply second. TASK-15692 tracks the separate display-order bug observed when reopening a browser-only conversation before saving.
 <!-- SECTION:IMPLEMENTATION_NOTES:END -->
 
 ## Final Summary
 
 <!-- SECTION:FINAL_SUMMARY:BEGIN -->
-Document Workspace discovers and continues native chats for the verified document and signed-in account. Existing browser histories can be saved individually and recover without creating duplicate server chats. Local verification used real documents, both database backends, and an isolated multi-user browser run. The feature is based on the merged Dev prerequisite and awaits its own Dev PR checks.
+Merged to Public Dev in PR #3647 and verified in the private beta after Hosted PR #336. Same-account chat sync and per-chat Save to server passed with real PDF and EPUB files in two browsers. The in-app browser reopened each Chrome-saved conversation once under the correct document and displayed the full transcript in order. The browser-only reopen ordering bug is tracked in TASK-15692.
 <!-- SECTION:FINAL_SUMMARY:END -->
 
 ## Definition of Done
